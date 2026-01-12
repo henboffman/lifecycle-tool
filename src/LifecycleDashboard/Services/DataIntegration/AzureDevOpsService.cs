@@ -768,7 +768,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     #region Private Helpers
 
     /// <summary>
-    /// Gets repository items (file tree) with branch fallback: defaultBranch -> main -> master
+    /// Gets repository file tree using the Trees API with branch fallback: defaultBranch -> main -> master.
+    /// Uses refs -> commit -> tree chain to get full recursive file listing.
     /// </summary>
     private async Task<(HttpResponseMessage? Response, string? BranchUsed)> GetRepositoryItemsWithFallbackAsync(
         string baseUrl, AuthenticationHeaderValue auth, string project, string repositoryId, string? defaultBranch)
@@ -792,59 +793,120 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         foreach (var branch in branchesToTry)
         {
-            // Use scopePath=/ to tell API to start from root and recurse the entire tree
-            var url = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?scopePath=/&recursionLevel=Full&includeContent=false&latestProcessedChange=false&versionDescriptor.version={Uri.EscapeDataString(branch)}&versionDescriptor.versionType=branch&api-version=7.1";
-
-            _logger.LogDebug("Trying to fetch items from repo {RepositoryId} branch {Branch}: {Url}", repositoryId, branch, url);
-            var response = await SendRequestAsync(url, auth);
-
-            if (response.IsSuccessStatusCode)
+            try
             {
-                // Log response info to help diagnose issues
-                var content = await response.Content.ReadAsStringAsync();
-                try
-                {
-                    var jsonDoc = System.Text.Json.JsonDocument.Parse(content);
-                    var hasValue = jsonDoc.RootElement.TryGetProperty("value", out var valueArray);
-                    var itemCount = hasValue ? valueArray.GetArrayLength() : 0;
-                    _logger.LogInformation("Successfully fetched items from repo {RepositoryId} branch {Branch}: {ItemCount} items returned (hasValue: {HasValue})",
-                        repositoryId, branch, itemCount, hasValue);
+                // Step 1: Get the branch ref to find the commit SHA
+                var refsUrl = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/refs?filter=heads/{Uri.EscapeDataString(branch)}&api-version=7.1";
+                _logger.LogDebug("Getting refs for repo {RepositoryId} branch {Branch}", repositoryId, branch);
+                var refsResponse = await SendRequestAsync(refsUrl, auth);
 
-                    // If we got a proper response with items, return it
-                    if (hasValue && itemCount > 1)
+                if (!refsResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("Failed to get refs for repo {RepositoryId} branch {Branch}: {Status}", repositoryId, branch, refsResponse.StatusCode);
+                    continue;
+                }
+
+                var refsContent = await refsResponse.Content.ReadAsStringAsync();
+                var refsJson = JsonDocument.Parse(refsContent);
+
+                if (!refsJson.RootElement.TryGetProperty("value", out var refsArray) || refsArray.GetArrayLength() == 0)
+                {
+                    _logger.LogDebug("No refs found for repo {RepositoryId} branch {Branch}", repositoryId, branch);
+                    continue;
+                }
+
+                var commitId = refsArray.EnumerateArray().First().GetProperty("objectId").GetString();
+                if (string.IsNullOrEmpty(commitId))
+                {
+                    _logger.LogDebug("No commit ID in ref for repo {RepositoryId} branch {Branch}", repositoryId, branch);
+                    continue;
+                }
+
+                _logger.LogDebug("Found commit {CommitId} for repo {RepositoryId} branch {Branch}", commitId, repositoryId, branch);
+
+                // Step 2: Get the commit to find the tree SHA
+                var commitUrl = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/commits/{commitId}?api-version=7.1";
+                var commitResponse = await SendRequestAsync(commitUrl, auth);
+
+                if (!commitResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("Failed to get commit {CommitId} for repo {RepositoryId}: {Status}", commitId, repositoryId, commitResponse.StatusCode);
+                    continue;
+                }
+
+                var commitContent = await commitResponse.Content.ReadAsStringAsync();
+                var commitJson = JsonDocument.Parse(commitContent);
+
+                if (!commitJson.RootElement.TryGetProperty("treeId", out var treeIdProp))
+                {
+                    _logger.LogDebug("No treeId in commit {CommitId} for repo {RepositoryId}", commitId, repositoryId);
+                    continue;
+                }
+
+                var treeId = treeIdProp.GetString();
+                if (string.IsNullOrEmpty(treeId))
+                {
+                    _logger.LogDebug("Empty treeId in commit {CommitId} for repo {RepositoryId}", commitId, repositoryId);
+                    continue;
+                }
+
+                _logger.LogDebug("Found tree {TreeId} for repo {RepositoryId} branch {Branch}", treeId, repositoryId, branch);
+
+                // Step 3: Get the tree with recursive=true to get all files
+                var treeUrl = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/trees/{treeId}?recursive=true&api-version=7.1";
+                var treeResponse = await SendRequestAsync(treeUrl, auth);
+
+                if (!treeResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("Failed to get tree {TreeId} for repo {RepositoryId}: {Status}", treeId, repositoryId, treeResponse.StatusCode);
+                    continue;
+                }
+
+                var treeContent = await treeResponse.Content.ReadAsStringAsync();
+                var treeJson = JsonDocument.Parse(treeContent);
+
+                // The Trees API returns { treeEntries: [...] } instead of { value: [...] }
+                // We need to transform this to match the expected format for DetectTechStackAsync
+                if (treeJson.RootElement.TryGetProperty("treeEntries", out var treeEntries))
+                {
+                    var itemCount = treeEntries.GetArrayLength();
+                    _logger.LogInformation("Successfully fetched tree for repo {RepositoryId} branch {Branch}: {ItemCount} entries",
+                        repositoryId, branch, itemCount);
+
+                    // Transform treeEntries to match Items API format: { value: [...] }
+                    // Tree entry has: relativePath, gitObjectType (blob/tree), objectId, mode, size
+                    // Items API has: path, gitObjectType, objectId, isFolder
+                    var transformedItems = new List<object>();
+                    foreach (var entry in treeEntries.EnumerateArray())
                     {
-                        // Reset the stream position by returning a new response with the content
-                        var newResponse = new HttpResponseMessage(response.StatusCode)
+                        var relativePath = entry.TryGetProperty("relativePath", out var rp) ? rp.GetString() : "";
+                        var objectType = entry.TryGetProperty("gitObjectType", out var ot) ? ot.GetString() : "";
+                        transformedItems.Add(new
                         {
-                            Content = new StringContent(content, System.Text.Encoding.UTF8, "application/json")
-                        };
-                        return (newResponse, branch);
+                            path = "/" + relativePath,
+                            gitObjectType = objectType,
+                            isFolder = objectType == "tree"
+                        });
                     }
 
-                    // Log first item to help diagnose the single-item root folder issue
-                    if (hasValue && itemCount == 1)
+                    var transformedJson = JsonSerializer.Serialize(new { value = transformedItems });
+                    var transformedResponse = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
                     {
-                        var firstItem = valueArray.EnumerateArray().First();
-                        var path = firstItem.TryGetProperty("path", out var p) ? p.GetString() : "unknown";
-                        var isFolder = firstItem.TryGetProperty("isFolder", out var f) && f.GetBoolean();
-                        _logger.LogWarning("Repo {RepositoryId} branch {Branch} returned only 1 item (path: {Path}, isFolder: {IsFolder}) - may need different API approach",
-                            repositoryId, branch, path, isFolder);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Could not parse items response for repo {RepositoryId}", repositoryId);
+                        Content = new StringContent(transformedJson, System.Text.Encoding.UTF8, "application/json")
+                    };
+
+                    return (transformedResponse, branch);
                 }
 
-                return (response, branch);
+                _logger.LogWarning("Tree response for repo {RepositoryId} had no treeEntries property", repositoryId);
             }
-
-            var statusCode = (int)response.StatusCode;
-            _logger.LogDebug("Failed to fetch items from repo {RepositoryId} branch {Branch}: {StatusCode} {Status}",
-                repositoryId, branch, statusCode, response.StatusCode);
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error getting tree for repo {RepositoryId} branch {Branch}", repositoryId, branch);
+            }
         }
 
-        _logger.LogWarning("Could not fetch items from repo {RepositoryId} - tried branches: [{Branches}]. Repo may be empty or inaccessible.",
+        _logger.LogWarning("Could not fetch tree from repo {RepositoryId} - tried branches: [{Branches}]. Repo may be empty or inaccessible.",
             repositoryId, string.Join(", ", branchesToTry));
         return (null, null);
     }
