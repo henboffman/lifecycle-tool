@@ -1,5 +1,11 @@
 @page "/data-jobs"
+@using DataIntegration = LifecycleDashboard.Services.DataIntegration
 @inject NavigationManager Navigation
+@inject DataIntegration.IDataSyncOrchestrator SyncOrchestrator
+@inject DataIntegration.IAzureDevOpsService AzureDevOpsService
+@inject DataIntegration.ISharePointService SharePointService
+@inject DataIntegration.IServiceNowService ServiceNowService
+@inject DataIntegration.IIisDatabaseService IisDatabaseService
 
 <PageTitle>Data Jobs - Lifecycle Dashboard</PageTitle>
 
@@ -256,14 +262,111 @@
     private bool _isRunningAll;
     private string? _runningSource;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        InitializeMockData();
+        InitializeDataSources();
+        await CheckConnectionStatusAsync();
+        await LoadJobHistoryAsync();
         CalculateStatistics();
         ApplyFilter();
     }
 
-    private void InitializeMockData()
+    private async Task CheckConnectionStatusAsync()
+    {
+        // Check Azure DevOps connection
+        var adoSource = _dataSources.FirstOrDefault(d => d.Name == "Azure DevOps");
+        if (adoSource != null)
+        {
+            try
+            {
+                var result = await AzureDevOpsService.TestConnectionAsync();
+                adoSource.Status = result.Success ? "Connected" : "Disconnected";
+            }
+            catch
+            {
+                adoSource.Status = "Disconnected";
+            }
+        }
+
+        // Check SharePoint connection
+        var spSource = _dataSources.FirstOrDefault(d => d.Name == "SharePoint");
+        if (spSource != null)
+        {
+            try
+            {
+                var result = await SharePointService.TestConnectionAsync();
+                spSource.Status = result.Success ? "Connected" : "Disconnected";
+            }
+            catch
+            {
+                spSource.Status = "Disconnected";
+            }
+        }
+
+        // Check ServiceNow connection
+        var snSource = _dataSources.FirstOrDefault(d => d.Name == "ServiceNow");
+        if (snSource != null)
+        {
+            try
+            {
+                var result = await ServiceNowService.TestConnectionAsync();
+                snSource.Status = result.Success ? "Connected" : "Disconnected";
+            }
+            catch
+            {
+                snSource.Status = "Disconnected";
+            }
+        }
+
+        // Check IIS Database connection
+        var iisSource = _dataSources.FirstOrDefault(d => d.Name == "IIS Database");
+        if (iisSource != null)
+        {
+            try
+            {
+                var result = await IisDatabaseService.TestConnectionAsync();
+                iisSource.Status = result.Success ? "Connected" : "Disconnected";
+            }
+            catch
+            {
+                iisSource.Status = "Disconnected";
+            }
+        }
+    }
+
+    private async Task LoadJobHistoryAsync()
+    {
+        try
+        {
+            var history = await SyncOrchestrator.GetSyncJobHistoryAsync(50);
+            _allJobs = history.Select(j => new JobExecution
+            {
+                Id = j.Id,
+                Source = j.DataSource.ToString(),
+                StartTime = j.StartTime,
+                Duration = j.EndTime.HasValue ? j.EndTime.Value - j.StartTime : TimeSpan.Zero,
+                RecordsProcessed = j.RecordsProcessed,
+                RecordsUpdated = j.RecordsCreated + j.RecordsUpdated,
+                Status = j.Status switch
+                {
+                    DataIntegration.SyncJobStatus.Completed => "Success",
+                    DataIntegration.SyncJobStatus.CompletedWithErrors => "Warning",
+                    DataIntegration.SyncJobStatus.Failed => "Failed",
+                    DataIntegration.SyncJobStatus.Running => "Running",
+                    _ => "Unknown"
+                },
+                Message = j.ErrorMessage ?? (j.Status == DataIntegration.SyncJobStatus.Completed ? "Successfully synchronized data" : ""),
+                Logs = []
+            }).OrderByDescending(j => j.StartTime).ToList();
+        }
+        catch
+        {
+            // Fall back to empty list if service fails
+            _allJobs = [];
+        }
+    }
+
+    private void InitializeDataSources()
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -274,120 +377,52 @@
                 Name = "Azure DevOps",
                 Type = "REST API",
                 Icon = "<i class=\"bi bi-globe\"></i>",
-                Status = "Disconnected",
+                Status = "Checking...",
                 Schedule = "Weekly (Sundays @ 2:00 AM)",
                 LastSync = null,
                 NextRun = now.AddDays(1),
-                RecordCount = 0
+                RecordCount = 0,
+                DataSourceType = DataIntegration.DataSourceType.AzureDevOps
             },
             new()
             {
                 Name = "SharePoint",
                 Type = "Graph API",
                 Icon = "<i class=\"bi bi-file-earmark-text\"></i>",
-                Status = "Disconnected",
+                Status = "Checking...",
                 Schedule = "Weekly (Sundays @ 3:00 AM)",
                 LastSync = null,
                 NextRun = now.AddDays(1),
-                RecordCount = 0
+                RecordCount = 0,
+                DataSourceType = DataIntegration.DataSourceType.SharePoint
             },
             new()
             {
                 Name = "ServiceNow",
                 Type = "CSV Import",
                 Icon = "<i class=\"bi bi-database\"></i>",
-                Status = "Disconnected",
+                Status = "Checking...",
                 Schedule = "Weekly (Manual trigger)",
                 LastSync = null,
                 NextRun = null,
-                RecordCount = 0
+                RecordCount = 0,
+                DataSourceType = DataIntegration.DataSourceType.ServiceNow
             },
             new()
             {
                 Name = "IIS Database",
                 Type = "SQL Query",
                 Icon = "<i class=\"bi bi-server\"></i>",
-                Status = "Disconnected",
+                Status = "Checking...",
                 Schedule = "Weekly (Sundays @ 4:00 AM)",
                 LastSync = null,
                 NextRun = now.AddDays(1),
-                RecordCount = 0
+                RecordCount = 0,
+                DataSourceType = DataIntegration.DataSourceType.IisDatabase
             }
         };
 
-        // Generate mock job history
-        _allJobs = new List<JobExecution>();
-        var random = new Random(42);
-
-        for (int i = 0; i < 30; i++)
-        {
-            var daysAgo = random.Next(0, 30);
-            var source = _dataSources[random.Next(_dataSources.Count)].Name;
-            var status = GetRandomStatus(random);
-            var recordsProcessed = status != "Failed" ? random.Next(30, 300) : 0;
-            var recordsUpdated = status == "Success" ? random.Next(0, recordsProcessed / 3) : 0;
-
-            _allJobs.Add(new JobExecution
-            {
-                Id = Guid.NewGuid().ToString(),
-                Source = source,
-                StartTime = now.AddDays(-daysAgo).AddHours(-random.Next(0, 24)),
-                Duration = TimeSpan.FromSeconds(random.Next(30, 600)),
-                RecordsProcessed = recordsProcessed,
-                RecordsUpdated = recordsUpdated,
-                Status = status,
-                Message = GetStatusMessage(status, source),
-                Logs = GenerateLogs(status, now.AddDays(-daysAgo))
-            });
-        }
-
-        _allJobs = _allJobs.OrderByDescending(j => j.StartTime).ToList();
-    }
-
-    private static string GetRandomStatus(Random random)
-    {
-        var roll = random.Next(100);
-        if (roll < 70) return "Success";
-        if (roll < 90) return "Warning";
-        return "Failed";
-    }
-
-    private static string GetStatusMessage(string status, string source) => status switch
-    {
-        "Success" => $"Successfully synchronized data from {source}",
-        "Warning" => $"Completed with warnings - some records could not be processed",
-        "Failed" => $"Connection to {source} failed - check credentials and network",
-        _ => ""
-    };
-
-    private List<LogEntry> GenerateLogs(string status, DateTimeOffset startTime)
-    {
-        var logs = new List<LogEntry>
-        {
-            new() { Timestamp = startTime, Level = "INFO", Message = "Job started" },
-            new() { Timestamp = startTime.AddSeconds(2), Level = "INFO", Message = "Connecting to data source..." },
-        };
-
-        if (status == "Failed")
-        {
-            logs.Add(new() { Timestamp = startTime.AddSeconds(5), Level = "ERROR", Message = "Connection failed: Unable to reach endpoint" });
-            logs.Add(new() { Timestamp = startTime.AddSeconds(6), Level = "ERROR", Message = "Job aborted" });
-        }
-        else
-        {
-            logs.Add(new() { Timestamp = startTime.AddSeconds(5), Level = "INFO", Message = "Connection established" });
-            logs.Add(new() { Timestamp = startTime.AddSeconds(10), Level = "INFO", Message = "Fetching records..." });
-
-            if (status == "Warning")
-            {
-                logs.Add(new() { Timestamp = startTime.AddSeconds(30), Level = "WARN", Message = "3 records skipped due to validation errors" });
-            }
-
-            logs.Add(new() { Timestamp = startTime.AddMinutes(2), Level = "INFO", Message = "Processing complete" });
-            logs.Add(new() { Timestamp = startTime.AddMinutes(2).AddSeconds(5), Level = "INFO", Message = "Job completed successfully" });
-        }
-
-        return logs;
+        _allJobs = [];
     }
 
     private void CalculateStatistics()
@@ -415,9 +450,12 @@
         _filteredJobs = filtered.ToList();
     }
 
-    private void RefreshStatus()
+    private async Task RefreshStatus()
     {
-        // In real implementation, this would check connection status
+        await CheckConnectionStatusAsync();
+        await LoadJobHistoryAsync();
+        CalculateStatistics();
+        ApplyFilter();
         StateHasChanged();
     }
 
@@ -448,33 +486,57 @@
 
     private async Task RunJobInternal(DataSource source)
     {
-        var now = DateTimeOffset.UtcNow;
-        var random = new Random();
+        var startTime = DateTimeOffset.UtcNow;
 
-        // Simulate job running
-        await Task.Delay(1500);
-
-        // Since sources are disconnected, simulate a failed job with connection error
-        var status = source.Status == "Connected" ? "Success" : "Failed";
-        var recordsProcessed = status == "Success" ? random.Next(30, 300) : 0;
-        var recordsUpdated = status == "Success" ? random.Next(0, recordsProcessed / 3) : 0;
-
-        var job = new JobExecution
+        try
         {
-            Id = Guid.NewGuid().ToString(),
-            Source = source.Name,
-            StartTime = now,
-            Duration = TimeSpan.FromSeconds(random.Next(1, 5)),
-            RecordsProcessed = recordsProcessed,
-            RecordsUpdated = recordsUpdated,
-            Status = status,
-            Message = status == "Failed"
-                ? $"Connection to {source.Name} failed - data source not configured"
-                : $"Successfully synchronized data from {source.Name}",
-            Logs = GenerateLogs(status, now)
-        };
+            // Call the real sync orchestrator
+            var result = await SyncOrchestrator.SyncDataSourceAsync(source.DataSourceType, "Manual trigger");
 
-        _allJobs.Insert(0, job);
+            var job = new JobExecution
+            {
+                Id = Guid.NewGuid().ToString(),
+                Source = source.Name,
+                StartTime = startTime,
+                Duration = DateTimeOffset.UtcNow - startTime,
+                RecordsProcessed = result.RecordsProcessed,
+                RecordsUpdated = result.RecordsCreated + result.RecordsUpdated,
+                Status = result.Success ? "Success" : (result.Errors.Count > 0 ? "Failed" : "Warning"),
+                Message = result.Success
+                    ? $"Successfully synchronized {result.RecordsProcessed} records from {source.Name}"
+                    : result.ErrorMessage ?? $"Sync failed for {source.Name}",
+                Logs = result.Errors.Select(e => new LogEntry
+                {
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Level = "ERROR",
+                    Message = e.Message
+                }).ToList()
+            };
+
+            // Update source status
+            source.LastSync = DateTimeOffset.UtcNow;
+            source.RecordCount = result.RecordsProcessed;
+
+            _allJobs.Insert(0, job);
+        }
+        catch (Exception ex)
+        {
+            var job = new JobExecution
+            {
+                Id = Guid.NewGuid().ToString(),
+                Source = source.Name,
+                StartTime = startTime,
+                Duration = DateTimeOffset.UtcNow - startTime,
+                RecordsProcessed = 0,
+                RecordsUpdated = 0,
+                Status = "Failed",
+                Message = $"Error syncing {source.Name}: {ex.Message}",
+                Logs = [new LogEntry { Timestamp = DateTimeOffset.UtcNow, Level = "ERROR", Message = ex.Message }]
+            };
+
+            _allJobs.Insert(0, job);
+        }
+
         CalculateStatistics();
         ApplyFilter();
     }
@@ -547,6 +609,7 @@
         public DateTimeOffset? LastSync { get; set; }
         public DateTimeOffset? NextRun { get; set; }
         public int RecordCount { get; set; }
+        public DataIntegration.DataSourceType DataSourceType { get; set; }
     }
 
     private class JobExecution
