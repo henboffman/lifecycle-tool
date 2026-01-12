@@ -17,6 +17,12 @@
             <p class="subtitle">Monitor and manage data synchronization</p>
         </div>
         <div class="header-actions">
+            <div class="dev-mode-toggle">
+                <label class="toggle-label" title="Limit Azure DevOps sync to 10 repositories for faster testing">
+                    <input type="checkbox" @bind="_devModeEnabled" @bind:after="OnDevModeChanged" />
+                    <span class="toggle-text">Dev Mode (10 repos)</span>
+                </label>
+            </div>
             <button class="btn btn-outline" @onclick="RefreshStatus">
                 <i class="bi bi-arrow-repeat"></i> Refresh Status
             </button>
@@ -353,17 +359,32 @@
     private string? _runningSource;
     private DataIntegration.SyncProgressEventArgs? _currentProgress;
     private HashSet<string> _expandedScopes = [];
+    private bool _devModeEnabled;
 
     protected override async Task OnInitializedAsync()
     {
         // Subscribe to progress updates
         SyncOrchestrator.SyncProgressUpdated += OnProgressUpdated;
 
+        // Load dev mode state from configuration
+        var config = SyncOrchestrator.GetConfiguration();
+        _devModeEnabled = config.DevModeRepoLimit > 0;
+
         InitializeDataSources();
         await CheckConnectionStatusAsync();
         await LoadJobHistoryAsync();
         CalculateStatistics();
         ApplyFilter();
+    }
+
+    private async Task OnDevModeChanged()
+    {
+        var config = SyncOrchestrator.GetConfiguration();
+        var newConfig = config with
+        {
+            DevModeRepoLimit = _devModeEnabled ? 10 : 0
+        };
+        await SyncOrchestrator.SetConfigurationAsync(newConfig);
     }
 
     private void OnProgressUpdated(object? sender, DataIntegration.SyncProgressEventArgs e)

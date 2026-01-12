@@ -119,6 +119,9 @@ public interface IDataSyncOrchestrator
 /// </summary>
 public record SyncConfiguration
 {
+    /// <summary>Dev mode: limit number of repos to sync (0 = no limit).</summary>
+    public int DevModeRepoLimit { get; init; } = 0;
+
     /// <summary>Whether automatic scheduled sync is enabled.</summary>
     public bool AutoSyncEnabled { get; init; } = true;
 

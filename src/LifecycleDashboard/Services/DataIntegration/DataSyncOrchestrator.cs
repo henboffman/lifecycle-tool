@@ -621,16 +621,25 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
 
             var repos = reposResult.Data ?? [];
             _logger.LogInformation("Found {Count} repositories in Azure DevOps", repos.Count);
-            ReportProgress("Processing repositories", 0, repos.Count, message: $"Found {repos.Count} repositories");
+
+            // Apply dev mode repo limit if configured
+            var reposToProcess = repos;
+            if (_configuration.DevModeRepoLimit > 0 && repos.Count > _configuration.DevModeRepoLimit)
+            {
+                reposToProcess = repos.Take(_configuration.DevModeRepoLimit).ToList();
+                _logger.LogWarning("Dev mode: limiting sync to {Limit} of {Total} repositories", _configuration.DevModeRepoLimit, repos.Count);
+            }
+
+            ReportProgress("Processing repositories", 0, reposToProcess.Count, message: $"Processing {reposToProcess.Count} of {repos.Count} repositories");
 
             // Step 2: Process each repository
             var processStart = DateTimeOffset.UtcNow;
             var processedCount = 0;
-            foreach (var repo in repos)
+            foreach (var repo in reposToProcess)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 processedCount++;
-                _logger.LogInformation("Processing repository: {RepoName} ({Current}/{Total})", repo.Name, processedCount, repos.Count);
+                _logger.LogInformation("Processing repository: {RepoName} ({Current}/{Total})", repo.Name, processedCount, reposToProcess.Count);
                 ReportProgress("Processing repositories", processedCount, repos.Count, repo.Name);
 
                 var syncedRepo = new SyncedRepository

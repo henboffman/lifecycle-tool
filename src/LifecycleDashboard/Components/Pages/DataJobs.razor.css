@@ -29,7 +29,39 @@
 
 .header-actions {
     display: flex;
+    align-items: center;
     gap: 0.75rem;
+}
+
+/* Dev Mode Toggle */
+.dev-mode-toggle {
+    display: flex;
+    align-items: center;
+    margin-right: 0.5rem;
+}
+
+.dev-mode-toggle .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.375rem;
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #92400e;
+}
+
+.dev-mode-toggle .toggle-label:hover {
+    background: #fde68a;
+}
+
+.dev-mode-toggle input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    accent-color: #f59e0b;
 }
 
 /* Data Sources Section */
