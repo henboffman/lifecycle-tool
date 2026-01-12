@@ -42,22 +42,36 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                 return ConnectionTestResult.Failed(error ?? "Failed to configure Azure DevOps client");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
-            var response = await SendRequestAsync($"{baseUrl}{project}/_apis/projects?api-version=7.1", auth);
+            // Test connection using organization-level projects endpoint (no project in path)
+            // URL format: https://dev.azure.com/{organization}/_apis/projects
+            var response = await SendRequestAsync($"{baseUrl}_apis/projects?api-version=7.1", auth);
 
             stopwatch.Stop();
 
             if (response.IsSuccessStatusCode)
             {
-                var version = response.Headers.TryGetValues("X-VSS-E2EID", out var values)
-                    ? values.FirstOrDefault()
-                    : null;
+                var content = await response.Content.ReadAsStringAsync();
+                var projectCount = "unknown";
+                try
+                {
+                    var json = System.Text.Json.JsonDocument.Parse(content);
+                    if (json.RootElement.TryGetProperty("count", out var count))
+                    {
+                        projectCount = count.GetInt32().ToString();
+                    }
+                }
+                catch { }
 
                 return ConnectionTestResult.Succeeded(
-                    "Successfully connected to Azure DevOps",
+                    $"Successfully connected to Azure DevOps ({projectCount} projects found)",
                     stopwatch.Elapsed,
-                    version);
+                    null);
             }
+
+            // Include response body for better error diagnosis
+            var errorBody = await response.Content.ReadAsStringAsync();
+            _logger.LogWarning("Azure DevOps connection test failed. Status: {Status}, Body: {Body}",
+                response.StatusCode, errorBody);
 
             return ConnectionTestResult.Failed($"Connection failed: {response.StatusCode} - {response.ReasonPhrase}");
         }
