@@ -792,14 +792,50 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         foreach (var branch in branchesToTry)
         {
-            var url = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?$top=8000&recursionLevel=Full&versionDescriptor.version={Uri.EscapeDataString(branch)}&versionDescriptor.versionType=branch&api-version=7.1";
+            // Use scopePath=/ to tell API to start from root and recurse the entire tree
+            var url = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?scopePath=/&recursionLevel=Full&includeContent=false&latestProcessedChange=false&versionDescriptor.version={Uri.EscapeDataString(branch)}&versionDescriptor.versionType=branch&api-version=7.1";
 
-            _logger.LogDebug("Trying to fetch items from repo {RepositoryId} branch {Branch}", repositoryId, branch);
+            _logger.LogDebug("Trying to fetch items from repo {RepositoryId} branch {Branch}: {Url}", repositoryId, branch, url);
             var response = await SendRequestAsync(url, auth);
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("Successfully fetched items from repo {RepositoryId} using branch {Branch}", repositoryId, branch);
+                // Log response info to help diagnose issues
+                var content = await response.Content.ReadAsStringAsync();
+                try
+                {
+                    var jsonDoc = System.Text.Json.JsonDocument.Parse(content);
+                    var hasValue = jsonDoc.RootElement.TryGetProperty("value", out var valueArray);
+                    var itemCount = hasValue ? valueArray.GetArrayLength() : 0;
+                    _logger.LogInformation("Successfully fetched items from repo {RepositoryId} branch {Branch}: {ItemCount} items returned (hasValue: {HasValue})",
+                        repositoryId, branch, itemCount, hasValue);
+
+                    // If we got a proper response with items, return it
+                    if (hasValue && itemCount > 1)
+                    {
+                        // Reset the stream position by returning a new response with the content
+                        var newResponse = new HttpResponseMessage(response.StatusCode)
+                        {
+                            Content = new StringContent(content, System.Text.Encoding.UTF8, "application/json")
+                        };
+                        return (newResponse, branch);
+                    }
+
+                    // Log first item to help diagnose the single-item root folder issue
+                    if (hasValue && itemCount == 1)
+                    {
+                        var firstItem = valueArray.EnumerateArray().First();
+                        var path = firstItem.TryGetProperty("path", out var p) ? p.GetString() : "unknown";
+                        var isFolder = firstItem.TryGetProperty("isFolder", out var f) && f.GetBoolean();
+                        _logger.LogWarning("Repo {RepositoryId} branch {Branch} returned only 1 item (path: {Path}, isFolder: {IsFolder}) - may need different API approach",
+                            repositoryId, branch, path, isFolder);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not parse items response for repo {RepositoryId}", repositoryId);
+                }
+
                 return (response, branch);
             }
 

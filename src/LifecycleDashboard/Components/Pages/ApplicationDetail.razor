@@ -609,65 +609,79 @@ else
                         </div>
                     </div>
 
-                    <div class="content-section">
-                        <h2><i class="bi bi-graph-up"></i> Usage Metrics</h2>
-                        <div class="usage-cards">
-                            <div class="usage-card">
-                                <div class="usage-value">@_application.Usage.MonthlyRequests.ToString("N0")</div>
-                                <div class="usage-label">Monthly Requests</div>
-                                <div class="usage-trend @_application.Usage.Trend.ToString().ToLower()">
-                                    <i class="bi @GetTrendIcon(_application.Usage.Trend)"></i>
-                                    @_application.Usage.Trend
+                    @if (_application.Usage != null)
+                    {
+                        <div class="content-section">
+                            <h2><i class="bi bi-graph-up"></i> Usage Metrics</h2>
+                            <div class="usage-cards">
+                                <div class="usage-card">
+                                    <div class="usage-value">@_application.Usage.MonthlyRequests.ToString("N0")</div>
+                                    <div class="usage-label">Monthly Requests</div>
+                                    <div class="usage-trend @_application.Usage.Trend.ToString().ToLower()">
+                                        <i class="bi @GetTrendIcon(_application.Usage.Trend)"></i>
+                                        @_application.Usage.Trend
+                                    </div>
+                                </div>
+                                <div class="usage-card">
+                                    <div class="usage-value">@_application.Usage.MonthlyUsers.ToString("N0")</div>
+                                    <div class="usage-label">Monthly Users</div>
+                                </div>
+                                <div class="usage-card">
+                                    <div class="usage-value">@_application.Usage.MonthlySessions.ToString("N0")</div>
+                                    <div class="usage-label">Monthly Sessions</div>
+                                </div>
+                                <div class="usage-card">
+                                    <div class="usage-value">@GetUsageLevel()</div>
+                                    <div class="usage-label">Usage Level</div>
                                 </div>
                             </div>
-                            <div class="usage-card">
-                                <div class="usage-value">@_application.Usage.MonthlyUsers.ToString("N0")</div>
-                                <div class="usage-label">Monthly Users</div>
-                            </div>
-                            <div class="usage-card">
-                                <div class="usage-value">@_application.Usage.MonthlySessions.ToString("N0")</div>
-                                <div class="usage-label">Monthly Sessions</div>
-                            </div>
-                            <div class="usage-card">
-                                <div class="usage-value">@GetUsageLevel()</div>
-                                <div class="usage-label">Usage Level</div>
-                            </div>
                         </div>
-                    </div>
 
-                    <div class="content-section">
-                        <h2><i class="bi bi-info-circle"></i> Usage Analysis</h2>
-                        <div class="usage-analysis">
-                            @if (_application.Usage.MonthlyUsers == 0)
-                            {
-                                <div class="analysis-item warning">
-                                    <i class="bi bi-exclamation-triangle"></i>
-                                    <p>This application has no recorded usage. Consider evaluating for potential retirement.</p>
-                                </div>
-                            }
-                            else if (_application.Usage.MonthlyUsers < 20)
-                            {
-                                <div class="analysis-item info">
-                                    <i class="bi bi-info-circle"></i>
-                                    <p>Low usage application. May be a candidate for consolidation or specialized tool.</p>
-                                </div>
-                            }
-                            else if (_application.Usage.MonthlyUsers > 500)
-                            {
-                                <div class="analysis-item success">
-                                    <i class="bi bi-check-circle"></i>
-                                    <p>High usage application. Prioritize stability and performance monitoring.</p>
-                                </div>
-                            }
-                            else
-                            {
-                                <div class="analysis-item success">
-                                    <i class="bi bi-check-circle"></i>
-                                    <p>Normal usage patterns detected.</p>
-                                </div>
-                            }
+                        <div class="content-section">
+                            <h2><i class="bi bi-info-circle"></i> Usage Analysis</h2>
+                            <div class="usage-analysis">
+                                @if (_application.Usage.MonthlyUsers == 0)
+                                {
+                                    <div class="analysis-item warning">
+                                        <i class="bi bi-exclamation-triangle"></i>
+                                        <p>This application has no recorded usage. Consider evaluating for potential retirement.</p>
+                                    </div>
+                                }
+                                else if (_application.Usage.MonthlyUsers < 20)
+                                {
+                                    <div class="analysis-item info">
+                                        <i class="bi bi-info-circle"></i>
+                                        <p>Low usage application. May be a candidate for consolidation or specialized tool.</p>
+                                    </div>
+                                }
+                                else if (_application.Usage.MonthlyUsers > 500)
+                                {
+                                    <div class="analysis-item success">
+                                        <i class="bi bi-check-circle"></i>
+                                        <p>High usage application. Prioritize stability and performance monitoring.</p>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="analysis-item success">
+                                        <i class="bi bi-check-circle"></i>
+                                        <p>Normal usage patterns detected.</p>
+                                    </div>
+                                }
+                            </div>
                         </div>
-                    </div>
+                    }
+                    else
+                    {
+                        <div class="content-section">
+                            <h2><i class="bi bi-graph-up"></i> Usage Metrics</h2>
+                            <div class="empty-state">
+                                <i class="bi bi-bar-chart"></i>
+                                <h3>No Usage Data Available</h3>
+                                <p>Usage metrics will be populated after IIS database sync.</p>
+                            </div>
+                        </div>
+                    }
                 </section>
             }
             else if (_activeTab == DetailTab.Operations)
@@ -1110,8 +1124,9 @@ else
         return "error";
     }
 
-    private string GetUsageLabel(UsageMetrics usage)
+    private string GetUsageLabel(UsageMetrics? usage)
     {
+        if (usage == null) return "No data";
         if (usage.MonthlyUsers == 0) return "No usage";
         if (usage.MonthlyUsers < 20) return "Low";
         if (usage.MonthlyUsers < 100) return "Moderate";
