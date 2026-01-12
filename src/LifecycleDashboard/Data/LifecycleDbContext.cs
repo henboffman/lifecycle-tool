@@ -25,6 +25,7 @@ public class LifecycleDbContext : DbContext
     public DbSet<TaskDocumentationEntity> TaskDocumentation => Set<TaskDocumentationEntity>();
     public DbSet<SyncedRepositoryEntity> SyncedRepositories => Set<SyncedRepositoryEntity>();
     public DbSet<ImportedServiceNowApplicationEntity> ImportedServiceNowApplications => Set<ImportedServiceNowApplicationEntity>();
+    public DbSet<FrameworkVersionEntity> FrameworkVersions => Set<FrameworkVersionEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -242,6 +243,25 @@ public class LifecycleDbContext : DbContext
             entity.HasIndex(e => e.Name);
             entity.HasIndex(e => e.Capability);
             entity.HasIndex(e => e.ImportedAt);
+        });
+
+        // FrameworkVersion
+        modelBuilder.Entity<FrameworkVersionEntity>(entity =>
+        {
+            entity.ToTable("FrameworkVersions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Framework).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Version).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.LatestPatchVersion).HasMaxLength(50);
+            entity.Property(e => e.Notes).HasMaxLength(2000);
+            entity.Property(e => e.RecommendedUpgradePath).HasMaxLength(100);
+            entity.Property(e => e.TargetFrameworkMoniker).HasMaxLength(50);
+            entity.HasIndex(e => e.Framework);
+            entity.HasIndex(e => e.Version);
+            entity.HasIndex(e => new { e.Framework, e.Version }).IsUnique();
+            entity.HasIndex(e => e.TargetFrameworkMoniker);
         });
     }
 }

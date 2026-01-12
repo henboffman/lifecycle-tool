@@ -124,9 +124,52 @@ public class DatabaseDataService : IMockDataService
 
     public async Task<IReadOnlyList<Application>> GetApplicationsByFrameworkAsync(string frameworkVersionId)
     {
-        // For now, return empty - framework tracking will be implemented later
-        await Task.CompletedTask;
-        return [];
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        // Get the framework version to find its TFM
+        var frameworkVersion = await context.FrameworkVersions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.Id == frameworkVersionId);
+
+        if (frameworkVersion == null)
+            return [];
+
+        // Find repositories that use this framework
+        var matchingRepos = await context.SyncedRepositories
+            .AsNoTracking()
+            .Where(r => r.TargetFramework == frameworkVersion.TargetFrameworkMoniker)
+            .ToListAsync();
+
+        if (matchingRepos.Count == 0)
+            return [];
+
+        // Get applications that are linked to these repositories
+        var linkedAppIds = matchingRepos
+            .Where(r => !string.IsNullOrEmpty(r.LinkedApplicationId))
+            .Select(r => r.LinkedApplicationId!)
+            .Distinct()
+            .ToList();
+
+        // Also get applications by matching repo names to ServiceNow apps
+        var repoNames = matchingRepos.Select(r => r.Name).ToList();
+
+        var matchingApps = await context.ImportedServiceNowApplications
+            .AsNoTracking()
+            .Where(app => linkedAppIds.Contains(app.Id) ||
+                          repoNames.Contains(app.Name) ||
+                          repoNames.Contains(app.LinkedRepositoryName!))
+            .ToListAsync();
+
+        // Convert to Application models (basic conversion for framework page display)
+        return matchingApps.Select(app => new Application
+        {
+            Id = app.Id,
+            Name = app.Name,
+            Capability = app.Capability ?? "Unknown",
+            Description = app.Description,
+            ShortDescription = app.ShortDescription,
+            HealthScore = 50 // Default - HealthCategory is computed from this
+        }).ToList();
     }
 
     public async Task<IReadOnlyList<Application>> GetApplicationsForUserAsync(string userId)
@@ -523,40 +566,248 @@ public class DatabaseDataService : IMockDataService
 
     #region Framework Versions
 
-    public Task<IReadOnlyList<FrameworkVersion>> GetAllFrameworkVersionsAsync()
+    public async Task<IReadOnlyList<FrameworkVersion>> GetAllFrameworkVersionsAsync()
     {
-        // Framework versions will be implemented with endoflife.date integration
-        return Task.FromResult<IReadOnlyList<FrameworkVersion>>([]);
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        // First, auto-detect frameworks from synced repositories and ensure they exist
+        await EnsureAutoDetectedFrameworkVersionsAsync(context);
+
+        // Query all framework versions from the database
+        var entities = await context.FrameworkVersions
+            .AsNoTracking()
+            .OrderBy(f => f.Framework)
+            .ThenByDescending(f => f.Version)
+            .ToListAsync();
+
+        return entities.Select(EntityToFrameworkVersion).ToList();
     }
 
-    public Task<FrameworkVersion?> GetFrameworkVersionAsync(string id)
+    public async Task<FrameworkVersion?> GetFrameworkVersionAsync(string id)
     {
-        return Task.FromResult<FrameworkVersion?>(null);
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.FrameworkVersions.AsNoTracking().FirstOrDefaultAsync(f => f.Id == id);
+        return entity != null ? EntityToFrameworkVersion(entity) : null;
     }
 
-    public Task<IReadOnlyList<FrameworkVersion>> GetFrameworkVersionsByTypeAsync(FrameworkType type)
+    public async Task<IReadOnlyList<FrameworkVersion>> GetFrameworkVersionsByTypeAsync(FrameworkType type)
     {
-        return Task.FromResult<IReadOnlyList<FrameworkVersion>>([]);
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var typeString = type.ToString();
+        var entities = await context.FrameworkVersions
+            .AsNoTracking()
+            .Where(f => f.Framework == typeString)
+            .OrderByDescending(f => f.Version)
+            .ToListAsync();
+
+        return entities.Select(EntityToFrameworkVersion).ToList();
     }
 
-    public Task<FrameworkVersion> UpdateFrameworkVersionAsync(FrameworkVersion version)
+    public async Task<FrameworkVersion> UpdateFrameworkVersionAsync(FrameworkVersion version)
     {
-        return Task.FromResult(version);
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.FrameworkVersions.FirstOrDefaultAsync(f => f.Id == version.Id);
+        if (entity == null)
+        {
+            throw new InvalidOperationException($"Framework version with ID {version.Id} not found");
+        }
+
+        FrameworkVersionToEntity(version, entity);
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        await context.SaveChangesAsync();
+
+        return EntityToFrameworkVersion(entity);
     }
 
-    public Task<FrameworkVersion> CreateFrameworkVersionAsync(FrameworkVersion version)
+    public async Task<FrameworkVersion> CreateFrameworkVersionAsync(FrameworkVersion version)
     {
-        return Task.FromResult(version);
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entity = new FrameworkVersionEntity { Id = string.IsNullOrEmpty(version.Id) ? Guid.NewGuid().ToString() : version.Id };
+        FrameworkVersionToEntity(version, entity);
+
+        context.FrameworkVersions.Add(entity);
+        await context.SaveChangesAsync();
+
+        return EntityToFrameworkVersion(entity);
     }
 
-    public Task DeleteFrameworkVersionAsync(string id)
+    public async Task DeleteFrameworkVersionAsync(string id)
     {
-        return Task.CompletedTask;
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.FrameworkVersions.FirstOrDefaultAsync(f => f.Id == id);
+        if (entity != null)
+        {
+            context.FrameworkVersions.Remove(entity);
+            await context.SaveChangesAsync();
+        }
     }
 
-    public Task<FrameworkEolSummary> GetFrameworkEolSummaryAsync()
+    public async Task<FrameworkEolSummary> GetFrameworkEolSummaryAsync()
     {
-        return Task.FromResult(new FrameworkEolSummary());
+        var frameworks = await GetAllFrameworkVersionsAsync();
+        var applications = await GetApplicationsAsync();
+
+        var eolFrameworks = frameworks.Where(f => f.IsPastEol || f.IsApproachingEol).ToList();
+        var details = new List<FrameworkEolDetail>();
+
+        foreach (var framework in eolFrameworks)
+        {
+            var matchingApps = await GetApplicationsByFrameworkAsync(framework.Id);
+            if (matchingApps.Count > 0)
+            {
+                details.Add(new FrameworkEolDetail
+                {
+                    Framework = framework,
+                    ApplicationCount = matchingApps.Count,
+                    ApplicationNames = matchingApps.Select(a => a.Name).ToList()
+                });
+            }
+        }
+
+        return new FrameworkEolSummary
+        {
+            TotalApplications = applications.Count,
+            ApplicationsWithEolFrameworks = details.Where(d => d.Framework.IsPastEol).Sum(d => d.ApplicationCount),
+            ApplicationsApproachingEol = details.Where(d => d.Framework.IsApproachingEol && !d.Framework.IsPastEol).Sum(d => d.ApplicationCount),
+            CriticalEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.Critical),
+            HighEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.High),
+            MediumEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.Medium),
+            Details = details.OrderBy(d => d.Framework.DaysUntilEol ?? int.MaxValue).ToList()
+        };
+    }
+
+    /// <summary>
+    /// Ensures framework versions are auto-created from detected target frameworks in repositories.
+    /// </summary>
+    private async Task EnsureAutoDetectedFrameworkVersionsAsync(LifecycleDbContext context)
+    {
+        // Get distinct target frameworks from synced repositories
+        var detectedFrameworks = await context.SyncedRepositories
+            .Where(r => !string.IsNullOrEmpty(r.TargetFramework))
+            .Select(r => r.TargetFramework!)
+            .Distinct()
+            .ToListAsync();
+
+        foreach (var tfm in detectedFrameworks)
+        {
+            // Check if we already have this TFM
+            var existing = await context.FrameworkVersions
+                .FirstOrDefaultAsync(f => f.TargetFrameworkMoniker == tfm);
+
+            if (existing == null)
+            {
+                // Parse the TFM and create a framework version entry
+                var (frameworkType, version, displayName) = ParseTargetFrameworkMoniker(tfm);
+
+                var entity = new FrameworkVersionEntity
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Framework = frameworkType.ToString(),
+                    Version = version,
+                    DisplayName = displayName,
+                    Status = "Unknown",
+                    TargetFrameworkMoniker = tfm,
+                    AutoDetected = true,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+
+                context.FrameworkVersions.Add(entity);
+                _logger.LogInformation("Auto-detected framework version: {DisplayName} (TFM: {TFM})", displayName, tfm);
+            }
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Parses a Target Framework Moniker (TFM) into framework type, version, and display name.
+    /// </summary>
+    private static (FrameworkType Type, string Version, string DisplayName) ParseTargetFrameworkMoniker(string tfm)
+    {
+        // Common TFM patterns:
+        // net8.0, net7.0, net6.0 → .NET 8, .NET 7, .NET 6
+        // net472, net48, net461 → .NET Framework 4.7.2, 4.8, 4.6.1
+        // netcoreapp3.1, netcoreapp2.1 → .NET Core 3.1, 2.1
+        // netstandard2.0, netstandard2.1 → .NET Standard 2.0, 2.1
+
+        var lower = tfm.ToLowerInvariant();
+
+        // Modern .NET (net5.0+)
+        if (lower.StartsWith("net") && lower.Contains('.'))
+        {
+            var versionPart = lower[3..]; // Remove "net"
+            if (Version.TryParse(versionPart, out var parsed))
+            {
+                return (FrameworkType.DotNet, versionPart, $".NET {parsed.Major}");
+            }
+        }
+
+        // .NET Framework (net472, net48, etc)
+        if (lower.StartsWith("net") && !lower.Contains('.'))
+        {
+            var versionDigits = lower[3..];
+            if (versionDigits.Length >= 2)
+            {
+                var major = versionDigits[0];
+                var minor = versionDigits.Length > 1 ? versionDigits[1] : '0';
+                var patch = versionDigits.Length > 2 ? versionDigits[2..] : "";
+                var displayVersion = patch.Length > 0 ? $"{major}.{minor}.{patch}" : $"{major}.{minor}";
+                return (FrameworkType.DotNetFramework, displayVersion, $".NET Framework {displayVersion}");
+            }
+        }
+
+        // .NET Core
+        if (lower.StartsWith("netcoreapp"))
+        {
+            var versionPart = lower[10..];
+            return (FrameworkType.DotNet, versionPart, $".NET Core {versionPart}");
+        }
+
+        // .NET Standard (treat as .NET)
+        if (lower.StartsWith("netstandard"))
+        {
+            var versionPart = lower[11..];
+            return (FrameworkType.DotNet, $"standard{versionPart}", $".NET Standard {versionPart}");
+        }
+
+        // Unknown - return as-is
+        return (FrameworkType.Other, tfm, tfm);
+    }
+
+    private static FrameworkVersion EntityToFrameworkVersion(FrameworkVersionEntity entity)
+    {
+        return new FrameworkVersion
+        {
+            Id = entity.Id,
+            Framework = Enum.TryParse<FrameworkType>(entity.Framework, out var ft) ? ft : FrameworkType.Other,
+            Version = entity.Version,
+            DisplayName = entity.DisplayName,
+            ReleaseDate = entity.ReleaseDate,
+            EndOfLifeDate = entity.EndOfLifeDate,
+            EndOfActiveSupportDate = entity.EndOfActiveSupportDate,
+            IsLts = entity.IsLts,
+            Status = Enum.TryParse<SupportStatus>(entity.Status, out var ss) ? ss : SupportStatus.Unknown,
+            LatestPatchVersion = entity.LatestPatchVersion,
+            Notes = entity.Notes,
+            RecommendedUpgradePath = entity.RecommendedUpgradePath,
+            LastUpdated = entity.UpdatedAt ?? entity.CreatedAt
+        };
+    }
+
+    private static void FrameworkVersionToEntity(FrameworkVersion version, FrameworkVersionEntity entity)
+    {
+        entity.Framework = version.Framework.ToString();
+        entity.Version = version.Version;
+        entity.DisplayName = version.DisplayName;
+        entity.ReleaseDate = version.ReleaseDate;
+        entity.EndOfLifeDate = version.EndOfLifeDate;
+        entity.EndOfActiveSupportDate = version.EndOfActiveSupportDate;
+        entity.IsLts = version.IsLts;
+        entity.Status = version.Status.ToString();
+        entity.LatestPatchVersion = version.LatestPatchVersion;
+        entity.Notes = version.Notes;
+        entity.RecommendedUpgradePath = version.RecommendedUpgradePath;
     }
 
     #endregion
