@@ -36,14 +36,14 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return ConnectionTestResult.Failed(error ?? "Failed to configure Azure DevOps client");
             }
 
             var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
-            var response = await _httpClient.GetAsync($"{project}/_apis/projects?api-version=7.1");
+            var response = await SendRequestAsync($"{baseUrl}{project}/_apis/projects?api-version=7.1", auth);
 
             stopwatch.Stop();
 
@@ -75,15 +75,15 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return DataSyncResult<List<AzureDevOpsRepository>>.Failed(
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
             var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
-            var response = await _httpClient.GetAsync($"{project}/_apis/git/repositories?api-version=7.1");
+            var response = await SendRequestAsync($"{baseUrl}{project}/_apis/git/repositories?api-version=7.1", auth);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -142,8 +142,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return DataSyncResult<TechStackDetectionResult>.Failed(
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
@@ -152,8 +152,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
 
             // Get the file tree
-            var itemsResponse = await _httpClient.GetAsync(
-                $"{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1");
+            var itemsResponse = await SendRequestAsync(
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1", auth);
 
             if (!itemsResponse.IsSuccessStatusCode)
             {
@@ -203,7 +203,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             // Parse .csproj files for framework info
             if (csprojFiles.Count != 0)
             {
-                var csprojContent = await GetFileContentAsync(project, repositoryId, csprojFiles.First());
+                var csprojContent = await GetFileContentAsync(baseUrl, auth, project, repositoryId, csprojFiles.First());
                 if (csprojContent != null)
                 {
                     result = await ParseCsprojAsync(result, csprojContent);
@@ -213,7 +213,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             // Parse package.json for frontend frameworks
             if (packageJsonFiles.Count != 0)
             {
-                var packageJsonContent = await GetFileContentAsync(project, repositoryId, packageJsonFiles.First());
+                var packageJsonContent = await GetFileContentAsync(baseUrl, auth, project, repositoryId, packageJsonFiles.First());
                 if (packageJsonContent != null)
                 {
                     result = ParsePackageJson(result, packageJsonContent);
@@ -243,8 +243,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return DataSyncResult<List<PackageReference>>.Failed(
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
@@ -254,8 +254,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var packages = new List<PackageReference>();
 
             // Get the file tree
-            var itemsResponse = await _httpClient.GetAsync(
-                $"{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1");
+            var itemsResponse = await SendRequestAsync(
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1", auth);
 
             if (!itemsResponse.IsSuccessStatusCode)
             {
@@ -280,7 +280,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             // Parse .csproj files for NuGet packages
             foreach (var csproj in files.Where(f => f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)))
             {
-                var csprojContent = await GetFileContentAsync(project, repositoryId, csproj);
+                var csprojContent = await GetFileContentAsync(baseUrl, auth, project, repositoryId, csproj);
                 if (csprojContent != null)
                 {
                     packages.AddRange(ParseNuGetPackages(csprojContent, csproj));
@@ -290,7 +290,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             // Parse package.json for npm packages
             foreach (var packageJson in files.Where(f => f.EndsWith("package.json", StringComparison.OrdinalIgnoreCase)))
             {
-                var packageJsonContent = await GetFileContentAsync(project, repositoryId, packageJson);
+                var packageJsonContent = await GetFileContentAsync(baseUrl, auth, project, repositoryId, packageJson);
                 if (packageJsonContent != null)
                 {
                     packages.AddRange(ParseNpmPackages(packageJsonContent, packageJson));
@@ -322,8 +322,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return DataSyncResult<CommitHistory>.Failed(
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
@@ -332,8 +332,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
             var sinceDate = DateTimeOffset.UtcNow.AddDays(-daysBefore).ToString("o");
 
-            var response = await _httpClient.GetAsync(
-                $"{project}/_apis/git/repositories/{repositoryId}/commits?searchCriteria.fromDate={sinceDate}&api-version=7.1");
+            var response = await SendRequestAsync(
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/commits?searchCriteria.fromDate={sinceDate}&api-version=7.1", auth);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -385,8 +385,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return DataSyncResult<ReadmeStatus>.Failed(
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
@@ -395,8 +395,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
 
             // Try to get README.md
-            var readmeResponse = await _httpClient.GetAsync(
-                $"{project}/_apis/git/repositories/{repositoryId}/items?path=/README.md&api-version=7.1");
+            var readmeResponse = await SendRequestAsync(
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?path=/README.md&api-version=7.1", auth);
 
             var status = new ReadmeStatus
             {
@@ -437,8 +437,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return DataSyncResult<PipelineStatus>.Failed(
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
@@ -447,8 +447,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
 
             // Get builds for this repository
-            var response = await _httpClient.GetAsync(
-                $"{project}/_apis/build/builds?repositoryId={repositoryId}&repositoryType=TfsGit&$top=1&api-version=7.1");
+            var response = await SendRequestAsync(
+                $"{baseUrl}{project}/_apis/build/builds?repositoryId={repositoryId}&repositoryType=TfsGit&$top=1&api-version=7.1", auth);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -506,8 +506,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
         try
         {
-            var (configured, error) = await ConfigureClientAsync();
-            if (!configured)
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
             {
                 return DataSyncResult<List<SystemDependency>>.Failed(
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
@@ -517,8 +517,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var dependencies = new List<SystemDependency>();
 
             // Get file tree
-            var itemsResponse = await _httpClient.GetAsync(
-                $"{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1");
+            var itemsResponse = await SendRequestAsync(
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1", auth);
 
             if (!itemsResponse.IsSuccessStatusCode)
             {
@@ -545,7 +545,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                 f.Contains("appsettings", StringComparison.OrdinalIgnoreCase) &&
                 f.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
             {
-                var appsettingsContent = await GetFileContentAsync(project, repositoryId, appsettings);
+                var appsettingsContent = await GetFileContentAsync(baseUrl, auth, project, repositoryId, appsettings);
                 if (appsettingsContent != null)
                 {
                     dependencies.AddRange(ParseConnectionStrings(appsettingsContent, appsettings));
@@ -678,35 +678,43 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
     #region Private Helpers
 
-    private async Task<(bool Configured, string? Error)> ConfigureClientAsync()
+    private async Task<(bool Configured, string? Error, string? BaseUrl, AuthenticationHeaderValue? Auth)> GetConfigurationAsync()
     {
         var orgUrl = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsOrganization);
         var pat = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsPat);
 
         if (string.IsNullOrEmpty(orgUrl))
         {
-            return (false, "Azure DevOps organization URL not configured");
+            return (false, "Azure DevOps organization URL not configured", null, null);
         }
 
         if (string.IsNullOrEmpty(pat))
         {
-            return (false, "Azure DevOps PAT not configured");
+            return (false, "Azure DevOps PAT not configured", null, null);
         }
 
-        _httpClient.BaseAddress = new Uri(orgUrl.TrimEnd('/') + "/");
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+        var baseUrl = orgUrl.TrimEnd('/') + "/";
+        var auth = new AuthenticationHeaderValue(
             "Basic",
             Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($":{pat}")));
 
-        return (true, null);
+        return (true, null, baseUrl, auth);
     }
 
-    private async Task<string?> GetFileContentAsync(string project, string repositoryId, string path)
+    private async Task<HttpResponseMessage> SendRequestAsync(string url, AuthenticationHeaderValue auth)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = auth;
+        return await _httpClient.SendAsync(request);
+    }
+
+    private async Task<string?> GetFileContentAsync(string baseUrl, AuthenticationHeaderValue auth, string project, string repositoryId, string path)
     {
         try
         {
-            var response = await _httpClient.GetAsync(
-                $"{project}/_apis/git/repositories/{repositoryId}/items?path={Uri.EscapeDataString(path)}&api-version=7.1");
+            var response = await SendRequestAsync(
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?path={Uri.EscapeDataString(path)}&api-version=7.1",
+                auth);
 
             if (response.IsSuccessStatusCode)
             {
