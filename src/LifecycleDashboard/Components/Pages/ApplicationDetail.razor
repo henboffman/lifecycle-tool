@@ -164,7 +164,7 @@ else
                             <div class="stat-card">
                                 <div class="stat-icon usage"><i class="bi bi-people"></i></div>
                                 <div class="stat-info">
-                                    <span class="stat-value">@_application.Usage.MonthlyUsers.ToString("N0")</span>
+                                    <span class="stat-value">@(_application.Usage?.MonthlyUsers.ToString("N0") ?? "N/A")</span>
                                     <span class="stat-label">Monthly Users</span>
                                 </div>
                             </div>
