@@ -2,6 +2,7 @@
 @using LifecycleDashboard.Models
 @using LifecycleDashboard.Services
 @using DataIntegration = LifecycleDashboard.Services.DataIntegration
+@using Microsoft.AspNetCore.WebUtilities
 @inject IMockDataService DataService
 @inject IHealthScoringService HealthScoringService
 @inject IEolDataService EolDataService
@@ -12,6 +13,7 @@
 @inject DataIntegration.IServiceNowService ServiceNowService
 @inject DataIntegration.IIisDatabaseService IisDatabaseService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Administration - Lifecycle Dashboard</PageTitle>
 
@@ -1174,7 +1176,7 @@
 
                 @foreach (var ds in _dataSourceConfigs)
                 {
-                    <div class="data-source-card @(ds.IsConnected ? "connected" : "")">
+                    <div id="ds-@ds.Name.Replace(" ", "-").ToLower()" class="data-source-card @(ds.IsConnected ? "connected" : "") @(_highlightedDataSource == ds.Name ? "highlighted" : "")">
                         <div class="ds-header">
                             <div class="ds-info">
                                 <i class="bi @GetDataSourceIcon(ds.Type)"></i>
@@ -1463,6 +1465,8 @@
     private List<User> _users = [];
     private List<Application> _applications = [];
     private AdminSection _activeSection = AdminSection.HealthScoring;
+    private string? _highlightedDataSource;
+    private string? _scrollToDataSource;
 
     // Framework Versions state
     private List<FrameworkVersion> _frameworkVersions = [];
@@ -1641,6 +1645,21 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Check for query parameters to navigate to specific tab/section
+        var uri = new Uri(Navigation.Uri);
+        if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("tab", out var tabValue))
+        {
+            if (tabValue == "data-sources")
+            {
+                _activeSection = AdminSection.System;
+            }
+        }
+        if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("source", out var sourceValue))
+        {
+            _scrollToDataSource = sourceValue;
+            _highlightedDataSource = sourceValue;
+        }
+
         _users = (await DataService.GetUsersAsync()).ToList();
         _applications = (await DataService.GetApplicationsAsync()).ToList();
         _frameworkVersions = (await DataService.GetAllFrameworkVersionsAsync()).ToList();
@@ -1673,6 +1692,24 @@
 
         // Load AI configuration from secure storage
         await LoadAiConfiguration();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !string.IsNullOrEmpty(_scrollToDataSource))
+        {
+            // Scroll to the data source element
+            var elementId = $"ds-{_scrollToDataSource.Replace(" ", "-").ToLower()}";
+            await JS.InvokeVoidAsync("scrollToElement", elementId);
+
+            // Clear highlight after 3 seconds
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+                _highlightedDataSource = null;
+                await InvokeAsync(StateHasChanged);
+            });
+        }
     }
 
     private void SetActiveSection(AdminSection section)

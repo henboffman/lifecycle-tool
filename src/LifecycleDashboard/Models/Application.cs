@@ -21,9 +21,34 @@ public record Application
     public string? Description { get; init; }
 
     /// <summary>
+    /// Short description from ServiceNow (brief summary).
+    /// </summary>
+    public string? ShortDescription { get; init; }
+
+    /// <summary>
     /// Capability/business area this application belongs to.
     /// </summary>
     public required string Capability { get; init; }
+
+    /// <summary>
+    /// Application type classification (COTS, Homegrown, etc.).
+    /// </summary>
+    public AppType ApplicationType { get; init; } = AppType.Unknown;
+
+    /// <summary>
+    /// Architecture type (Web Based, Client Server, Desktop App, etc.).
+    /// </summary>
+    public ArchitectureType ArchitectureType { get; init; } = ArchitectureType.Unknown;
+
+    /// <summary>
+    /// User base estimate from ServiceNow (used as initial usage estimate).
+    /// </summary>
+    public string? UserBaseEstimate { get; init; }
+
+    /// <summary>
+    /// Importance value from ServiceNow.
+    /// </summary>
+    public string? Importance { get; init; }
 
     /// <summary>
     /// Link to the Azure DevOps repository.
@@ -196,11 +221,44 @@ public record RoleAssignment
 public enum ApplicationRole
 {
     Owner,
+    ProductManager,
+    BusinessOwner,
+    FunctionalArchitect,
+    TechnicalArchitect,
     TechnicalLead,
     Developer,
     SecurityChampion,
-    BusinessOwner,
     Support
+}
+
+/// <summary>
+/// Application type classification.
+/// </summary>
+public enum AppType
+{
+    Unknown,
+    COTS,       // Commercial Off-The-Shelf
+    Homegrown,  // Custom developed in-house
+    Hybrid,     // Mix of COTS and custom
+    SaaS,       // Software as a Service
+    OpenSource  // Open source solution
+}
+
+/// <summary>
+/// Architecture type classification.
+/// </summary>
+public enum ArchitectureType
+{
+    Unknown,
+    WebBased,
+    ClientServer,
+    DesktopApp,
+    MobileApp,
+    API,
+    BatchProcess,
+    Microservices,
+    Monolithic,
+    Other
 }
 
 /// <summary>

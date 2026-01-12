@@ -1334,6 +1334,26 @@
     border-left: 3px solid #22c55e;
 }
 
+.data-source-card.highlighted {
+    animation: highlight-pulse 3s ease-out;
+    border-color: var(--color-primary);
+}
+
+@keyframes highlight-pulse {
+    0% {
+        box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.6);
+        background: rgba(79, 70, 229, 0.1);
+    }
+    50% {
+        box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.3);
+        background: rgba(79, 70, 229, 0.05);
+    }
+    100% {
+        box-shadow: none;
+        background: var(--color-bg);
+    }
+}
+
 .ds-header {
     display: flex;
     justify-content: space-between;

@@ -237,6 +237,12 @@ public interface IMockDataService
     Task ClearServiceNowApplicationsAsync();
 
     /// <summary>
+    /// Creates Application records from imported ServiceNow applications.
+    /// Returns the number of applications created or updated.
+    /// </summary>
+    Task<int> CreateApplicationsFromServiceNowImportAsync();
+
+    /// <summary>
     /// Gets the saved ServiceNow CSV column mapping.
     /// </summary>
     Task<ServiceNowColumnMapping?> GetServiceNowColumnMappingAsync();
@@ -287,6 +293,28 @@ public interface IMockDataService
     /// Saves the app name mapping CSV column configuration.
     /// </summary>
     Task SaveAppNameMappingConfigAsync(AppNameMappingConfig config);
+
+    // Capability Mappings
+
+    /// <summary>
+    /// Gets all application-to-capability mappings.
+    /// </summary>
+    Task<IReadOnlyList<CapabilityMapping>> GetCapabilityMappingsAsync();
+
+    /// <summary>
+    /// Stores capability mappings from CSV import.
+    /// </summary>
+    Task StoreCapabilityMappingsAsync(IEnumerable<CapabilityMapping> mappings);
+
+    /// <summary>
+    /// Clears all capability mappings.
+    /// </summary>
+    Task ClearCapabilityMappingsAsync();
+
+    /// <summary>
+    /// Gets the capability for a specific application by name.
+    /// </summary>
+    Task<string?> GetCapabilityForApplicationAsync(string applicationName);
 
     // SharePoint Discovered Folders
 
@@ -591,14 +619,33 @@ public record ImportedServiceNowApplication
     public required string ServiceNowId { get; init; }
     public required string Name { get; init; }
     public string? Description { get; init; }
+    public string? ShortDescription { get; init; }
     public string? Capability { get; init; }
     public string? Status { get; init; }
+
+    // Key Roles
     public string? OwnerId { get; init; }
     public string? OwnerName { get; init; }
-    public string? TechnicalLeadId { get; init; }
-    public string? TechnicalLeadName { get; init; }
+    public string? ProductManagerId { get; init; }
+    public string? ProductManagerName { get; init; }
     public string? BusinessOwnerId { get; init; }
     public string? BusinessOwnerName { get; init; }
+    public string? FunctionalArchitectId { get; init; }
+    public string? FunctionalArchitectName { get; init; }
+    public string? TechnicalArchitectId { get; init; }
+    public string? TechnicalArchitectName { get; init; }
+
+    // Legacy - kept for backwards compatibility
+    public string? TechnicalLeadId { get; init; }
+    public string? TechnicalLeadName { get; init; }
+
+    // Application Classification
+    public string? ApplicationType { get; init; }  // COTS, Homegrown
+    public string? ArchitectureType { get; init; } // Web Based, Client Server, Desktop App, Other
+    public string? UserBase { get; init; }         // User base range estimate
+    public string? Importance { get; init; }       // Importance value from ServiceNow
+
+    // Other fields
     public string? RepositoryUrl { get; init; }
     public string? DocumentationUrl { get; init; }
     public string? Environment { get; init; }
@@ -623,14 +670,33 @@ public record ServiceNowColumnMapping
     public string? ServiceNowIdColumn { get; init; }
     public string? NameColumn { get; init; }
     public string? DescriptionColumn { get; init; }
+    public string? ShortDescriptionColumn { get; init; }
     public string? CapabilityColumn { get; init; }
     public string? StatusColumn { get; init; }
+
+    // Key Roles
     public string? OwnerIdColumn { get; init; }
     public string? OwnerNameColumn { get; init; }
-    public string? TechnicalLeadIdColumn { get; init; }
-    public string? TechnicalLeadNameColumn { get; init; }
+    public string? ProductManagerIdColumn { get; init; }
+    public string? ProductManagerNameColumn { get; init; }
     public string? BusinessOwnerIdColumn { get; init; }
     public string? BusinessOwnerNameColumn { get; init; }
+    public string? FunctionalArchitectIdColumn { get; init; }
+    public string? FunctionalArchitectNameColumn { get; init; }
+    public string? TechnicalArchitectIdColumn { get; init; }
+    public string? TechnicalArchitectNameColumn { get; init; }
+
+    // Legacy - kept for backwards compatibility
+    public string? TechnicalLeadIdColumn { get; init; }
+    public string? TechnicalLeadNameColumn { get; init; }
+
+    // Application Classification
+    public string? ApplicationTypeColumn { get; init; }
+    public string? ArchitectureTypeColumn { get; init; }
+    public string? UserBaseColumn { get; init; }
+    public string? ImportanceColumn { get; init; }
+
+    // Other fields
     public string? RepositoryUrlColumn { get; init; }
     public string? DocumentationUrlColumn { get; init; }
     public string? EnvironmentColumn { get; init; }
@@ -702,6 +768,27 @@ public record AppNameMappingConfig
 
     /// <summary>When this configuration was saved.</summary>
     public DateTimeOffset SavedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Mapping of an application to a business capability.
+/// </summary>
+public record CapabilityMapping
+{
+    /// <summary>Unique identifier for this mapping.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>The ServiceNow/canonical application name.</summary>
+    public required string ApplicationName { get; init; }
+
+    /// <summary>The business capability this application belongs to.</summary>
+    public required string Capability { get; init; }
+
+    /// <summary>When this mapping was created/imported.</summary>
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>When this mapping was last updated.</summary>
+    public DateTimeOffset? UpdatedAt { get; init; }
 }
 
 /// <summary>

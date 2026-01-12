@@ -126,8 +126,8 @@ $RECYCLE.BIN/
 # Application Specific
 # =============================================================================
 
-# External data directory (outside web root)
-data/
+# External data directory (outside web root, root level only)
+/data/
 
 # Uploaded files (if any)
 uploads/

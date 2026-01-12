@@ -214,6 +214,73 @@
     text-align: right;
 }
 
+/* Source Scope Section */
+.source-scope {
+    padding: 0 1rem 0.75rem;
+    border-top: 1px solid #f3f4f6;
+    margin-top: 0.5rem;
+}
+
+.scope-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    padding: 0.5rem 0;
+    font-size: 0.8rem;
+    color: #4f46e5;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font-weight: 500;
+}
+
+.scope-toggle:hover {
+    color: #3730a3;
+}
+
+.scope-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+}
+
+.scope-operation {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    background: #f9fafb;
+    border-radius: 6px;
+    border-left: 2px solid #e5e7eb;
+}
+
+.scope-operation i {
+    color: #6b7280;
+    margin-top: 0.1rem;
+    flex-shrink: 0;
+}
+
+.scope-op-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.scope-op-name {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #374151;
+}
+
+.scope-op-desc {
+    font-size: 0.7rem;
+    color: #6b7280;
+    line-height: 1.3;
+}
+
 .source-footer {
     display: flex;
     justify-content: flex-end;

@@ -281,17 +281,39 @@
 
     private readonly List<MappingField> _mappingFields =
     [
+        // Required fields
         new("ServiceNowIdColumn", "ServiceNow ID", true),
         new("NameColumn", "Application Name", true),
+
+        // Descriptions
         new("DescriptionColumn", "Description", false),
-        new("CapabilityColumn", "Capability/Business Area", false),
-        new("StatusColumn", "Status", false),
-        new("OwnerIdColumn", "Owner ID", false),
-        new("OwnerNameColumn", "Owner Name", false),
-        new("TechnicalLeadIdColumn", "Technical Lead ID", false),
-        new("TechnicalLeadNameColumn", "Technical Lead Name", false),
+        new("ShortDescriptionColumn", "Short Description", false),
+
+        // Key roles
+        new("ProductManagerIdColumn", "Product Manager ID", false),
+        new("ProductManagerNameColumn", "Product Manager Name", false),
         new("BusinessOwnerIdColumn", "Business Owner ID", false),
         new("BusinessOwnerNameColumn", "Business Owner Name", false),
+        new("FunctionalArchitectIdColumn", "Functional Architect ID", false),
+        new("FunctionalArchitectNameColumn", "Functional Architect Name", false),
+        new("TechnicalArchitectIdColumn", "Technical Architect ID", false),
+        new("TechnicalArchitectNameColumn", "Technical Architect Name", false),
+
+        // Legacy role fields (kept for backwards compatibility)
+        new("OwnerIdColumn", "Owner ID", false),
+        new("OwnerNameColumn", "Owner Name", false),
+        new("TechnicalLeadIdColumn", "Technical Lead ID (Legacy)", false),
+        new("TechnicalLeadNameColumn", "Technical Lead Name (Legacy)", false),
+
+        // Application classification
+        new("ApplicationTypeColumn", "Application Type (COTS/Homegrown)", false),
+        new("ArchitectureTypeColumn", "Architecture Type", false),
+        new("UserBaseColumn", "User Base", false),
+        new("ImportanceColumn", "Importance", false),
+
+        // Other fields
+        new("CapabilityColumn", "Capability/Business Area", false),
+        new("StatusColumn", "Status", false),
         new("RepositoryUrlColumn", "Repository URL", false),
         new("DocumentationUrlColumn", "Documentation URL", false),
         new("EnvironmentColumn", "Environment", false),
@@ -425,14 +447,33 @@
         _currentMapping["ServiceNowIdColumn"] = mapping.ServiceNowIdColumn;
         _currentMapping["NameColumn"] = mapping.NameColumn;
         _currentMapping["DescriptionColumn"] = mapping.DescriptionColumn;
+        _currentMapping["ShortDescriptionColumn"] = mapping.ShortDescriptionColumn;
         _currentMapping["CapabilityColumn"] = mapping.CapabilityColumn;
         _currentMapping["StatusColumn"] = mapping.StatusColumn;
+
+        // Key roles
+        _currentMapping["ProductManagerIdColumn"] = mapping.ProductManagerIdColumn;
+        _currentMapping["ProductManagerNameColumn"] = mapping.ProductManagerNameColumn;
+        _currentMapping["BusinessOwnerIdColumn"] = mapping.BusinessOwnerIdColumn;
+        _currentMapping["BusinessOwnerNameColumn"] = mapping.BusinessOwnerNameColumn;
+        _currentMapping["FunctionalArchitectIdColumn"] = mapping.FunctionalArchitectIdColumn;
+        _currentMapping["FunctionalArchitectNameColumn"] = mapping.FunctionalArchitectNameColumn;
+        _currentMapping["TechnicalArchitectIdColumn"] = mapping.TechnicalArchitectIdColumn;
+        _currentMapping["TechnicalArchitectNameColumn"] = mapping.TechnicalArchitectNameColumn;
+
+        // Legacy roles
         _currentMapping["OwnerIdColumn"] = mapping.OwnerIdColumn;
         _currentMapping["OwnerNameColumn"] = mapping.OwnerNameColumn;
         _currentMapping["TechnicalLeadIdColumn"] = mapping.TechnicalLeadIdColumn;
         _currentMapping["TechnicalLeadNameColumn"] = mapping.TechnicalLeadNameColumn;
-        _currentMapping["BusinessOwnerIdColumn"] = mapping.BusinessOwnerIdColumn;
-        _currentMapping["BusinessOwnerNameColumn"] = mapping.BusinessOwnerNameColumn;
+
+        // Application classification
+        _currentMapping["ApplicationTypeColumn"] = mapping.ApplicationTypeColumn;
+        _currentMapping["ArchitectureTypeColumn"] = mapping.ArchitectureTypeColumn;
+        _currentMapping["UserBaseColumn"] = mapping.UserBaseColumn;
+        _currentMapping["ImportanceColumn"] = mapping.ImportanceColumn;
+
+        // Other fields
         _currentMapping["RepositoryUrlColumn"] = mapping.RepositoryUrlColumn;
         _currentMapping["DocumentationUrlColumn"] = mapping.DocumentationUrlColumn;
         _currentMapping["EnvironmentColumn"] = mapping.EnvironmentColumn;
@@ -444,15 +485,40 @@
     {
         var patterns = new Dictionary<string, string[]>
         {
+            // Required fields
             ["ServiceNowIdColumn"] = ["u_application_id", "application_id", "ci_id", "sys_id", "id"],
             ["NameColumn"] = ["name", "application_name", "app_name", "display_name"],
-            ["DescriptionColumn"] = ["description", "short_description", "desc"],
-            ["CapabilityColumn"] = ["capability", "u_capability", "business_area", "category"],
-            ["StatusColumn"] = ["status", "install_status", "state"],
+
+            // Descriptions
+            ["DescriptionColumn"] = ["description", "desc"],
+            ["ShortDescriptionColumn"] = ["short_description", "short_desc", "summary"],
+
+            // Key roles
+            ["ProductManagerIdColumn"] = ["product_manager.employee_number", "u_product_manager.employee_number", "product_manager_id"],
+            ["ProductManagerNameColumn"] = ["product_manager", "product_manager.name", "u_product_manager", "u_product_manager.name"],
+            ["BusinessOwnerIdColumn"] = ["business_owner.employee_number", "u_business_owner.employee_number", "business_owner_id"],
+            ["BusinessOwnerNameColumn"] = ["business_owner", "business_owner.name", "u_business_owner", "u_business_owner.name"],
+            ["FunctionalArchitectIdColumn"] = ["functional_architect.employee_number", "u_functional_architect.employee_number", "func_architect_id"],
+            ["FunctionalArchitectNameColumn"] = ["functional_architect", "functional_architect.name", "u_functional_architect", "u_functional_architect.name"],
+            ["TechnicalArchitectIdColumn"] = ["technical_architect.employee_number", "u_technical_architect.employee_number", "tech_architect_id"],
+            ["TechnicalArchitectNameColumn"] = ["technical_architect", "technical_architect.name", "u_technical_architect", "u_technical_architect.name"],
+
+            // Legacy role fields
             ["OwnerIdColumn"] = ["owner_id", "owned_by.employee_number", "owner.id"],
             ["OwnerNameColumn"] = ["owner_name", "owned_by.name", "owner", "owned_by"],
             ["TechnicalLeadIdColumn"] = ["tech_lead_id", "u_technical_lead.employee_number", "technical_lead.id"],
             ["TechnicalLeadNameColumn"] = ["tech_lead_name", "u_technical_lead.name", "technical_lead", "tech_lead"],
+
+            // Application classification
+            ["ApplicationTypeColumn"] = ["application_type", "u_application_type", "app_type"],
+            ["ArchitectureTypeColumn"] = ["architecture_type", "u_architecture_type", "arch_type"],
+            ["UserBaseColumn"] = ["user_base", "u_user_base", "expected_users", "estimated_users"],
+            ["ImportanceColumn"] = ["importance", "u_importance", "business_importance"],
+
+            // Other fields
+            ["CapabilityColumn"] = ["capability", "u_capability", "business_area", "category"],
+            ["StatusColumn"] = ["status", "install_status", "state"],
+            ["CriticalityColumn"] = ["criticality", "u_criticality", "business_criticality"],
         };
 
         foreach (var (field, candidatePatterns) in patterns)
@@ -504,14 +570,33 @@
             ServiceNowIdColumn = GetMappingValue("ServiceNowIdColumn"),
             NameColumn = GetMappingValue("NameColumn"),
             DescriptionColumn = GetMappingValue("DescriptionColumn"),
+            ShortDescriptionColumn = GetMappingValue("ShortDescriptionColumn"),
             CapabilityColumn = GetMappingValue("CapabilityColumn"),
             StatusColumn = GetMappingValue("StatusColumn"),
+
+            // Key roles
+            ProductManagerIdColumn = GetMappingValue("ProductManagerIdColumn"),
+            ProductManagerNameColumn = GetMappingValue("ProductManagerNameColumn"),
+            BusinessOwnerIdColumn = GetMappingValue("BusinessOwnerIdColumn"),
+            BusinessOwnerNameColumn = GetMappingValue("BusinessOwnerNameColumn"),
+            FunctionalArchitectIdColumn = GetMappingValue("FunctionalArchitectIdColumn"),
+            FunctionalArchitectNameColumn = GetMappingValue("FunctionalArchitectNameColumn"),
+            TechnicalArchitectIdColumn = GetMappingValue("TechnicalArchitectIdColumn"),
+            TechnicalArchitectNameColumn = GetMappingValue("TechnicalArchitectNameColumn"),
+
+            // Legacy roles
             OwnerIdColumn = GetMappingValue("OwnerIdColumn"),
             OwnerNameColumn = GetMappingValue("OwnerNameColumn"),
             TechnicalLeadIdColumn = GetMappingValue("TechnicalLeadIdColumn"),
             TechnicalLeadNameColumn = GetMappingValue("TechnicalLeadNameColumn"),
-            BusinessOwnerIdColumn = GetMappingValue("BusinessOwnerIdColumn"),
-            BusinessOwnerNameColumn = GetMappingValue("BusinessOwnerNameColumn"),
+
+            // Application classification
+            ApplicationTypeColumn = GetMappingValue("ApplicationTypeColumn"),
+            ArchitectureTypeColumn = GetMappingValue("ArchitectureTypeColumn"),
+            UserBaseColumn = GetMappingValue("UserBaseColumn"),
+            ImportanceColumn = GetMappingValue("ImportanceColumn"),
+
+            // Other fields
             RepositoryUrlColumn = GetMappingValue("RepositoryUrlColumn"),
             DocumentationUrlColumn = GetMappingValue("DocumentationUrlColumn"),
             EnvironmentColumn = GetMappingValue("EnvironmentColumn"),
@@ -576,14 +661,33 @@
                 ServiceNowId = serviceNowId,
                 Name = name,
                 Description = GetCsvValue(row, GetMappingValue("DescriptionColumn")),
+                ShortDescription = GetCsvValue(row, GetMappingValue("ShortDescriptionColumn")),
                 Capability = GetCsvValue(row, GetMappingValue("CapabilityColumn")),
                 Status = GetCsvValue(row, GetMappingValue("StatusColumn")),
+
+                // Key roles
+                ProductManagerId = GetCsvValue(row, GetMappingValue("ProductManagerIdColumn")),
+                ProductManagerName = GetCsvValue(row, GetMappingValue("ProductManagerNameColumn")),
+                BusinessOwnerId = GetCsvValue(row, GetMappingValue("BusinessOwnerIdColumn")),
+                BusinessOwnerName = GetCsvValue(row, GetMappingValue("BusinessOwnerNameColumn")),
+                FunctionalArchitectId = GetCsvValue(row, GetMappingValue("FunctionalArchitectIdColumn")),
+                FunctionalArchitectName = GetCsvValue(row, GetMappingValue("FunctionalArchitectNameColumn")),
+                TechnicalArchitectId = GetCsvValue(row, GetMappingValue("TechnicalArchitectIdColumn")),
+                TechnicalArchitectName = GetCsvValue(row, GetMappingValue("TechnicalArchitectNameColumn")),
+
+                // Legacy roles
                 OwnerId = GetCsvValue(row, GetMappingValue("OwnerIdColumn")),
                 OwnerName = GetCsvValue(row, GetMappingValue("OwnerNameColumn")),
                 TechnicalLeadId = GetCsvValue(row, GetMappingValue("TechnicalLeadIdColumn")),
                 TechnicalLeadName = GetCsvValue(row, GetMappingValue("TechnicalLeadNameColumn")),
-                BusinessOwnerId = GetCsvValue(row, GetMappingValue("BusinessOwnerIdColumn")),
-                BusinessOwnerName = GetCsvValue(row, GetMappingValue("BusinessOwnerNameColumn")),
+
+                // Application classification
+                ApplicationType = GetCsvValue(row, GetMappingValue("ApplicationTypeColumn")),
+                ArchitectureType = GetCsvValue(row, GetMappingValue("ArchitectureTypeColumn")),
+                UserBase = GetCsvValue(row, GetMappingValue("UserBaseColumn")),
+                Importance = GetCsvValue(row, GetMappingValue("ImportanceColumn")),
+
+                // Other fields
                 RepositoryUrl = GetCsvValue(row, GetMappingValue("RepositoryUrlColumn")),
                 DocumentationUrl = GetCsvValue(row, GetMappingValue("DocumentationUrlColumn")),
                 Environment = GetCsvValue(row, GetMappingValue("EnvironmentColumn")),
@@ -614,8 +718,13 @@
 
         try
         {
+            // Store the imported ServiceNow data
             await DataService.StoreServiceNowApplicationsAsync(_previewData);
-            _importedCount = _previewData.Count;
+
+            // Create/update actual Application records from the import
+            var appCount = await DataService.CreateApplicationsFromServiceNowImportAsync();
+
+            _importedCount = appCount;
             _importComplete = true;
             _existingImports = (await DataService.GetImportedServiceNowApplicationsAsync()).ToList();
         }

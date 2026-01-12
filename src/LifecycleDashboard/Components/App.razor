@@ -98,6 +98,13 @@
             link.click();
             URL.revokeObjectURL(link.href);
         };
+
+        window.scrollToElement = function(elementId) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        };
     </script>
 </body>
 

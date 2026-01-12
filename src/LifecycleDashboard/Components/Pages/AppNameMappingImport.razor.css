@@ -20,6 +20,83 @@
     margin: 0.5rem 0 0 0;
 }
 
+/* Import Tabs */
+.import-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted, #6c757d);
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-bottom: -1px;
+}
+
+.tab-btn:hover {
+    color: var(--primary, #4361ee);
+    background: rgba(67, 97, 238, 0.05);
+}
+
+.tab-btn.active {
+    color: var(--primary, #4361ee);
+    border-bottom-color: var(--primary, #4361ee);
+}
+
+.tab-btn i {
+    font-size: 1rem;
+}
+
+/* Capability Summary */
+.capability-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 1rem 0;
+}
+
+.capability-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: var(--bg-muted, #f8f9fa);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 20px;
+    font-size: 0.85rem;
+}
+
+.cap-name {
+    color: var(--header-text, #1a1a2e);
+}
+
+.cap-count {
+    background: var(--primary, #4361ee);
+    color: white;
+    padding: 0.1rem 0.4rem;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.more-caps {
+    color: var(--text-muted, #6c757d);
+    font-size: 0.85rem;
+    padding: 0.35rem 0;
+}
+
 /* Info section */
 .info-section {
     background: rgba(67, 97, 238, 0.08);

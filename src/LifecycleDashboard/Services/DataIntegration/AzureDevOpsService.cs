@@ -789,13 +789,34 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     {
         try
         {
+            // IMPORTANT: Must include includeContent=true to get the actual file content
+            // Without this, the API only returns metadata about the file
             var response = await SendRequestAsync(
-                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?path={Uri.EscapeDataString(path)}&api-version=7.1",
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?path={Uri.EscapeDataString(path)}&includeContent=true&api-version=7.1",
                 auth);
 
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadAsStringAsync();
+                var content = await response.Content.ReadAsStringAsync();
+
+                // The response is JSON with a 'content' property containing the file content
+                try
+                {
+                    var jsonDoc = JsonDocument.Parse(content);
+                    if (jsonDoc.RootElement.TryGetProperty("content", out var contentElement))
+                    {
+                        return contentElement.GetString();
+                    }
+                }
+                catch (JsonException)
+                {
+                    // If it's not valid JSON, it might be raw content (for download=true scenarios)
+                    return content;
+                }
+            }
+            else
+            {
+                _logger.LogWarning("Failed to get file content for {Path}: {Status}", path, response.StatusCode);
             }
         }
         catch (Exception ex)

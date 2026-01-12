@@ -1,0 +1,1043 @@
+using System.Text.Json;
+using LifecycleDashboard.Data;
+using LifecycleDashboard.Data.Entities;
+using LifecycleDashboard.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace LifecycleDashboard.Services;
+
+/// <summary>
+/// Database-backed implementation of IMockDataService using Entity Framework Core.
+/// </summary>
+public class DatabaseDataService : IMockDataService
+{
+    private readonly IDbContextFactory<LifecycleDbContext> _contextFactory;
+    private readonly ILogger<DatabaseDataService> _logger;
+
+    // In-memory caches for configuration data (not persisted to DB yet)
+    private ServiceNowColumnMapping? _serviceNowColumnMapping;
+    private AppNameMappingConfig? _appNameMappingConfig;
+    private TaskSchedulingConfig _taskSchedulingConfig = new();
+    private SystemSettings _systemSettings = new();
+    private readonly List<DataSourceConfig> _dataSourceConfigs = [];
+
+    // In-memory storage for data that doesn't have entities yet
+    private readonly List<ImportedServiceNowApplication> _importedServiceNowApps = [];
+    private readonly List<SyncedRepository> _syncedRepositories = [];
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = false
+    };
+
+    public DatabaseDataService(
+        IDbContextFactory<LifecycleDbContext> contextFactory,
+        ILogger<DatabaseDataService> logger)
+    {
+        _contextFactory = contextFactory;
+        _logger = logger;
+
+        // Initialize default data source configs
+        InitializeDataSourceConfigs();
+    }
+
+    private void InitializeDataSourceConfigs()
+    {
+        _dataSourceConfigs.AddRange([
+            new DataSourceConfig
+            {
+                Id = "azure-devops",
+                Name = "Azure DevOps",
+                Type = DataSourceType.AzureDevOps,
+                IsEnabled = false,
+                IsConnected = false
+            },
+            new DataSourceConfig
+            {
+                Id = "sharepoint",
+                Name = "SharePoint",
+                Type = DataSourceType.SharePoint,
+                IsEnabled = false,
+                IsConnected = false
+            },
+            new DataSourceConfig
+            {
+                Id = "servicenow",
+                Name = "ServiceNow",
+                Type = DataSourceType.ServiceNow,
+                IsEnabled = false,
+                IsConnected = false
+            },
+            new DataSourceConfig
+            {
+                Id = "iis-database",
+                Name = "IIS Database",
+                Type = DataSourceType.IisDatabase,
+                IsEnabled = false,
+                IsConnected = false
+            }
+        ]);
+    }
+
+    #region IMockDataService Properties
+
+    public bool IsMockDataEnabled => _systemSettings.MockDataEnabled;
+
+    public event EventHandler<bool>? MockDataModeChanged;
+
+    public Task SetMockDataEnabledAsync(bool enabled)
+    {
+        _systemSettings = _systemSettings with { MockDataEnabled = enabled };
+        MockDataModeChanged?.Invoke(this, enabled);
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Applications
+
+    public async Task<IReadOnlyList<Application>> GetApplicationsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.Applications.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task<Application?> GetApplicationAsync(string id)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Applications.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+        return entity?.ToModel();
+    }
+
+    public async Task<IReadOnlyList<Application>> GetApplicationsByHealthAsync(HealthCategory category)
+    {
+        var apps = await GetApplicationsAsync();
+        return apps.Where(a => a.HealthCategory == category).ToList();
+    }
+
+    public async Task<IReadOnlyList<Application>> GetApplicationsByFrameworkAsync(string frameworkVersionId)
+    {
+        // For now, return empty - framework tracking will be implemented later
+        await Task.CompletedTask;
+        return [];
+    }
+
+    public async Task<IReadOnlyList<Application>> GetApplicationsForUserAsync(string userId)
+    {
+        var apps = await GetApplicationsAsync();
+        return apps.Where(a => a.RoleAssignments.Any(r => r.UserId == userId)).ToList();
+    }
+
+    #endregion
+
+    #region Tasks
+
+    public async Task<IReadOnlyList<LifecycleTask>> GetTasksForUserAsync(string userId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.Tasks.AsNoTracking()
+            .Where(t => t.AssigneeId == userId)
+            .ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task<IReadOnlyList<LifecycleTask>> GetTasksForApplicationAsync(string applicationId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.Tasks.AsNoTracking()
+            .Where(t => t.ApplicationId == applicationId)
+            .ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task<IReadOnlyList<LifecycleTask>> GetOverdueTasksAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var now = DateTimeOffset.UtcNow;
+        var entities = await context.Tasks.AsNoTracking()
+            .Where(t => t.DueDate < now && t.Status != Models.TaskStatus.Completed)
+            .ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task<IReadOnlyList<LifecycleTask>> GetAllTasksAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.Tasks.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task<LifecycleTask?> GetTaskAsync(string taskId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Tasks.AsNoTracking().FirstOrDefaultAsync(t => t.Id == taskId);
+        return entity?.ToModel();
+    }
+
+    public async Task<LifecycleTask> CreateTaskAsync(LifecycleTask task)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = task.ToEntity();
+        context.Tasks.Add(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task DeleteTaskAsync(string taskId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Tasks.FindAsync(taskId);
+        if (entity != null)
+        {
+            context.Tasks.Remove(entity);
+            await context.SaveChangesAsync();
+        }
+    }
+
+    public async Task<LifecycleTask> UpdateTaskStatusAsync(string taskId, Models.TaskStatus newStatus, string performedByUserId, string performedByName, string? notes = null)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Tasks.FindAsync(taskId)
+            ?? throw new InvalidOperationException($"Task {taskId} not found");
+
+        var task = entity.ToModel();
+        var updatedHistory = task.History.ToList();
+        updatedHistory.Add(new TaskHistoryEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Action = $"Status changed to {newStatus}",
+            PerformedBy = performedByName,
+            PerformedById = performedByUserId,
+            Notes = notes
+        });
+
+        var updatedTask = task with
+        {
+            Status = newStatus,
+            CompletedDate = newStatus == Models.TaskStatus.Completed ? DateTimeOffset.UtcNow : task.CompletedDate,
+            History = updatedHistory
+        };
+
+        updatedTask.ToEntity(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task<LifecycleTask> AssignTaskAsync(string taskId, string userId, string userName, string userEmail, string performedByUserId, string performedByName)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Tasks.FindAsync(taskId)
+            ?? throw new InvalidOperationException($"Task {taskId} not found");
+
+        var task = entity.ToModel();
+        var updatedHistory = task.History.ToList();
+        updatedHistory.Add(new TaskHistoryEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Action = $"Assigned to {userName}",
+            PerformedBy = performedByName,
+            PerformedById = performedByUserId
+        });
+
+        var updatedTask = task with
+        {
+            AssigneeId = userId,
+            AssigneeName = userName,
+            AssigneeEmail = userEmail,
+            History = updatedHistory
+        };
+
+        updatedTask.ToEntity(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task<LifecycleTask> DelegateTaskAsync(string taskId, string fromUserId, string toUserId, string toUserName, string toUserEmail, string reason, string performedByUserId, string performedByName)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Tasks.FindAsync(taskId)
+            ?? throw new InvalidOperationException($"Task {taskId} not found");
+
+        var task = entity.ToModel();
+        var updatedHistory = task.History.ToList();
+        updatedHistory.Add(new TaskHistoryEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Action = $"Delegated to {toUserName}",
+            PerformedBy = performedByName,
+            PerformedById = performedByUserId,
+            Notes = reason
+        });
+
+        var updatedTask = task with
+        {
+            AssigneeId = toUserId,
+            AssigneeName = toUserName,
+            AssigneeEmail = toUserEmail,
+            OriginalAssigneeId = task.OriginalAssigneeId ?? fromUserId,
+            DelegationReason = reason,
+            History = updatedHistory
+        };
+
+        updatedTask.ToEntity(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task<LifecycleTask> EscalateTaskAsync(string taskId, string reason, string performedByUserId, string performedByName)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Tasks.FindAsync(taskId)
+            ?? throw new InvalidOperationException($"Task {taskId} not found");
+
+        var task = entity.ToModel();
+        var updatedHistory = task.History.ToList();
+        updatedHistory.Add(new TaskHistoryEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Action = "Task escalated",
+            PerformedBy = performedByName,
+            PerformedById = performedByUserId,
+            Notes = reason
+        });
+
+        var updatedTask = task with
+        {
+            IsEscalated = true,
+            EscalatedDate = DateTimeOffset.UtcNow,
+            History = updatedHistory
+        };
+
+        updatedTask.ToEntity(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task<LifecycleTask> CompleteTaskAsync(string taskId, string performedByUserId, string performedByName, string? notes = null)
+    {
+        return await UpdateTaskStatusAsync(taskId, Models.TaskStatus.Completed, performedByUserId, performedByName, notes);
+    }
+
+    public async Task<LifecycleTask> AddTaskNoteAsync(string taskId, string performedByUserId, string performedByName, string note)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Tasks.FindAsync(taskId)
+            ?? throw new InvalidOperationException($"Task {taskId} not found");
+
+        var task = entity.ToModel();
+        var updatedHistory = task.History.ToList();
+        updatedHistory.Add(new TaskHistoryEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Action = "Note added",
+            PerformedBy = performedByName,
+            PerformedById = performedByUserId,
+            Notes = note
+        });
+
+        var updatedTask = task with { History = updatedHistory };
+        updatedTask.ToEntity(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task<TaskSummary> GetTaskSummaryForUserAsync(string userId)
+    {
+        var tasks = await GetTasksForUserAsync(userId);
+        var now = DateTimeOffset.UtcNow;
+
+        return new TaskSummary
+        {
+            Total = tasks.Count,
+            Overdue = tasks.Count(t => t.DueDate < now && t.Status != Models.TaskStatus.Completed),
+            DueThisWeek = tasks.Count(t => t.DueDate >= now && t.DueDate <= now.AddDays(7) && t.Status != Models.TaskStatus.Completed),
+            DueThisMonth = tasks.Count(t => t.DueDate >= now && t.DueDate <= now.AddDays(30) && t.Status != Models.TaskStatus.Completed),
+            Completed = tasks.Count(t => t.Status == Models.TaskStatus.Completed),
+            InProgress = tasks.Count(t => t.Status == Models.TaskStatus.InProgress)
+        };
+    }
+
+    #endregion
+
+    #region Users
+
+    public async Task<User> GetCurrentUserAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Users.AsNoTracking().FirstOrDefaultAsync();
+
+        if (entity != null)
+            return entity.ToModel();
+
+        // Return default user if none exists
+        return new User
+        {
+            Id = "current-user",
+            Name = "Current User",
+            Email = "user@example.com",
+            Role = Models.SystemRole.StandardUser,
+            IsActive = true
+        };
+    }
+
+    public async Task<IReadOnlyList<User>> GetUsersAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.Users.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task<User?> GetUserAsync(string userId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+        return entity?.ToModel();
+    }
+
+    public async Task<User> CreateUserAsync(User user)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = user.ToEntity();
+        context.Users.Add(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task<User> UpdateUserAsync(User user)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Users.FindAsync(user.Id)
+            ?? throw new InvalidOperationException($"User {user.Id} not found");
+
+        user.ToEntity(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task DeleteUserAsync(string userId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Users.FindAsync(userId);
+        if (entity != null)
+        {
+            context.Users.Remove(entity);
+            await context.SaveChangesAsync();
+        }
+    }
+
+    #endregion
+
+    #region Portfolio Health
+
+    public async Task<PortfolioHealthSummary> GetPortfolioHealthSummaryAsync()
+    {
+        var apps = await GetApplicationsAsync();
+
+        return new PortfolioHealthSummary
+        {
+            TotalApplications = apps.Count,
+            HealthyCount = apps.Count(a => a.HealthCategory == HealthCategory.Healthy),
+            NeedsAttentionCount = apps.Count(a => a.HealthCategory == HealthCategory.NeedsAttention),
+            AtRiskCount = apps.Count(a => a.HealthCategory == HealthCategory.AtRisk),
+            CriticalCount = apps.Count(a => a.HealthCategory == HealthCategory.Critical),
+            AverageScore = apps.Count > 0 ? apps.Average(a => a.HealthScore) : 0,
+            LastUpdated = DateTimeOffset.UtcNow
+        };
+    }
+
+    #endregion
+
+    #region Repository Info
+
+    public async Task<RepositoryInfo?> GetRepositoryInfoAsync(string applicationId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Repositories.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.RepositoryId == applicationId);
+        return entity?.ToModel();
+    }
+
+    #endregion
+
+    #region Task Documentation
+
+    public async Task<TaskDocumentation?> GetTaskDocumentationAsync(TaskType taskType)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.TaskDocumentation.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.TaskType == taskType.ToString());
+        return entity?.ToModel();
+    }
+
+    public async Task<IReadOnlyList<TaskDocumentation>> GetAllTaskDocumentationAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.TaskDocumentation.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task<TaskDocumentation> UpdateTaskDocumentationAsync(TaskDocumentation documentation)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.TaskDocumentation.FindAsync(documentation.Id)
+            ?? throw new InvalidOperationException($"Task documentation {documentation.Id} not found");
+
+        documentation.ToEntity(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task<TaskDocumentation> CreateTaskDocumentationAsync(TaskDocumentation documentation)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = documentation.ToEntity();
+        context.TaskDocumentation.Add(entity);
+        await context.SaveChangesAsync();
+        return entity.ToModel();
+    }
+
+    public async Task DeleteTaskDocumentationAsync(string id)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.TaskDocumentation.FindAsync(id);
+        if (entity != null)
+        {
+            context.TaskDocumentation.Remove(entity);
+            await context.SaveChangesAsync();
+        }
+    }
+
+    #endregion
+
+    #region Framework Versions
+
+    public Task<IReadOnlyList<FrameworkVersion>> GetAllFrameworkVersionsAsync()
+    {
+        // Framework versions will be implemented with endoflife.date integration
+        return Task.FromResult<IReadOnlyList<FrameworkVersion>>([]);
+    }
+
+    public Task<FrameworkVersion?> GetFrameworkVersionAsync(string id)
+    {
+        return Task.FromResult<FrameworkVersion?>(null);
+    }
+
+    public Task<IReadOnlyList<FrameworkVersion>> GetFrameworkVersionsByTypeAsync(FrameworkType type)
+    {
+        return Task.FromResult<IReadOnlyList<FrameworkVersion>>([]);
+    }
+
+    public Task<FrameworkVersion> UpdateFrameworkVersionAsync(FrameworkVersion version)
+    {
+        return Task.FromResult(version);
+    }
+
+    public Task<FrameworkVersion> CreateFrameworkVersionAsync(FrameworkVersion version)
+    {
+        return Task.FromResult(version);
+    }
+
+    public Task DeleteFrameworkVersionAsync(string id)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task<FrameworkEolSummary> GetFrameworkEolSummaryAsync()
+    {
+        return Task.FromResult(new FrameworkEolSummary());
+    }
+
+    #endregion
+
+    #region Synced Repositories
+
+    public Task<IReadOnlyList<SyncedRepository>> GetSyncedRepositoriesAsync()
+    {
+        return Task.FromResult<IReadOnlyList<SyncedRepository>>(_syncedRepositories.ToList());
+    }
+
+    public Task StoreSyncedRepositoriesAsync(IEnumerable<SyncedRepository> repositories)
+    {
+        _syncedRepositories.Clear();
+        _syncedRepositories.AddRange(repositories);
+        return Task.CompletedTask;
+    }
+
+    public Task<SyncedRepository?> GetSyncedRepositoryAsync(string repositoryId)
+    {
+        var repo = _syncedRepositories.FirstOrDefault(r => r.Id == repositoryId);
+        return Task.FromResult(repo);
+    }
+
+    public Task ClearSyncedRepositoriesAsync()
+    {
+        _syncedRepositories.Clear();
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region ServiceNow Applications
+
+    public Task<IReadOnlyList<ImportedServiceNowApplication>> GetImportedServiceNowApplicationsAsync()
+    {
+        return Task.FromResult<IReadOnlyList<ImportedServiceNowApplication>>(_importedServiceNowApps.ToList());
+    }
+
+    public Task StoreServiceNowApplicationsAsync(IEnumerable<ImportedServiceNowApplication> applications)
+    {
+        foreach (var app in applications)
+        {
+            var existing = _importedServiceNowApps.FirstOrDefault(a => a.ServiceNowId == app.ServiceNowId);
+            if (existing != null)
+            {
+                _importedServiceNowApps.Remove(existing);
+            }
+            _importedServiceNowApps.Add(app);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task ClearServiceNowApplicationsAsync()
+    {
+        _importedServiceNowApps.Clear();
+        return Task.CompletedTask;
+    }
+
+    public async Task<int> CreateApplicationsFromServiceNowImportAsync()
+    {
+        if (_importedServiceNowApps.Count == 0)
+            return 0;
+
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        int count = 0;
+
+        foreach (var imported in _importedServiceNowApps)
+        {
+            // Check if app already exists by ServiceNow ID
+            var existing = await context.Applications
+                .FirstOrDefaultAsync(a => a.ServiceNowId == imported.ServiceNowId);
+
+            var app = new Application
+            {
+                Id = existing?.Id ?? Guid.NewGuid().ToString(),
+                Name = imported.Name,
+                Description = imported.Description,
+                ShortDescription = imported.ShortDescription,
+                Capability = imported.Capability ?? "Uncategorized",
+                ApplicationType = ParseAppType(imported.ApplicationType),
+                ArchitectureType = ParseArchitectureType(imported.ArchitectureType),
+                UserBaseEstimate = imported.UserBase,
+                Importance = imported.Importance,
+                ServiceNowId = imported.ServiceNowId,
+                RepositoryUrl = imported.RepositoryUrl,
+                DocumentationUrl = imported.DocumentationUrl,
+                HealthScore = existing != null ? context.Entry(existing).Property<int>("HealthScore").CurrentValue : 70,
+                LastSyncDate = DateTimeOffset.UtcNow,
+                RoleAssignments = BuildRoleAssignments(imported)
+            };
+
+            if (existing != null)
+            {
+                app.ToEntity(existing);
+            }
+            else
+            {
+                context.Applications.Add(app.ToEntity());
+            }
+
+            count++;
+        }
+
+        await context.SaveChangesAsync();
+        _logger.LogInformation("Created/updated {Count} applications from ServiceNow import", count);
+        return count;
+    }
+
+    private static AppType ParseAppType(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return AppType.Unknown;
+        return value.ToUpperInvariant() switch
+        {
+            "COTS" => AppType.COTS,
+            "HOMEGROWN" or "CUSTOM" or "IN-HOUSE" => AppType.Homegrown,
+            "HYBRID" => AppType.Hybrid,
+            "SAAS" => AppType.SaaS,
+            "OPEN SOURCE" or "OPENSOURCE" => AppType.OpenSource,
+            _ => AppType.Unknown
+        };
+    }
+
+    private static ArchitectureType ParseArchitectureType(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return ArchitectureType.Unknown;
+        return value.ToUpperInvariant() switch
+        {
+            "WEB BASED" or "WEB-BASED" or "WEB" => ArchitectureType.WebBased,
+            "CLIENT SERVER" or "CLIENT-SERVER" or "CLIENT/SERVER" => ArchitectureType.ClientServer,
+            "DESKTOP APP" or "DESKTOP" => ArchitectureType.DesktopApp,
+            "MOBILE APP" or "MOBILE" => ArchitectureType.MobileApp,
+            "API" => ArchitectureType.API,
+            "BATCH PROCESS" or "BATCH" => ArchitectureType.BatchProcess,
+            "MICROSERVICES" => ArchitectureType.Microservices,
+            "MONOLITHIC" or "MONOLITH" => ArchitectureType.Monolithic,
+            "OTHER" => ArchitectureType.Other,
+            _ => ArchitectureType.Unknown
+        };
+    }
+
+    private static List<RoleAssignment> BuildRoleAssignments(ImportedServiceNowApplication imported)
+    {
+        var assignments = new List<RoleAssignment>();
+
+        if (!string.IsNullOrEmpty(imported.ProductManagerName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.ProductManagerId ?? Guid.NewGuid().ToString(),
+                UserName = imported.ProductManagerName,
+                UserEmail = GenerateEmailFromName(imported.ProductManagerName),
+                Role = ApplicationRole.ProductManager
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.BusinessOwnerName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.BusinessOwnerId ?? Guid.NewGuid().ToString(),
+                UserName = imported.BusinessOwnerName,
+                UserEmail = GenerateEmailFromName(imported.BusinessOwnerName),
+                Role = ApplicationRole.BusinessOwner
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.FunctionalArchitectName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.FunctionalArchitectId ?? Guid.NewGuid().ToString(),
+                UserName = imported.FunctionalArchitectName,
+                UserEmail = GenerateEmailFromName(imported.FunctionalArchitectName),
+                Role = ApplicationRole.FunctionalArchitect
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.TechnicalArchitectName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.TechnicalArchitectId ?? Guid.NewGuid().ToString(),
+                UserName = imported.TechnicalArchitectName,
+                UserEmail = GenerateEmailFromName(imported.TechnicalArchitectName),
+                Role = ApplicationRole.TechnicalArchitect
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.OwnerName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.OwnerId ?? Guid.NewGuid().ToString(),
+                UserName = imported.OwnerName,
+                UserEmail = GenerateEmailFromName(imported.OwnerName),
+                Role = ApplicationRole.Owner
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.TechnicalLeadName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.TechnicalLeadId ?? Guid.NewGuid().ToString(),
+                UserName = imported.TechnicalLeadName,
+                UserEmail = GenerateEmailFromName(imported.TechnicalLeadName),
+                Role = ApplicationRole.TechnicalLead
+            });
+        }
+
+        return assignments;
+    }
+
+    private static string GenerateEmailFromName(string name)
+    {
+        // Generate a placeholder email from the name (will be updated when synced with Entra ID)
+        var normalized = name.ToLowerInvariant().Replace(" ", ".").Replace(",", "");
+        return $"{normalized}@example.com";
+    }
+
+    public Task<ServiceNowColumnMapping?> GetServiceNowColumnMappingAsync()
+    {
+        return Task.FromResult(_serviceNowColumnMapping);
+    }
+
+    public Task SaveServiceNowColumnMappingAsync(ServiceNowColumnMapping mapping)
+    {
+        _serviceNowColumnMapping = mapping;
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region App Name Mappings
+
+    public async Task<IReadOnlyList<AppNameMapping>> GetAppNameMappingsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.AppNameMappings.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task StoreAppNameMappingsAsync(IEnumerable<AppNameMapping> mappings)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        foreach (var mapping in mappings)
+        {
+            var existing = await context.AppNameMappings
+                .FirstOrDefaultAsync(m => m.ServiceNowAppName == mapping.ServiceNowAppName);
+
+            if (existing != null)
+            {
+                mapping.ToEntity(existing);
+            }
+            else
+            {
+                context.AppNameMappings.Add(mapping.ToEntity());
+            }
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    public async Task<AppNameMapping?> GetAppNameMappingByServiceNowNameAsync(string serviceNowAppName)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.AppNameMappings.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.ServiceNowAppName == serviceNowAppName);
+        return entity?.ToModel();
+    }
+
+    public async Task<AppNameMapping?> GetAppNameMappingBySharePointFolderAsync(string sharePointFolderName)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.AppNameMappings.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.SharePointFolderName == sharePointFolderName);
+        return entity?.ToModel();
+    }
+
+    public async Task<AppNameMapping?> GetAppNameMappingByRepoNameAsync(string repoName)
+    {
+        var mappings = await GetAppNameMappingsAsync();
+        return mappings.FirstOrDefault(m => m.AzureDevOpsRepoNames.Contains(repoName, StringComparer.OrdinalIgnoreCase));
+    }
+
+    public async Task ClearAppNameMappingsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        context.AppNameMappings.RemoveRange(context.AppNameMappings);
+        await context.SaveChangesAsync();
+    }
+
+    public Task<AppNameMappingConfig?> GetAppNameMappingConfigAsync()
+    {
+        return Task.FromResult(_appNameMappingConfig);
+    }
+
+    public Task SaveAppNameMappingConfigAsync(AppNameMappingConfig config)
+    {
+        _appNameMappingConfig = config;
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Capability Mappings
+
+    public async Task<IReadOnlyList<CapabilityMapping>> GetCapabilityMappingsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.CapabilityMappings.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task StoreCapabilityMappingsAsync(IEnumerable<CapabilityMapping> mappings)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        foreach (var mapping in mappings)
+        {
+            var existing = await context.CapabilityMappings
+                .FirstOrDefaultAsync(m => m.ApplicationName == mapping.ApplicationName);
+
+            if (existing != null)
+            {
+                mapping.ToEntity(existing);
+            }
+            else
+            {
+                context.CapabilityMappings.Add(mapping.ToEntity());
+            }
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    public async Task ClearCapabilityMappingsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        context.CapabilityMappings.RemoveRange(context.CapabilityMappings);
+        await context.SaveChangesAsync();
+    }
+
+    public async Task<string?> GetCapabilityForApplicationAsync(string applicationName)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.CapabilityMappings.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.ApplicationName == applicationName);
+        return entity?.Capability;
+    }
+
+    #endregion
+
+    #region SharePoint Folders
+
+    public async Task<IReadOnlyList<DiscoveredSharePointFolder>> GetDiscoveredSharePointFoldersAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.SharePointFolders.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task StoreDiscoveredSharePointFoldersAsync(IEnumerable<DiscoveredSharePointFolder> folders)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        foreach (var folder in folders)
+        {
+            var existing = await context.SharePointFolders
+                .FirstOrDefaultAsync(f => f.FullPath == folder.FullPath);
+
+            if (existing != null)
+            {
+                folder.ToEntity(existing);
+            }
+            else
+            {
+                context.SharePointFolders.Add(folder.ToEntity());
+            }
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    public async Task ClearDiscoveredSharePointFoldersAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        context.SharePointFolders.RemoveRange(context.SharePointFolders);
+        await context.SaveChangesAsync();
+    }
+
+    #endregion
+
+    #region Task Settings
+
+    public Task<TaskSchedulingConfig> GetTaskSchedulingConfigAsync()
+    {
+        return Task.FromResult(_taskSchedulingConfig);
+    }
+
+    public Task<TaskSchedulingConfig> UpdateTaskSchedulingConfigAsync(TaskSchedulingConfig config)
+    {
+        _taskSchedulingConfig = config;
+        return Task.FromResult(_taskSchedulingConfig);
+    }
+
+    #endregion
+
+    #region Audit Log
+
+    public async Task<IReadOnlyList<AuditLogEntry>> GetAuditLogAsync(AuditLogFilter? filter = null)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var query = context.AuditLogs.AsNoTracking().AsQueryable();
+
+        if (filter != null)
+        {
+            if (!string.IsNullOrEmpty(filter.Category))
+                query = query.Where(e => e.Category == filter.Category);
+            if (!string.IsNullOrEmpty(filter.EventType))
+                query = query.Where(e => e.EventType == filter.EventType);
+            if (!string.IsNullOrEmpty(filter.UserId))
+                query = query.Where(e => e.UserId == filter.UserId);
+            if (filter.StartDate.HasValue)
+                query = query.Where(e => e.Timestamp >= filter.StartDate.Value);
+            if (filter.EndDate.HasValue)
+                query = query.Where(e => e.Timestamp <= filter.EndDate.Value);
+        }
+
+        query = query.OrderByDescending(e => e.Timestamp);
+
+        if (filter?.Limit.HasValue == true)
+            query = query.Take(filter.Limit.Value);
+
+        var entities = await query.ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
+    }
+
+    public async Task RecordAuditLogAsync(AuditLogEntry entry)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        context.AuditLogs.Add(entry.ToEntity());
+        await context.SaveChangesAsync();
+    }
+
+    #endregion
+
+    #region System Settings
+
+    public Task<SystemSettings> GetSystemSettingsAsync()
+    {
+        return Task.FromResult(_systemSettings);
+    }
+
+    public Task<SystemSettings> UpdateSystemSettingsAsync(SystemSettings settings)
+    {
+        _systemSettings = settings;
+        return Task.FromResult(_systemSettings);
+    }
+
+    public Task<IReadOnlyList<DataSourceConfig>> GetDataSourceConfigsAsync()
+    {
+        return Task.FromResult<IReadOnlyList<DataSourceConfig>>(_dataSourceConfigs.ToList());
+    }
+
+    public Task<DataSourceConfig> UpdateDataSourceConfigAsync(DataSourceConfig config)
+    {
+        var existing = _dataSourceConfigs.FirstOrDefault(c => c.Id == config.Id);
+        if (existing != null)
+        {
+            _dataSourceConfigs.Remove(existing);
+        }
+        _dataSourceConfigs.Add(config);
+        return Task.FromResult(config);
+    }
+
+    public Task<DataSourceTestResult> TestDataSourceConnectionAsync(string dataSourceId)
+    {
+        return Task.FromResult(new DataSourceTestResult
+        {
+            Success = false,
+            Message = "Connection testing not implemented for database service"
+        });
+    }
+
+    #endregion
+}
