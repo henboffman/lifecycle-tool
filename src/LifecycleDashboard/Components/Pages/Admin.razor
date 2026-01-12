@@ -1,11 +1,16 @@
 @page "/admin"
 @using LifecycleDashboard.Models
 @using LifecycleDashboard.Services
+@using DataIntegration = LifecycleDashboard.Services.DataIntegration
 @inject IMockDataService DataService
 @inject IHealthScoringService HealthScoringService
 @inject IEolDataService EolDataService
 @inject ISecureStorageService SecureStorage
 @inject IAiRecommendationService AiService
+@inject DataIntegration.IAzureDevOpsService AzureDevOpsService
+@inject DataIntegration.ISharePointService SharePointService
+@inject DataIntegration.IServiceNowService ServiceNowService
+@inject DataIntegration.IIisDatabaseService IisDatabaseService
 @inject NavigationManager Navigation
 
 <PageTitle>Administration - Lifecycle Dashboard</PageTitle>
@@ -2465,7 +2470,52 @@
 
     private async Task TestDataSourceConnection(string dataSourceId)
     {
-        _dataSourceTestResult = await DataService.TestDataSourceConnectionAsync(dataSourceId);
+        var dataSource = _dataSourceConfigs.FirstOrDefault(d => d.Id == dataSourceId);
+        if (dataSource == null)
+        {
+            _dataSourceTestResult = new DataSourceTestResult
+            {
+                Success = false,
+                Message = "Data source configuration not found"
+            };
+            return;
+        }
+
+        _dataSourceTestResult = new DataSourceTestResult
+        {
+            Success = false,
+            Message = "Testing connection..."
+        };
+        StateHasChanged();
+
+        try
+        {
+            // Use the actual data integration services for real connection tests
+            DataIntegration.ConnectionTestResult result = dataSource.Type switch
+            {
+                DataSourceType.AzureDevOps => await AzureDevOpsService.TestConnectionAsync(),
+                DataSourceType.SharePoint => await SharePointService.TestConnectionAsync(),
+                DataSourceType.ServiceNow => await ServiceNowService.TestConnectionAsync(),
+                DataSourceType.IisDatabase => await IisDatabaseService.TestConnectionAsync(),
+                _ => DataIntegration.ConnectionTestResult.Failed("Unknown data source type")
+            };
+
+            _dataSourceTestResult = new DataSourceTestResult
+            {
+                Success = result.Success,
+                Message = result.Message ?? (result.Success ? "Connection successful" : "Connection failed"),
+                ResponseTime = result.ResponseTime,
+                Version = result.Version
+            };
+        }
+        catch (Exception ex)
+        {
+            _dataSourceTestResult = new DataSourceTestResult
+            {
+                Success = false,
+                Message = $"Connection error: {ex.Message}"
+            };
+        }
     }
 
     private static string GetDataSourceIcon(DataSourceType type) => type switch

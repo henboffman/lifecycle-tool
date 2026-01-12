@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject IWebHostEnvironment Environment
 
 <div class="page">
     <div class="sidebar">
@@ -8,12 +9,18 @@
     <main>
         <div class="top-row px-4">
             <div class="app-info">
-                <span class="environment-badge">Development</span>
-                <span class="mock-data-indicator">Mock Data Mode</span>
+                <span class="environment-badge @GetEnvironmentClass()">@Environment.EnvironmentName</span>
+                @if (Environment.IsDevelopment())
+                {
+                    <span class="mock-data-indicator">Mock Data Mode</span>
+                }
             </div>
-            <button class="devmode-toggle" @onclick="ToggleDevSidebar" title="Toggle Dev Mode Sidebar (Ctrl+Shift+D)">
-                <i class="bi bi-tools"></i> Dev
-            </button>
+            @if (Environment.IsDevelopment())
+            {
+                <button class="devmode-toggle" @onclick="ToggleDevSidebar" title="Toggle Dev Mode Sidebar (Ctrl+Shift+D)">
+                    <i class="bi bi-tools"></i> Dev
+                </button>
+            }
         </div>
 
         <article class="content px-4">
@@ -21,7 +28,10 @@
         </article>
     </main>
 
-    <DevModeSidebar @bind-IsVisible="_showDevSidebar" />
+    @if (Environment.IsDevelopment())
+    {
+        <DevModeSidebar @bind-IsVisible="_showDevSidebar" />
+    }
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
@@ -37,4 +47,12 @@
     {
         _showDevSidebar = !_showDevSidebar;
     }
+
+    private string GetEnvironmentClass() => Environment.EnvironmentName switch
+    {
+        "Development" => "env-dev",
+        "Staging" => "env-staging",
+        "Production" => "env-prod",
+        _ => "env-unknown"
+    };
 }

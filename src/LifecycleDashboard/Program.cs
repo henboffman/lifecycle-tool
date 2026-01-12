@@ -4,6 +4,13 @@ using LifecycleDashboard.Services.DataIntegration;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Default to Development environment if not explicitly set
+// This ensures mock data mode is used unless Production is explicitly configured
+if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")))
+{
+    builder.Environment.EnvironmentName = "Development";
+}
+
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -42,10 +49,32 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
+else
+{
+    // In development, show detailed errors
+    app.UseDeveloperExceptionPage();
+}
+
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseAntiforgery();
 
-app.MapStaticAssets();
+// Static files configuration
+// UseStaticFiles provides fallback when MapStaticAssets manifest isn't available
+// (e.g., running from bin folder, different machine, or without proper build)
+app.UseStaticFiles();
+
+// MapStaticAssets enables fingerprinted assets for cache busting in production
+// This may fail silently if manifest isn't available, UseStaticFiles above provides fallback
+try
+{
+    app.MapStaticAssets();
+}
+catch (InvalidOperationException)
+{
+    // Static asset manifest not available - UseStaticFiles fallback is already configured
+    Console.WriteLine("Note: Static asset manifest not found. Using standard static file serving.");
+}
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
