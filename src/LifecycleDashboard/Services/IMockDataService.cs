@@ -197,6 +197,28 @@ public interface IMockDataService
     /// </summary>
     event EventHandler<bool>? MockDataModeChanged;
 
+    // Synced Repository Data (from Azure DevOps)
+
+    /// <summary>
+    /// Gets all synced repositories from Azure DevOps.
+    /// </summary>
+    Task<IReadOnlyList<SyncedRepository>> GetSyncedRepositoriesAsync();
+
+    /// <summary>
+    /// Stores synced repositories from Azure DevOps.
+    /// </summary>
+    Task StoreSyncedRepositoriesAsync(IEnumerable<SyncedRepository> repositories);
+
+    /// <summary>
+    /// Gets a synced repository by ID.
+    /// </summary>
+    Task<SyncedRepository?> GetSyncedRepositoryAsync(string repositoryId);
+
+    /// <summary>
+    /// Clears all synced repository data.
+    /// </summary>
+    Task ClearSyncedRepositoriesAsync();
+
     // User Management
 
     /// <summary>
@@ -410,4 +432,65 @@ public record FrameworkEolDetail
     public required FrameworkVersion Framework { get; init; }
     public int ApplicationCount { get; init; }
     public List<string> ApplicationNames { get; init; } = [];
+}
+
+/// <summary>
+/// Repository synced from Azure DevOps with detected tech stack and metadata.
+/// </summary>
+public record SyncedRepository
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public required string Url { get; init; }
+    public string? CloneUrl { get; init; }
+    public string? DefaultBranch { get; init; }
+    public string? ProjectName { get; init; }
+    public long? SizeBytes { get; init; }
+    public bool IsDisabled { get; init; }
+
+    // Sync metadata
+    public DateTimeOffset SyncedAt { get; init; } = DateTimeOffset.UtcNow;
+    public string? SyncedBy { get; init; }
+
+    // Detected tech stack
+    public string? PrimaryStack { get; init; }
+    public List<string> Frameworks { get; init; } = [];
+    public List<string> Languages { get; init; } = [];
+    public string? TargetFramework { get; init; }
+    public string? DetectedPattern { get; init; }
+
+    // Commit info
+    public int? TotalCommits { get; init; }
+    public DateTimeOffset? LastCommitDate { get; init; }
+    public List<string> Contributors { get; init; } = [];
+
+    // Package info
+    public int NuGetPackageCount { get; init; }
+    public int NpmPackageCount { get; init; }
+    public List<SyncedPackageReference> Packages { get; init; } = [];
+
+    // Build/Pipeline info
+    public string? LastBuildStatus { get; init; }
+    public string? LastBuildResult { get; init; }
+    public DateTimeOffset? LastBuildDate { get; init; }
+
+    // README status
+    public bool HasReadme { get; init; }
+    public int? ReadmeQualityScore { get; init; }
+
+    // Linked application (if mapped)
+    public string? LinkedApplicationId { get; init; }
+    public string? LinkedApplicationName { get; init; }
+}
+
+/// <summary>
+/// Package reference from a synced repository.
+/// </summary>
+public record SyncedPackageReference
+{
+    public required string Name { get; init; }
+    public required string Version { get; init; }
+    public required string PackageManager { get; init; }
+    public string? SourceFile { get; init; }
+    public bool IsDevelopmentDependency { get; init; }
 }

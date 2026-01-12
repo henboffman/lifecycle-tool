@@ -1,0 +1,487 @@
+@page "/repositories"
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+
+<PageTitle>Repositories - Lifecycle Dashboard</PageTitle>
+
+<div class="repositories-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Repositories</h1>
+            <p class="subtitle">Azure DevOps repositories synced from your organization</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline" @onclick="RefreshData">
+                <i class="bi bi-arrow-repeat"></i> Refresh
+            </button>
+            <button class="btn btn-primary" @onclick="GoToDataJobs">
+                <i class="bi bi-cloud-download"></i> Sync from Azure DevOps
+            </button>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <span>Loading repositories...</span>
+        </div>
+    }
+    else if (_repositories.Count == 0)
+    {
+        <div class="empty-state">
+            <i class="bi bi-git empty-icon"></i>
+            <h2>No Repositories Synced</h2>
+            <p>Run a sync from the Data Jobs page to pull repository data from Azure DevOps.</p>
+            <button class="btn btn-primary" @onclick="GoToDataJobs">
+                <i class="bi bi-arrow-right"></i> Go to Data Jobs
+            </button>
+        </div>
+    }
+    else
+    {
+        <!-- Stats Summary -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">@_repositories.Count</div>
+                <div class="stat-label">Total Repositories</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@_repositories.Count(r => !string.IsNullOrEmpty(r.PrimaryStack))</div>
+                <div class="stat-label">With Tech Stack</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@_repositories.Count(r => r.HasReadme)</div>
+                <div class="stat-label">With README</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@_repositories.Sum(r => r.NuGetPackageCount + r.NpmPackageCount)</div>
+                <div class="stat-label">Total Packages</div>
+            </div>
+        </section>
+
+        <!-- Filters -->
+        <section class="filters-section">
+            <div class="search-box">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search repositories..." @bind="_searchTerm" @bind:event="oninput" @bind:after="ApplyFilters" />
+            </div>
+            <select class="filter-select" @bind="_stackFilter" @bind:after="ApplyFilters">
+                <option value="">All Tech Stacks</option>
+                @foreach (var stack in _uniqueStacks)
+                {
+                    <option value="@stack">@stack</option>
+                }
+            </select>
+            <select class="filter-select" @bind="_hasReadmeFilter" @bind:after="ApplyFilters">
+                <option value="">README Status</option>
+                <option value="true">Has README</option>
+                <option value="false">No README</option>
+            </select>
+        </section>
+
+        <!-- Repository Table -->
+        <section class="table-section">
+            <table class="repo-table">
+                <thead>
+                    <tr>
+                        <th class="sortable" @onclick='() => SortBy("Name")'>
+                            Name
+                            @if (_sortColumn == "Name") { <i class="bi @(_sortAscending ? "bi-sort-alpha-down" : "bi-sort-alpha-up")"></i> }
+                        </th>
+                        <th>Tech Stack</th>
+                        <th>Frameworks</th>
+                        <th class="sortable" @onclick='() => SortBy("Commits")'>
+                            Commits
+                            @if (_sortColumn == "Commits") { <i class="bi @(_sortAscending ? "bi-sort-numeric-down" : "bi-sort-numeric-up")"></i> }
+                        </th>
+                        <th>Packages</th>
+                        <th>README</th>
+                        <th class="sortable" @onclick='() => SortBy("LastSync")'>
+                            Last Synced
+                            @if (_sortColumn == "LastSync") { <i class="bi @(_sortAscending ? "bi-sort-down" : "bi-sort-up")"></i> }
+                        </th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var repo in _filteredRepositories)
+                    {
+                        <tr @onclick="() => SelectRepo(repo)" class="@(_selectedRepo?.Id == repo.Id ? "selected" : "")">
+                            <td class="repo-name">
+                                <i class="bi bi-git"></i>
+                                <span>@repo.Name</span>
+                                @if (repo.IsDisabled)
+                                {
+                                    <span class="badge badge-warning">Disabled</span>
+                                }
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(repo.PrimaryStack))
+                                {
+                                    <span class="tech-badge @GetStackClass(repo.PrimaryStack)">@repo.PrimaryStack</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">Unknown</span>
+                                }
+                            </td>
+                            <td class="frameworks-cell">
+                                @foreach (var fw in repo.Frameworks.Take(3))
+                                {
+                                    <span class="framework-chip">@fw</span>
+                                }
+                                @if (repo.Frameworks.Count > 3)
+                                {
+                                    <span class="more-badge">+@(repo.Frameworks.Count - 3)</span>
+                                }
+                            </td>
+                            <td class="number-cell">@(repo.TotalCommits?.ToString("N0") ?? "-")</td>
+                            <td class="number-cell">
+                                @if (repo.NuGetPackageCount > 0 || repo.NpmPackageCount > 0)
+                                {
+                                    <span title="NuGet: @repo.NuGetPackageCount, npm: @repo.NpmPackageCount">
+                                        @(repo.NuGetPackageCount + repo.NpmPackageCount)
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                            <td>
+                                @if (repo.HasReadme)
+                                {
+                                    <span class="readme-status has-readme" title="Quality: @(repo.ReadmeQualityScore ?? 0)%">
+                                        <i class="bi bi-check-circle-fill"></i>
+                                        @if (repo.ReadmeQualityScore.HasValue)
+                                        {
+                                            <span class="quality-score">@repo.ReadmeQualityScore%</span>
+                                        }
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="readme-status no-readme">
+                                        <i class="bi bi-x-circle"></i>
+                                    </span>
+                                }
+                            </td>
+                            <td class="date-cell">@FormatDate(repo.SyncedAt)</td>
+                            <td class="actions-cell">
+                                <a href="@repo.Url" target="_blank" class="btn btn-sm btn-outline" title="Open in Azure DevOps">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div class="table-footer">
+                Showing @_filteredRepositories.Count of @_repositories.Count repositories
+            </div>
+        </section>
+
+        <!-- Detail Panel -->
+        @if (_selectedRepo != null)
+        {
+            <div class="detail-panel">
+                <div class="detail-header">
+                    <h2>@_selectedRepo.Name</h2>
+                    <button class="btn-close" @onclick="() => _selectedRepo = null">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+
+                <div class="detail-content">
+                    <div class="detail-section">
+                        <h3>Repository Info</h3>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <span class="label">Default Branch</span>
+                                <span class="value">@(_selectedRepo.DefaultBranch ?? "N/A")</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">Project</span>
+                                <span class="value">@(_selectedRepo.ProjectName ?? "N/A")</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">Size</span>
+                                <span class="value">@FormatSize(_selectedRepo.SizeBytes)</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">Last Commit</span>
+                                <span class="value">@FormatDate(_selectedRepo.LastCommitDate)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_selectedRepo.PrimaryStack))
+                    {
+                        <div class="detail-section">
+                            <h3>Technology Stack</h3>
+                            <div class="stack-info">
+                                <span class="tech-badge large @GetStackClass(_selectedRepo.PrimaryStack)">@_selectedRepo.PrimaryStack</span>
+                                @if (!string.IsNullOrEmpty(_selectedRepo.TargetFramework))
+                                {
+                                    <span class="target-framework">Target: @_selectedRepo.TargetFramework</span>
+                                }
+                            </div>
+                            @if (_selectedRepo.Frameworks.Count > 0)
+                            {
+                                <div class="frameworks-list">
+                                    <span class="label">Frameworks:</span>
+                                    @foreach (var fw in _selectedRepo.Frameworks)
+                                    {
+                                        <span class="framework-chip">@fw</span>
+                                    }
+                                </div>
+                            }
+                            @if (_selectedRepo.Languages.Count > 0)
+                            {
+                                <div class="languages-list">
+                                    <span class="label">Languages:</span>
+                                    @foreach (var lang in _selectedRepo.Languages)
+                                    {
+                                        <span class="lang-chip">@lang</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (_selectedRepo.Contributors.Count > 0)
+                    {
+                        <div class="detail-section">
+                            <h3>Contributors (@_selectedRepo.Contributors.Count)</h3>
+                            <div class="contributors-list">
+                                @foreach (var contributor in _selectedRepo.Contributors.Take(10))
+                                {
+                                    <span class="contributor-chip">@contributor</span>
+                                }
+                                @if (_selectedRepo.Contributors.Count > 10)
+                                {
+                                    <span class="more-contributors">+@(_selectedRepo.Contributors.Count - 10) more</span>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (_selectedRepo.Packages.Count > 0)
+                    {
+                        <div class="detail-section">
+                            <h3>Packages (@_selectedRepo.Packages.Count)</h3>
+                            <div class="packages-table-container">
+                                <table class="packages-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Version</th>
+                                            <th>Manager</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var pkg in _selectedRepo.Packages.Take(20))
+                                        {
+                                            <tr>
+                                                <td>@pkg.Name</td>
+                                                <td>@pkg.Version</td>
+                                                <td><span class="pkg-manager @pkg.PackageManager.ToLower()">@pkg.PackageManager</span></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                                @if (_selectedRepo.Packages.Count > 20)
+                                {
+                                    <div class="packages-footer">Showing 20 of @_selectedRepo.Packages.Count packages</div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_selectedRepo.LastBuildStatus))
+                    {
+                        <div class="detail-section">
+                            <h3>Build Status</h3>
+                            <div class="build-info">
+                                <span class="build-status @GetBuildStatusClass(_selectedRepo.LastBuildResult)">
+                                    @_selectedRepo.LastBuildResult
+                                </span>
+                                @if (_selectedRepo.LastBuildDate.HasValue)
+                                {
+                                    <span class="build-date">@FormatDate(_selectedRepo.LastBuildDate)</span>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <div class="detail-section">
+                        <h3>Links</h3>
+                        <div class="links-list">
+                            <a href="@_selectedRepo.Url" target="_blank" class="link-btn">
+                                <i class="bi bi-box-arrow-up-right"></i> Open in Azure DevOps
+                            </a>
+                            @if (!string.IsNullOrEmpty(_selectedRepo.CloneUrl))
+                            {
+                                <button class="link-btn" @onclick="() => CopyToClipboard(_selectedRepo.CloneUrl!)">
+                                    <i class="bi bi-clipboard"></i> Copy Clone URL
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<SyncedRepository> _repositories = [];
+    private List<SyncedRepository> _filteredRepositories = [];
+    private SyncedRepository? _selectedRepo;
+    private bool _loading = true;
+
+    private string _searchTerm = "";
+    private string _stackFilter = "";
+    private string _hasReadmeFilter = "";
+    private string _sortColumn = "Name";
+    private bool _sortAscending = true;
+
+    private List<string> _uniqueStacks = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _repositories = (await DataService.GetSyncedRepositoriesAsync()).ToList();
+        _uniqueStacks = _repositories
+            .Where(r => !string.IsNullOrEmpty(r.PrimaryStack))
+            .Select(r => r.PrimaryStack!)
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+        ApplyFilters();
+        _loading = false;
+    }
+
+    private async Task RefreshData()
+    {
+        await LoadDataAsync();
+    }
+
+    private void GoToDataJobs()
+    {
+        Navigation.NavigateTo("/data-jobs");
+    }
+
+    private void ApplyFilters()
+    {
+        var filtered = _repositories.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_searchTerm))
+        {
+            var term = _searchTerm.ToLower();
+            filtered = filtered.Where(r =>
+                r.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (r.PrimaryStack?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                r.Frameworks.Any(f => f.Contains(term, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (!string.IsNullOrEmpty(_stackFilter))
+        {
+            filtered = filtered.Where(r => r.PrimaryStack == _stackFilter);
+        }
+
+        if (!string.IsNullOrEmpty(_hasReadmeFilter))
+        {
+            var hasReadme = _hasReadmeFilter == "true";
+            filtered = filtered.Where(r => r.HasReadme == hasReadme);
+        }
+
+        // Apply sorting
+        filtered = _sortColumn switch
+        {
+            "Name" => _sortAscending ? filtered.OrderBy(r => r.Name) : filtered.OrderByDescending(r => r.Name),
+            "Commits" => _sortAscending ? filtered.OrderBy(r => r.TotalCommits ?? 0) : filtered.OrderByDescending(r => r.TotalCommits ?? 0),
+            "LastSync" => _sortAscending ? filtered.OrderBy(r => r.SyncedAt) : filtered.OrderByDescending(r => r.SyncedAt),
+            _ => filtered.OrderBy(r => r.Name)
+        };
+
+        _filteredRepositories = filtered.ToList();
+    }
+
+    private void SortBy(string column)
+    {
+        if (_sortColumn == column)
+        {
+            _sortAscending = !_sortAscending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = true;
+        }
+        ApplyFilters();
+    }
+
+    private void SelectRepo(SyncedRepository repo)
+    {
+        _selectedRepo = _selectedRepo?.Id == repo.Id ? null : repo;
+    }
+
+    private static string GetStackClass(string? stack) => stack?.ToLower() switch
+    {
+        "dotnetcore" or ".net core" => "dotnet",
+        "dotnetframework" or ".net framework" => "dotnet-fw",
+        "blazor" => "blazor",
+        "nodejs" or "node.js" => "nodejs",
+        "python" => "python",
+        "java" => "java",
+        _ => "other"
+    };
+
+    private static string GetBuildStatusClass(string? result) => result?.ToLower() switch
+    {
+        "succeeded" => "success",
+        "partiallysucceeded" => "warning",
+        "failed" => "error",
+        "canceled" => "canceled",
+        _ => ""
+    };
+
+    private static string FormatDate(DateTimeOffset? date)
+    {
+        if (!date.HasValue) return "-";
+        var diff = DateTimeOffset.UtcNow - date.Value;
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
+        return date.Value.ToString("MMM d, yyyy");
+    }
+
+    private static string FormatSize(long? bytes)
+    {
+        if (!bytes.HasValue || bytes == 0) return "-";
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes.Value;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        // This would need JS interop in a real implementation
+        await Task.CompletedTask;
+    }
+}

@@ -2801,4 +2801,57 @@ public class MockDataService : IMockDataService
     }
 
     #endregion
+
+    #region Synced Repository Storage
+
+    private readonly List<SyncedRepository> _syncedRepositories = [];
+
+    public Task<IReadOnlyList<SyncedRepository>> GetSyncedRepositoriesAsync()
+    {
+        return Task.FromResult<IReadOnlyList<SyncedRepository>>(
+            _syncedRepositories.OrderBy(r => r.Name).ToList());
+    }
+
+    public Task StoreSyncedRepositoriesAsync(IEnumerable<SyncedRepository> repositories)
+    {
+        foreach (var repo in repositories)
+        {
+            var existingIndex = _syncedRepositories.FindIndex(r => r.Id == repo.Id);
+            if (existingIndex >= 0)
+            {
+                _syncedRepositories[existingIndex] = repo;
+            }
+            else
+            {
+                _syncedRepositories.Add(repo);
+            }
+        }
+
+        RecordAuditLogAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            EventType = "RepositoriesSynced",
+            Category = "Sync",
+            Message = $"Synced {repositories.Count()} repositories from Azure DevOps",
+            UserId = "system",
+            UserName = "System",
+            EntityType = "Repository"
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task<SyncedRepository?> GetSyncedRepositoryAsync(string repositoryId)
+    {
+        var repo = _syncedRepositories.FirstOrDefault(r => r.Id == repositoryId);
+        return Task.FromResult(repo);
+    }
+
+    public Task ClearSyncedRepositoriesAsync()
+    {
+        _syncedRepositories.Clear();
+        return Task.CompletedTask;
+    }
+
+    #endregion
 }

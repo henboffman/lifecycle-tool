@@ -425,7 +425,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
     {
         var startTime = DateTimeOffset.UtcNow;
         var errors = new List<SyncError>();
-        var totalRepos = 0;
+        var syncedRepos = new List<SyncedRepository>();
 
         _logger.LogInformation("Starting Azure DevOps sync...");
 
@@ -445,25 +445,120 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
             }
 
             var repos = reposResult.Data ?? [];
-            totalRepos = repos.Count;
-            _logger.LogInformation("Found {Count} repositories in Azure DevOps", totalRepos);
+            _logger.LogInformation("Found {Count} repositories in Azure DevOps", repos.Count);
 
-            // Step 2: Log each repository found
+            // Step 2: Convert each repo to a SyncedRepository and store it
             foreach (var repo in repos)
             {
-                _logger.LogInformation("  - {RepoName} ({Branch})", repo.Name, repo.DefaultBranch ?? "no branch");
+                cancellationToken.ThrowIfCancellationRequested();
+                _logger.LogInformation("Processing repository: {RepoName}", repo.Name);
+
+                var syncedRepo = new SyncedRepository
+                {
+                    Id = repo.Id,
+                    Name = repo.Name,
+                    Url = repo.Url,
+                    CloneUrl = repo.CloneUrl,
+                    DefaultBranch = repo.DefaultBranch,
+                    ProjectName = repo.ProjectName,
+                    SizeBytes = repo.SizeBytes,
+                    IsDisabled = repo.IsDisabled,
+                    SyncedAt = DateTimeOffset.UtcNow,
+                    SyncedBy = "DataSyncOrchestrator"
+                };
+
+                // Try to get additional details (tech stack, commits, etc.) - but don't fail the whole sync if one repo fails
+                try
+                {
+                    // Get tech stack
+                    var techStackResult = await _azureDevOpsService.DetectTechStackAsync(repo.Id);
+                    if (techStackResult.Success && techStackResult.Data != null)
+                    {
+                        syncedRepo = syncedRepo with
+                        {
+                            PrimaryStack = techStackResult.Data.PrimaryStack.ToString(),
+                            Frameworks = techStackResult.Data.Frameworks,
+                            Languages = techStackResult.Data.Languages,
+                            TargetFramework = techStackResult.Data.TargetFramework,
+                            DetectedPattern = techStackResult.Data.DetectedPattern
+                        };
+                    }
+
+                    // Get commit history
+                    var commitsResult = await _azureDevOpsService.GetCommitHistoryAsync(repo.Id, 365);
+                    if (commitsResult.Success && commitsResult.Data != null)
+                    {
+                        syncedRepo = syncedRepo with
+                        {
+                            TotalCommits = commitsResult.Data.TotalCommits,
+                            LastCommitDate = commitsResult.Data.LastCommitDate,
+                            Contributors = commitsResult.Data.Contributors
+                        };
+                    }
+
+                    // Get packages
+                    var packagesResult = await _azureDevOpsService.GetPackagesAsync(repo.Id);
+                    if (packagesResult.Success && packagesResult.Data != null)
+                    {
+                        syncedRepo = syncedRepo with
+                        {
+                            NuGetPackageCount = packagesResult.Data.Count(p => p.PackageManager == "NuGet"),
+                            NpmPackageCount = packagesResult.Data.Count(p => p.PackageManager == "npm"),
+                            Packages = packagesResult.Data.Select(p => new SyncedPackageReference
+                            {
+                                Name = p.Name,
+                                Version = p.Version,
+                                PackageManager = p.PackageManager,
+                                SourceFile = p.SourceFile,
+                                IsDevelopmentDependency = p.IsDevelopmentDependency
+                            }).ToList()
+                        };
+                    }
+
+                    // Get README status
+                    var readmeResult = await _azureDevOpsService.GetReadmeStatusAsync(repo.Id);
+                    if (readmeResult.Success && readmeResult.Data != null)
+                    {
+                        syncedRepo = syncedRepo with
+                        {
+                            HasReadme = readmeResult.Data.Exists,
+                            ReadmeQualityScore = readmeResult.Data.QualityScore
+                        };
+                    }
+
+                    // Get pipeline/build status
+                    var pipelineResult = await _azureDevOpsService.GetPipelineStatusAsync(repo.Id);
+                    if (pipelineResult.Success && pipelineResult.Data != null)
+                    {
+                        syncedRepo = syncedRepo with
+                        {
+                            LastBuildStatus = pipelineResult.Data.Status.ToString(),
+                            LastBuildResult = pipelineResult.Data.Result.ToString(),
+                            LastBuildDate = pipelineResult.Data.FinishTime ?? pipelineResult.Data.StartTime
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to get additional details for repo {RepoName}, continuing with basic info", repo.Name);
+                    errors.Add(new SyncError { Message = $"Partial sync for {repo.Name}: {ex.Message}" });
+                }
+
+                syncedRepos.Add(syncedRepo);
             }
 
-            // Step 3: For each repo, optionally get more details (tech stack, etc.)
-            // For now, just return the count of repos found
-            _logger.LogInformation("Azure DevOps sync completed. Found {Count} repositories.", totalRepos);
+            // Step 3: Store all synced repositories
+            _logger.LogInformation("Storing {Count} synced repositories...", syncedRepos.Count);
+            await _mockDataService.StoreSyncedRepositoriesAsync(syncedRepos);
+
+            _logger.LogInformation("Azure DevOps sync completed. Processed {Count} repositories.", syncedRepos.Count);
 
             return new DataSyncResult
             {
                 Success = true,
                 DataSource = DataSourceType.AzureDevOps,
-                RecordsProcessed = totalRepos,
-                RecordsCreated = totalRepos, // All repos are "new" in this simple sync
+                RecordsProcessed = syncedRepos.Count,
+                RecordsCreated = syncedRepos.Count,
                 Errors = errors,
                 StartTime = startTime,
                 EndTime = DateTimeOffset.UtcNow
