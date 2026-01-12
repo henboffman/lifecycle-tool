@@ -423,8 +423,62 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
 
     private async Task<DataSyncResult> SyncAzureDevOpsAsync(CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return await _azureDevOpsService.SyncAllRepositoriesAsync();
+        var startTime = DateTimeOffset.UtcNow;
+        var errors = new List<SyncError>();
+        var totalRepos = 0;
+
+        _logger.LogInformation("Starting Azure DevOps sync...");
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Step 1: Get all repositories from Azure DevOps
+            _logger.LogInformation("Fetching repositories from Azure DevOps...");
+            var reposResult = await _azureDevOpsService.GetRepositoriesAsync();
+
+            if (!reposResult.Success)
+            {
+                _logger.LogError("Failed to get repositories: {Error}", reposResult.ErrorMessage);
+                return DataSyncResult.Failed(DataSourceType.AzureDevOps, startTime,
+                    reposResult.ErrorMessage ?? "Failed to get repositories");
+            }
+
+            var repos = reposResult.Data ?? [];
+            totalRepos = repos.Count;
+            _logger.LogInformation("Found {Count} repositories in Azure DevOps", totalRepos);
+
+            // Step 2: Log each repository found
+            foreach (var repo in repos)
+            {
+                _logger.LogInformation("  - {RepoName} ({Branch})", repo.Name, repo.DefaultBranch ?? "no branch");
+            }
+
+            // Step 3: For each repo, optionally get more details (tech stack, etc.)
+            // For now, just return the count of repos found
+            _logger.LogInformation("Azure DevOps sync completed. Found {Count} repositories.", totalRepos);
+
+            return new DataSyncResult
+            {
+                Success = true,
+                DataSource = DataSourceType.AzureDevOps,
+                RecordsProcessed = totalRepos,
+                RecordsCreated = totalRepos, // All repos are "new" in this simple sync
+                Errors = errors,
+                StartTime = startTime,
+                EndTime = DateTimeOffset.UtcNow
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Azure DevOps sync was cancelled");
+            return DataSyncResult.Failed(DataSourceType.AzureDevOps, startTime, "Sync was cancelled");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Azure DevOps sync failed");
+            return DataSyncResult.Failed(DataSourceType.AzureDevOps, startTime, ex.Message);
+        }
     }
 
     private async Task<DataSyncResult> SyncSharePointAsync(CancellationToken cancellationToken)

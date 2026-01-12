@@ -97,26 +97,41 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             }
 
             var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
-            var response = await SendRequestAsync($"{baseUrl}{project}/_apis/git/repositories?api-version=7.1", auth);
+            var requestUrl = $"{baseUrl}{project}/_apis/git/repositories?api-version=7.1";
+
+            _logger.LogInformation("Fetching repositories from: {Url}", requestUrl);
+
+            var response = await SendRequestAsync(requestUrl, auth);
+
+            _logger.LogInformation("Response status: {Status}", response.StatusCode);
 
             if (!response.IsSuccessStatusCode)
             {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("API error response: {Content}", errorContent);
                 return DataSyncResult<List<AzureDevOpsRepository>>.Failed(
-                    DataSourceType.AzureDevOps, startTime, $"API returned {response.StatusCode}");
+                    DataSourceType.AzureDevOps, startTime, $"API returned {response.StatusCode}: {errorContent}");
             }
 
             var content = await response.Content.ReadAsStringAsync();
+            _logger.LogDebug("Response content length: {Length} chars", content.Length);
+
             var jsonDoc = JsonDocument.Parse(content);
             var repositories = new List<AzureDevOpsRepository>();
 
             if (jsonDoc.RootElement.TryGetProperty("value", out var reposElement))
             {
+                _logger.LogInformation("Found {Count} repositories in response", reposElement.GetArrayLength());
+
                 foreach (var repo in reposElement.EnumerateArray())
                 {
+                    var repoName = repo.GetProperty("name").GetString() ?? "";
+                    _logger.LogDebug("Processing repository: {Name}", repoName);
+
                     repositories.Add(new AzureDevOpsRepository
                     {
                         Id = repo.GetProperty("id").GetString() ?? "",
-                        Name = repo.GetProperty("name").GetString() ?? "",
+                        Name = repoName,
                         Url = repo.GetProperty("webUrl").GetString() ?? "",
                         CloneUrl = repo.TryGetProperty("remoteUrl", out var remote) ? remote.GetString() : null,
                         DefaultBranch = repo.TryGetProperty("defaultBranch", out var branch)
@@ -130,6 +145,13 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     });
                 }
             }
+            else
+            {
+                _logger.LogWarning("No 'value' property found in response. Root properties: {Props}",
+                    string.Join(", ", jsonDoc.RootElement.EnumerateObject().Select(p => p.Name)));
+            }
+
+            _logger.LogInformation("Successfully parsed {Count} repositories", repositories.Count);
 
             return new DataSyncResult<List<AzureDevOpsRepository>>
             {
@@ -165,9 +187,9 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
             var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
 
-            // Get the file tree
+            // Get the file tree (use $top=8000 to get all files)
             var itemsResponse = await SendRequestAsync(
-                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1", auth);
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?$top=8000&recursionLevel=Full&api-version=7.1", auth);
 
             if (!itemsResponse.IsSuccessStatusCode)
             {
@@ -267,9 +289,9 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
             var packages = new List<PackageReference>();
 
-            // Get the file tree
+            // Get the file tree (use $top=8000 to get all files)
             var itemsResponse = await SendRequestAsync(
-                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?recursionLevel=Full&api-version=7.1", auth);
+                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?$top=8000&recursionLevel=Full&api-version=7.1", auth);
 
             if (!itemsResponse.IsSuccessStatusCode)
             {
