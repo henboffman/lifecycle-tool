@@ -10,12 +10,22 @@
     - Release Notes
 *@
 
+@inject IMockDataService MockDataService
+@implements IDisposable
+
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">
             <i class="bi bi-bar-chart-fill brand-icon"></i>
             Lifecycle Dashboard
         </a>
+        @* Mock Data Toggle *@
+        <button class="btn btn-sm @(_mockDataEnabled ? "btn-warning" : "btn-outline-secondary")"
+                @onclick="ToggleMockData"
+                title="@(_mockDataEnabled ? "Mock data is ON - click to use real data" : "Mock data is OFF - click to enable mock data")">
+            <i class="bi @(_mockDataEnabled ? "bi-database-fill" : "bi-database")"></i>
+            @(_mockDataEnabled ? "Mock" : "Live")
+        </button>
     </div>
 </div>
 
@@ -101,5 +111,40 @@
                 <i class="bi bi-journal-text nav-icon" aria-hidden="true"></i> Release Notes
             </NavLink>
         </div>
+
+        @* Mock Data Status Indicator *@
+        <div class="nav-item px-3 mt-3">
+            <div class="mock-data-indicator @(_mockDataEnabled ? "mock-enabled" : "mock-disabled")">
+                <i class="bi @(_mockDataEnabled ? "bi-database-fill-gear" : "bi-database-check")"></i>
+                <span>@(_mockDataEnabled ? "Using Mock Data" : "Using Live Data")</span>
+            </div>
+        </div>
     </nav>
 </div>
+
+@code {
+    private bool _mockDataEnabled = true;
+
+    protected override void OnInitialized()
+    {
+        _mockDataEnabled = MockDataService.IsMockDataEnabled;
+        MockDataService.MockDataModeChanged += OnMockDataModeChanged;
+    }
+
+    private async Task ToggleMockData()
+    {
+        _mockDataEnabled = !_mockDataEnabled;
+        await MockDataService.SetMockDataEnabledAsync(_mockDataEnabled);
+    }
+
+    private void OnMockDataModeChanged(object? sender, bool enabled)
+    {
+        _mockDataEnabled = enabled;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        MockDataService.MockDataModeChanged -= OnMockDataModeChanged;
+    }
+}

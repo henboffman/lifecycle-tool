@@ -4,10 +4,20 @@
 @inject IMockDataService DataService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>Dashboard - Lifecycle Dashboard</PageTitle>
 
 <div class="dashboard-page">
+    @if (!DataService.IsMockDataEnabled)
+    {
+        <div class="data-mode-banner live">
+            <i class="bi bi-broadcast"></i>
+            <span><strong>Live Data Mode</strong> - Showing data from configured data sources. Run Data Jobs to sync real data.</span>
+            <a href="/data-jobs" class="btn btn-sm btn-outline">Go to Data Jobs</a>
+        </div>
+    }
+
     <header class="dashboard-header">
         <div class="header-content">
             <h1>Application Portfolio Health</h1>
@@ -236,6 +246,12 @@
 
     protected override async Task OnInitializedAsync()
     {
+        DataService.MockDataModeChanged += OnMockDataModeChanged;
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
         _applications = (await DataService.GetApplicationsAsync()).ToList();
         _healthySummary = await DataService.GetPortfolioHealthSummaryAsync();
 
@@ -268,6 +284,17 @@
         _criticalApps = _applications.Where(a => a.HealthCategory == HealthCategory.Critical).ToList();
         _lowUsageApps = _applications.Where(a => a.Usage?.Level == UsageLevel.None || a.Usage?.Level == UsageLevel.VeryLow).ToList();
         _missingDocs = _applications.Where(a => !a.Documentation.HasArchitectureDiagram || !a.Documentation.HasSystemDocumentation).ToList();
+    }
+
+    private async void OnMockDataModeChanged(object? sender, bool enabled)
+    {
+        await LoadDataAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        DataService.MockDataModeChanged -= OnMockDataModeChanged;
     }
 
     private async Task ExportReport()

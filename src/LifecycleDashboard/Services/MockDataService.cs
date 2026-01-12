@@ -7,41 +7,87 @@ namespace LifecycleDashboard.Services;
 /// </summary>
 public class MockDataService : IMockDataService
 {
-    private readonly List<Application> _applications;
-    private readonly List<LifecycleTask> _tasks;
-    private readonly List<User> _users;
-    private readonly Dictionary<string, RepositoryInfo> _repositoryInfo;
-    private List<TaskDocumentation> _taskDocumentation;
-    private List<FrameworkVersion> _frameworkVersions;
+    // Mock data collections (pre-generated test data)
+    private readonly List<Application> _mockApplications;
+    private readonly List<LifecycleTask> _mockTasks;
+    private readonly List<User> _mockUsers;
+    private readonly Dictionary<string, RepositoryInfo> _mockRepositoryInfo;
+    private readonly List<TaskDocumentation> _mockTaskDocumentation;
+    private readonly List<FrameworkVersion> _mockFrameworkVersions;
 
-    public bool IsMockDataEnabled => true;
+    // Real data collections (populated by syncs) - used when mock mode is off
+    private readonly List<Application> _realApplications = [];
+    private readonly List<LifecycleTask> _realTasks = [];
+    private readonly List<User> _realUsers = [];
+    private readonly List<TaskDocumentation> _realTaskDocumentation = [];
+    private readonly List<FrameworkVersion> _realFrameworkVersions = [];
+    private readonly Dictionary<string, RepositoryInfo> _realRepositoryInfo = [];
+
+    // Active collections that return either mock or real data based on mode
+    private List<Application> Applications => IsMockDataEnabled ? _mockApplications : _realApplications;
+    private List<LifecycleTask> Tasks => IsMockDataEnabled ? _mockTasks : _realTasks;
+    private List<User> Users => IsMockDataEnabled ? _mockUsers : _realUsers;
+    private Dictionary<string, RepositoryInfo> RepositoryInfo => IsMockDataEnabled ? _mockRepositoryInfo : _realRepositoryInfo;
+    private List<TaskDocumentation> TaskDocumentationList => IsMockDataEnabled ? _mockTaskDocumentation : _realTaskDocumentation;
+    private List<FrameworkVersion> FrameworkVersions => IsMockDataEnabled ? _mockFrameworkVersions : _realFrameworkVersions;
+
+    public bool IsMockDataEnabled => _systemSettings.MockDataEnabled;
+
+    public event EventHandler<bool>? MockDataModeChanged;
+
+    public Task SetMockDataEnabledAsync(bool enabled)
+    {
+        if (_systemSettings.MockDataEnabled != enabled)
+        {
+            _systemSettings = _systemSettings with
+            {
+                MockDataEnabled = enabled,
+                LastUpdated = DateTimeOffset.UtcNow
+            };
+
+            RecordAuditLogAsync(new AuditLogEntry
+            {
+                Id = Guid.NewGuid().ToString(),
+                EventType = enabled ? "MockDataEnabled" : "MockDataDisabled",
+                Category = "Config",
+                Message = $"Mock data mode was {(enabled ? "enabled" : "disabled")}",
+                UserId = "system",
+                UserName = "System",
+                EntityType = "SystemSettings"
+            });
+
+            MockDataModeChanged?.Invoke(this, enabled);
+        }
+
+        return Task.CompletedTask;
+    }
 
     public MockDataService()
     {
-        _users = GenerateMockUsers();
-        _applications = GenerateMockApplications();
-        _tasks = GenerateMockTasks();
-        _repositoryInfo = GenerateMockRepositoryInfo();
-        _taskDocumentation = GenerateMockTaskDocumentation();
-        _frameworkVersions = GenerateMockFrameworkVersions();
+        _mockUsers = GenerateMockUsers();
+        _mockApplications = GenerateMockApplications();
+        _mockTasks = GenerateMockTasks();
+        _mockRepositoryInfo = GenerateMockRepositoryInfo();
+        _mockTaskDocumentation = GenerateMockTaskDocumentation();
+        _mockFrameworkVersions = GenerateMockFrameworkVersions();
     }
 
     #region Application Methods
 
     public Task<IReadOnlyList<Application>> GetApplicationsAsync()
     {
-        return Task.FromResult<IReadOnlyList<Application>>(_applications.OrderBy(a => a.Name).ToList());
+        return Task.FromResult<IReadOnlyList<Application>>(Applications.OrderBy(a => a.Name).ToList());
     }
 
     public Task<Application?> GetApplicationAsync(string id)
     {
-        var app = _applications.FirstOrDefault(a => a.Id == id);
+        var app = Applications.FirstOrDefault(a => a.Id == id);
         return Task.FromResult(app);
     }
 
     public Task<IReadOnlyList<Application>> GetApplicationsByHealthAsync(HealthCategory category)
     {
-        var apps = _applications.Where(a => a.HealthCategory == category).ToList();
+        var apps = Applications.Where(a => a.HealthCategory == category).ToList();
         return Task.FromResult<IReadOnlyList<Application>>(apps);
     }
 
@@ -51,25 +97,25 @@ public class MockDataService : IMockDataService
 
     public Task<IReadOnlyList<LifecycleTask>> GetTasksForUserAsync(string userId)
     {
-        var tasks = _tasks.Where(t => t.AssigneeId == userId).OrderBy(t => t.DueDate).ToList();
+        var tasks = Tasks.Where(t => t.AssigneeId == userId).OrderBy(t => t.DueDate).ToList();
         return Task.FromResult<IReadOnlyList<LifecycleTask>>(tasks);
     }
 
     public Task<IReadOnlyList<LifecycleTask>> GetTasksForApplicationAsync(string applicationId)
     {
-        var tasks = _tasks.Where(t => t.ApplicationId == applicationId).OrderBy(t => t.DueDate).ToList();
+        var tasks = Tasks.Where(t => t.ApplicationId == applicationId).OrderBy(t => t.DueDate).ToList();
         return Task.FromResult<IReadOnlyList<LifecycleTask>>(tasks);
     }
 
     public Task<IReadOnlyList<LifecycleTask>> GetOverdueTasksAsync()
     {
-        var tasks = _tasks.Where(t => t.IsOverdue).OrderByDescending(t => t.DaysOverdue).ToList();
+        var tasks = Tasks.Where(t => t.IsOverdue).OrderByDescending(t => t.DaysOverdue).ToList();
         return Task.FromResult<IReadOnlyList<LifecycleTask>>(tasks);
     }
 
     public Task<TaskSummary> GetTaskSummaryForUserAsync(string userId)
     {
-        var userTasks = _tasks.Where(t => t.AssigneeId == userId).ToList();
+        var userTasks = Tasks.Where(t => t.AssigneeId == userId).ToList();
         var now = DateTimeOffset.UtcNow;
         var weekFromNow = now.AddDays(7);
         var monthFromNow = now.AddDays(30);
@@ -95,12 +141,12 @@ public class MockDataService : IMockDataService
     {
         var summary = new PortfolioHealthSummary
         {
-            TotalApplications = _applications.Count,
-            HealthyCount = _applications.Count(a => a.HealthCategory == HealthCategory.Healthy),
-            NeedsAttentionCount = _applications.Count(a => a.HealthCategory == HealthCategory.NeedsAttention),
-            AtRiskCount = _applications.Count(a => a.HealthCategory == HealthCategory.AtRisk),
-            CriticalCount = _applications.Count(a => a.HealthCategory == HealthCategory.Critical),
-            AverageScore = _applications.Average(a => a.HealthScore),
+            TotalApplications = Applications.Count,
+            HealthyCount = Applications.Count(a => a.HealthCategory == HealthCategory.Healthy),
+            NeedsAttentionCount = Applications.Count(a => a.HealthCategory == HealthCategory.NeedsAttention),
+            AtRiskCount = Applications.Count(a => a.HealthCategory == HealthCategory.AtRisk),
+            CriticalCount = Applications.Count(a => a.HealthCategory == HealthCategory.Critical),
+            AverageScore = Applications.Average(a => a.HealthScore),
             TrendDirection = 1, // Simulated improving trend
             LastUpdated = DateTimeOffset.UtcNow.AddHours(-2)
         };
@@ -115,12 +161,12 @@ public class MockDataService : IMockDataService
     public Task<User> GetCurrentUserAsync()
     {
         // Return first user as "current user" for mock purposes
-        return Task.FromResult(_users.First());
+        return Task.FromResult(Users.First());
     }
 
     public Task<IReadOnlyList<User>> GetUsersAsync()
     {
-        return Task.FromResult<IReadOnlyList<User>>(_users);
+        return Task.FromResult<IReadOnlyList<User>>(Users);
     }
 
     #endregion
@@ -129,7 +175,7 @@ public class MockDataService : IMockDataService
 
     public Task<LifecycleTask?> GetTaskAsync(string taskId)
     {
-        var task = _tasks.FirstOrDefault(t => t.Id == taskId);
+        var task = Tasks.FirstOrDefault(t => t.Id == taskId);
         return Task.FromResult(task);
     }
 
@@ -139,7 +185,7 @@ public class MockDataService : IMockDataService
 
     public Task<RepositoryInfo?> GetRepositoryInfoAsync(string applicationId)
     {
-        _repositoryInfo.TryGetValue(applicationId, out var repoInfo);
+        RepositoryInfo.TryGetValue(applicationId, out var repoInfo);
         return Task.FromResult(repoInfo);
     }
 
@@ -149,13 +195,13 @@ public class MockDataService : IMockDataService
 
     public Task<TaskDocumentation?> GetTaskDocumentationAsync(TaskType taskType)
     {
-        var doc = _taskDocumentation.FirstOrDefault(d => d.TaskType == taskType);
+        var doc = TaskDocumentationList.FirstOrDefault(d => d.TaskType == taskType);
         return Task.FromResult(doc);
     }
 
     public Task<IReadOnlyList<TaskDocumentation>> GetAllTaskDocumentationAsync()
     {
-        return Task.FromResult<IReadOnlyList<TaskDocumentation>>(_taskDocumentation);
+        return Task.FromResult<IReadOnlyList<TaskDocumentation>>(TaskDocumentationList);
     }
 
     #endregion
@@ -401,7 +447,7 @@ public class MockDataService : IMockDataService
 
         foreach (var role in roles.Take(random.Next(2, 4)))
         {
-            var user = _users[random.Next(_users.Count)];
+            var user = _mockUsers[random.Next(_mockUsers.Count)];
             assignments.Add(new RoleAssignment
             {
                 UserId = user.Id,
@@ -704,10 +750,10 @@ public class MockDataService : IMockDataService
         };
 
         // Create tasks for each application
-        foreach (var app in _applications.Take(25)) // Tasks for some apps
+        foreach (var app in _mockApplications.Take(25)) // Tasks for some apps
         {
             var template = taskTemplates[random.Next(taskTemplates.Length)];
-            var assignee = _users[random.Next(_users.Count)];
+            var assignee = _mockUsers[random.Next(_mockUsers.Count)];
 
             // Vary due dates - some overdue, some due soon, some upcoming
             var daysOffset = random.Next(100) switch
@@ -783,7 +829,7 @@ public class MockDataService : IMockDataService
             ("Dr. Aisha Patel", "aisha.patel@company.com")
         };
 
-        foreach (var app in _applications)
+        foreach (var app in _mockApplications)
         {
             var stackType = random.Next(10) switch
             {
@@ -1565,16 +1611,16 @@ public class MockDataService : IMockDataService
 
     public Task<TaskDocumentation> UpdateTaskDocumentationAsync(TaskDocumentation documentation)
     {
-        var index = _taskDocumentation.FindIndex(d => d.TaskType == documentation.TaskType);
+        var index = TaskDocumentationList.FindIndex(d => d.TaskType == documentation.TaskType);
         if (index >= 0)
         {
-            _taskDocumentation[index] = documentation with { LastUpdated = DateTimeOffset.UtcNow };
+            TaskDocumentationList[index] = documentation with { LastUpdated = DateTimeOffset.UtcNow };
         }
         else
         {
-            _taskDocumentation.Add(documentation with { LastUpdated = DateTimeOffset.UtcNow });
+            TaskDocumentationList.Add(documentation with { LastUpdated = DateTimeOffset.UtcNow });
         }
-        return Task.FromResult(_taskDocumentation.First(d => d.TaskType == documentation.TaskType));
+        return Task.FromResult(TaskDocumentationList.First(d => d.TaskType == documentation.TaskType));
     }
 
     public Task<TaskDocumentation> CreateTaskDocumentationAsync(TaskDocumentation documentation)
@@ -1584,13 +1630,13 @@ public class MockDataService : IMockDataService
             Id = Guid.NewGuid().ToString(),
             LastUpdated = DateTimeOffset.UtcNow
         };
-        _taskDocumentation.Add(newDoc);
+        TaskDocumentationList.Add(newDoc);
         return Task.FromResult(newDoc);
     }
 
     public Task DeleteTaskDocumentationAsync(string id)
     {
-        _taskDocumentation.RemoveAll(d => d.Id == id);
+        TaskDocumentationList.RemoveAll(d => d.Id == id);
         return Task.CompletedTask;
     }
 
@@ -1617,23 +1663,23 @@ public class MockDataService : IMockDataService
                 : task.History
         };
 
-        _tasks.Add(newTask);
+        Tasks.Add(newTask);
         return Task.FromResult(newTask);
     }
 
     public Task DeleteTaskAsync(string taskId)
     {
-        _tasks.RemoveAll(t => t.Id == taskId);
+        Tasks.RemoveAll(t => t.Id == taskId);
         return Task.CompletedTask;
     }
 
     public Task<LifecycleTask> UpdateTaskStatusAsync(string taskId, Models.TaskStatus newStatus, string performedByUserId, string performedByName, string? notes = null)
     {
-        var index = _tasks.FindIndex(t => t.Id == taskId);
+        var index = Tasks.FindIndex(t => t.Id == taskId);
         if (index < 0)
             throw new KeyNotFoundException($"Task {taskId} not found");
 
-        var task = _tasks[index];
+        var task = Tasks[index];
         var oldStatus = task.Status;
 
         var historyEntry = new TaskHistoryEntry
@@ -1655,17 +1701,17 @@ public class MockDataService : IMockDataService
             History = [.. task.History, historyEntry]
         };
 
-        _tasks[index] = updatedTask;
+        Tasks[index] = updatedTask;
         return Task.FromResult(updatedTask);
     }
 
     public Task<LifecycleTask> AssignTaskAsync(string taskId, string userId, string userName, string userEmail, string performedByUserId, string performedByName)
     {
-        var index = _tasks.FindIndex(t => t.Id == taskId);
+        var index = Tasks.FindIndex(t => t.Id == taskId);
         if (index < 0)
             throw new KeyNotFoundException($"Task {taskId} not found");
 
-        var task = _tasks[index];
+        var task = Tasks[index];
 
         var historyEntry = new TaskHistoryEntry
         {
@@ -1687,17 +1733,17 @@ public class MockDataService : IMockDataService
             History = [.. task.History, historyEntry]
         };
 
-        _tasks[index] = updatedTask;
+        Tasks[index] = updatedTask;
         return Task.FromResult(updatedTask);
     }
 
     public Task<LifecycleTask> DelegateTaskAsync(string taskId, string fromUserId, string toUserId, string toUserName, string toUserEmail, string reason, string performedByUserId, string performedByName)
     {
-        var index = _tasks.FindIndex(t => t.Id == taskId);
+        var index = Tasks.FindIndex(t => t.Id == taskId);
         if (index < 0)
             throw new KeyNotFoundException($"Task {taskId} not found");
 
-        var task = _tasks[index];
+        var task = Tasks[index];
 
         var historyEntry = new TaskHistoryEntry
         {
@@ -1721,17 +1767,17 @@ public class MockDataService : IMockDataService
             History = [.. task.History, historyEntry]
         };
 
-        _tasks[index] = updatedTask;
+        Tasks[index] = updatedTask;
         return Task.FromResult(updatedTask);
     }
 
     public Task<LifecycleTask> EscalateTaskAsync(string taskId, string reason, string performedByUserId, string performedByName)
     {
-        var index = _tasks.FindIndex(t => t.Id == taskId);
+        var index = Tasks.FindIndex(t => t.Id == taskId);
         if (index < 0)
             throw new KeyNotFoundException($"Task {taskId} not found");
 
-        var task = _tasks[index];
+        var task = Tasks[index];
 
         var historyEntry = new TaskHistoryEntry
         {
@@ -1750,7 +1796,7 @@ public class MockDataService : IMockDataService
             History = [.. task.History, historyEntry]
         };
 
-        _tasks[index] = updatedTask;
+        Tasks[index] = updatedTask;
         return Task.FromResult(updatedTask);
     }
 
@@ -1761,11 +1807,11 @@ public class MockDataService : IMockDataService
 
     public Task<LifecycleTask> AddTaskNoteAsync(string taskId, string performedByUserId, string performedByName, string note)
     {
-        var index = _tasks.FindIndex(t => t.Id == taskId);
+        var index = Tasks.FindIndex(t => t.Id == taskId);
         if (index < 0)
             throw new KeyNotFoundException($"Task {taskId} not found");
 
-        var task = _tasks[index];
+        var task = Tasks[index];
 
         var historyEntry = new TaskHistoryEntry
         {
@@ -1787,13 +1833,13 @@ public class MockDataService : IMockDataService
             History = [.. task.History, historyEntry]
         };
 
-        _tasks[index] = updatedTask;
+        Tasks[index] = updatedTask;
         return Task.FromResult(updatedTask);
     }
 
     public Task<IReadOnlyList<LifecycleTask>> GetAllTasksAsync()
     {
-        return Task.FromResult<IReadOnlyList<LifecycleTask>>(_tasks.ToList());
+        return Task.FromResult<IReadOnlyList<LifecycleTask>>(Tasks.ToList());
     }
 
     #endregion
@@ -1803,30 +1849,30 @@ public class MockDataService : IMockDataService
     public Task<IReadOnlyList<FrameworkVersion>> GetAllFrameworkVersionsAsync()
     {
         return Task.FromResult<IReadOnlyList<FrameworkVersion>>(
-            _frameworkVersions.OrderBy(f => f.Framework).ThenByDescending(f => f.Version).ToList());
+            FrameworkVersions.OrderBy(f => f.Framework).ThenByDescending(f => f.Version).ToList());
     }
 
     public Task<FrameworkVersion?> GetFrameworkVersionAsync(string id)
     {
-        var version = _frameworkVersions.FirstOrDefault(f => f.Id == id);
+        var version = FrameworkVersions.FirstOrDefault(f => f.Id == id);
         return Task.FromResult(version);
     }
 
     public Task<IReadOnlyList<FrameworkVersion>> GetFrameworkVersionsByTypeAsync(FrameworkType type)
     {
-        var versions = _frameworkVersions.Where(f => f.Framework == type)
+        var versions = FrameworkVersions.Where(f => f.Framework == type)
             .OrderByDescending(f => f.Version).ToList();
         return Task.FromResult<IReadOnlyList<FrameworkVersion>>(versions);
     }
 
     public Task<FrameworkVersion> UpdateFrameworkVersionAsync(FrameworkVersion version)
     {
-        var index = _frameworkVersions.FindIndex(f => f.Id == version.Id);
+        var index = FrameworkVersions.FindIndex(f => f.Id == version.Id);
         if (index >= 0)
         {
-            _frameworkVersions[index] = version with { LastUpdated = DateTimeOffset.UtcNow };
+            FrameworkVersions[index] = version with { LastUpdated = DateTimeOffset.UtcNow };
         }
-        return Task.FromResult(_frameworkVersions.First(f => f.Id == version.Id));
+        return Task.FromResult(FrameworkVersions.First(f => f.Id == version.Id));
     }
 
     public Task<FrameworkVersion> CreateFrameworkVersionAsync(FrameworkVersion version)
@@ -1836,24 +1882,24 @@ public class MockDataService : IMockDataService
             Id = Guid.NewGuid().ToString(),
             LastUpdated = DateTimeOffset.UtcNow
         };
-        _frameworkVersions.Add(newVersion);
+        FrameworkVersions.Add(newVersion);
         return Task.FromResult(newVersion);
     }
 
     public Task DeleteFrameworkVersionAsync(string id)
     {
-        _frameworkVersions.RemoveAll(f => f.Id == id);
+        FrameworkVersions.RemoveAll(f => f.Id == id);
         return Task.CompletedTask;
     }
 
     public Task<IReadOnlyList<Application>> GetApplicationsByFrameworkAsync(string frameworkVersionId)
     {
-        var framework = _frameworkVersions.FirstOrDefault(f => f.Id == frameworkVersionId);
+        var framework = FrameworkVersions.FirstOrDefault(f => f.Id == frameworkVersionId);
         if (framework == null)
             return Task.FromResult<IReadOnlyList<Application>>([]);
 
         // For mock data, match applications by their technology stack containing the framework
-        var matchingApps = _applications.Where(a =>
+        var matchingApps = Applications.Where(a =>
             a.TechnologyStack.Any(t =>
                 t.Contains(framework.DisplayName, StringComparison.OrdinalIgnoreCase) ||
                 t.Contains(framework.Version, StringComparison.OrdinalIgnoreCase))).ToList();
@@ -1863,10 +1909,10 @@ public class MockDataService : IMockDataService
 
     public Task<FrameworkEolSummary> GetFrameworkEolSummaryAsync()
     {
-        var eolFrameworks = _frameworkVersions.Where(f => f.IsPastEol || f.IsApproachingEol).ToList();
+        var eolFrameworks = FrameworkVersions.Where(f => f.IsPastEol || f.IsApproachingEol).ToList();
         var details = eolFrameworks.Select(f =>
         {
-            var apps = _applications.Where(a =>
+            var apps = Applications.Where(a =>
                 a.TechnologyStack.Any(t =>
                     t.Contains(f.DisplayName, StringComparison.OrdinalIgnoreCase) ||
                     t.Contains(f.Version, StringComparison.OrdinalIgnoreCase))).ToList();
@@ -1881,7 +1927,7 @@ public class MockDataService : IMockDataService
 
         var summary = new FrameworkEolSummary
         {
-            TotalApplications = _applications.Count,
+            TotalApplications = Applications.Count,
             ApplicationsWithEolFrameworks = details.Where(d => d.Framework.IsPastEol).Sum(d => d.ApplicationCount),
             ApplicationsApproachingEol = details.Where(d => d.Framework.IsApproachingEol).Sum(d => d.ApplicationCount),
             CriticalEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.Critical),
@@ -2354,14 +2400,14 @@ public class MockDataService : IMockDataService
 
     public Task<User?> GetUserAsync(string userId)
     {
-        var user = _users.FirstOrDefault(u => u.Id == userId);
+        var user = Users.FirstOrDefault(u => u.Id == userId);
         return Task.FromResult(user);
     }
 
     public Task<User> CreateUserAsync(User user)
     {
         var newUser = user with { Id = Guid.NewGuid().ToString() };
-        _users.Add(newUser);
+        Users.Add(newUser);
 
         // Record audit log
         RecordAuditLogAsync(new AuditLogEntry
@@ -2381,11 +2427,11 @@ public class MockDataService : IMockDataService
 
     public Task<User> UpdateUserAsync(User user)
     {
-        var index = _users.FindIndex(u => u.Id == user.Id);
+        var index = Users.FindIndex(u => u.Id == user.Id);
         if (index >= 0)
         {
-            var oldUser = _users[index];
-            _users[index] = user;
+            var oldUser = Users[index];
+            Users[index] = user;
 
             // Record audit log
             RecordAuditLogAsync(new AuditLogEntry
@@ -2410,10 +2456,10 @@ public class MockDataService : IMockDataService
 
     public Task DeleteUserAsync(string userId)
     {
-        var user = _users.FirstOrDefault(u => u.Id == userId);
+        var user = Users.FirstOrDefault(u => u.Id == userId);
         if (user != null)
         {
-            _users.Remove(user);
+            Users.Remove(user);
 
             RecordAuditLogAsync(new AuditLogEntry
             {
@@ -2432,7 +2478,7 @@ public class MockDataService : IMockDataService
 
     public Task<IReadOnlyList<Application>> GetApplicationsForUserAsync(string userId)
     {
-        var apps = _applications
+        var apps = Applications
             .Where(a => a.RoleAssignments.Any(r => r.UserId == userId))
             .ToList();
         return Task.FromResult<IReadOnlyList<Application>>(apps);

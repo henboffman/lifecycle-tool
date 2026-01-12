@@ -187,6 +187,16 @@ public interface IMockDataService
     /// </summary>
     bool IsMockDataEnabled { get; }
 
+    /// <summary>
+    /// Toggles mock data mode on or off.
+    /// </summary>
+    Task SetMockDataEnabledAsync(bool enabled);
+
+    /// <summary>
+    /// Event raised when mock data mode changes.
+    /// </summary>
+    event EventHandler<bool>? MockDataModeChanged;
+
     // User Management
 
     /// <summary>
