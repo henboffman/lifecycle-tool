@@ -1,0 +1,154 @@
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IReleaseNotesService ReleaseNotesService
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+@*
+    DevMode Sidebar - A floating development feedback panel
+
+    This component provides developers and testers with real-time visibility into:
+    - Recent changes and features
+    - Current version information
+    - Quick navigation to release notes
+
+    This component is designed to be generic and reusable across projects.
+    Toggle visibility via the Settings icon or Ctrl+Shift+D keyboard shortcut.
+*@
+
+<div @ref="_sidebarRef" class="devmode-sidebar @(IsExpanded ? "expanded" : "collapsed") @(IsVisible ? "" : "hidden")">
+    @if (IsExpanded)
+    {
+        <div class="drag-handle" title="Drag to reposition">
+            <span class="drag-handle-icon"></span>
+        </div>
+        <div class="devmode-header">
+            <div class="devmode-title">
+                <i class="bi bi-tools devmode-icon"></i>
+                <span>Dev Mode</span>
+            </div>
+            <div class="devmode-controls">
+                <button class="devmode-btn" @onclick="Collapse" title="Collapse">
+                    <i class="bi bi-chevron-double-right"></i>
+                </button>
+                <button class="devmode-btn" @onclick="Hide" title="Hide (Ctrl+Shift+D to show)">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="devmode-version">
+            <span class="version-label">Version</span>
+            <span class="version-number">@_latestVersion</span>
+        </div>
+
+        <div class="devmode-section">
+            <div class="section-header">
+                <i class="bi bi-file-text"></i> Recent Changes
+            </div>
+            <div class="devmode-changes">
+                @if (_recentNotes.Count == 0)
+                {
+                    <div class="no-changes">Loading...</div>
+                }
+                else
+                {
+                    @foreach (var note in _recentNotes)
+                    {
+                        <div class="change-item @(note.IsHighlighted ? "highlighted" : "")">
+                            <div class="change-header">
+                                <span class="change-version">v@(note.Version)</span>
+                                <span class="change-date">@note.Date.ToString("MMM d")</span>
+                            </div>
+                            <div class="change-title">@note.Title</div>
+                            @if (note.Items.Count > 0)
+                            {
+                                <ul class="change-items">
+                                    @foreach (var item in note.Items.Take(3))
+                                    {
+                                        <li class="@item.Type.ToString().ToLower()">
+                                            <span class="item-badge">@(GetItemBadge(item.Type))</span>
+                                            @item.Text
+                                        </li>
+                                    }
+                                    @if (note.Items.Count > 3)
+                                    {
+                                        <li class="more-items">
+                                            +@(note.Items.Count - 3) more...
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+
+        <div class="devmode-footer">
+            <a href="/release-notes" class="devmode-link">
+                <i class="bi bi-journal-text"></i> View All Release Notes
+            </a>
+        </div>
+    }
+    else
+    {
+        <button class="devmode-expand-btn" @onclick="Expand" title="Expand Dev Mode">
+            <i class="bi bi-tools devmode-icon"></i>
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public bool IsVisible { get; set; } = true;
+
+    [Parameter]
+    public EventCallback<bool> IsVisibleChanged { get; set; }
+
+    private bool IsExpanded { get; set; } = true;
+    private List<ReleaseNote> _recentNotes = [];
+    private string _latestVersion = "...";
+    private ElementReference _sidebarRef;
+    private bool _jsInitialized = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _recentNotes = (await ReleaseNotesService.GetRecentAsync(3)).ToList();
+        _latestVersion = await ReleaseNotesService.GetLatestVersionAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsExpanded && IsVisible && !_jsInitialized)
+        {
+            await JSRuntime.InvokeVoidAsync("initDraggableSidebar", _sidebarRef, null);
+            _jsInitialized = true;
+        }
+    }
+
+    private void Expand()
+    {
+        IsExpanded = true;
+        _jsInitialized = false; // Re-initialize drag after expanding
+    }
+
+    private void Collapse() => IsExpanded = false;
+
+    private async Task Hide()
+    {
+        IsVisible = false;
+        await IsVisibleChanged.InvokeAsync(false);
+    }
+
+    private static MarkupString GetItemBadge(ReleaseNoteItemType type) => type switch
+    {
+        ReleaseNoteItemType.Added => new MarkupString("<i class=\"bi bi-plus\"></i>"),
+        ReleaseNoteItemType.Changed => new MarkupString("<i class=\"bi bi-pencil\"></i>"),
+        ReleaseNoteItemType.Fixed => new MarkupString("<i class=\"bi bi-check-lg\"></i>"),
+        ReleaseNoteItemType.Removed => new MarkupString("<i class=\"bi bi-dash\"></i>"),
+        ReleaseNoteItemType.Deprecated => new MarkupString("<i class=\"bi bi-exclamation\"></i>"),
+        ReleaseNoteItemType.Security => new MarkupString("<i class=\"bi bi-shield-lock\"></i>"),
+        _ => new MarkupString("<i class=\"bi bi-dot\"></i>")
+    };
+}

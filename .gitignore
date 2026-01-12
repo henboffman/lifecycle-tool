@@ -1,0 +1,217 @@
+# =============================================================================
+# .NET / Blazor Application
+# =============================================================================
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# .NET artifacts
+project.lock.json
+project.fragment.lock.json
+artifacts/
+**/Properties/launchSettings.json
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+nuget.exe
+**/packages/*
+!**/packages/build/
+
+# MSBuild
+*.msbuild
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+# =============================================================================
+# Visual Studio / IDE
+# =============================================================================
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+
+# =============================================================================
+# Credentials & Secrets (CRITICAL)
+# =============================================================================
+
+# Secure credentials storage
+**/data/secure-credentials.json
+**/secure-credentials.json
+*.credentials.json
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Certificate files
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+
+# Azure publish profiles
+*.pubxml
+*.publishproj
+PublishProfiles/
+
+# Local app settings with real credentials
+appsettings.local.json
+appsettings.Production.json
+appsettings.Staging.json
+secrets.json
+**/secrets/
+
+# =============================================================================
+# Database Files
+# =============================================================================
+
+*.mdf
+*.ldf
+*.ndf
+*.db
+*.sqlite
+*.sqlite3
+!.beads/beads.db
+
+# SQL Server files
+*.bak
+*.sql~
+
+# =============================================================================
+# OS Generated
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+
+# =============================================================================
+# Application Specific
+# =============================================================================
+
+# External data directory (outside web root)
+data/
+
+# Uploaded files (if any)
+uploads/
+wwwroot/uploads/
+
+# Generated documentation
+docs/generated/
+
+# Test results
+TestResults/
+*.trx
+coverage/
+*.coverage
+*.coveragexml
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+
+# =============================================================================
+# Logs & Temp Files
+# =============================================================================
+
+*.log
+*.tmp
+*.temp
+*.cache
+nlog-*.log
+
+# ASP.NET scaffolding
+ScaffoldingReadMe.txt
+
+# =============================================================================
+# Tools & Local Development
+# =============================================================================
+
+# Beads workflow management (local task database)
+# Note: .beads/ is intentionally NOT ignored - it tracks project work
+# But the local database should be ignored
+.beads/beads.db-journal
+.beads/beads.db-wal
+.beads/beads.db-shm
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Node (if used for frontend tooling)
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# =============================================================================
+# Build & Publish
+# =============================================================================
+
+# Publish output
+publish/
+out/
+
+# Docker
+docker-compose.override.yml
+
+# IIS
+*.iisexpress/
+
+# Webpack/Vite (if used)
+dist/
+.parcel-cache/
+
+# =============================================================================
+# Misc
+# =============================================================================
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Patch files
+*.patch
+*.diff
+
+# Local notes (not project documentation)
+TODO.local.md
+NOTES.local.md
+scratch.*

@@ -1,0 +1,104 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["LifecycleDashboard.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script>
+        function downloadFile(filename, base64Content, contentType) {
+            const byteCharacters = atob(base64Content);
+            const byteArrays = [];
+            for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+                const slice = byteCharacters.slice(offset, offset + 512);
+                const byteNumbers = new Array(slice.length);
+                for (let i = 0; i < slice.length; i++) {
+                    byteNumbers[i] = slice.charCodeAt(i);
+                }
+                byteArrays.push(new Uint8Array(byteNumbers));
+            }
+            const blob = new Blob(byteArrays, { type: contentType });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        window.initDraggableSidebar = function(element, dotnetRef) {
+            if (!element) return;
+            let isDragging = false;
+            let startY = 0;
+            let startTop = 0;
+
+            const handle = element.querySelector('.drag-handle');
+            if (!handle) return;
+
+            handle.addEventListener('mousedown', function(e) {
+                isDragging = true;
+                startY = e.clientY;
+                startTop = element.offsetTop;
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!isDragging) return;
+                const deltaY = e.clientY - startY;
+                let newTop = startTop + deltaY;
+                const maxTop = window.innerHeight - element.offsetHeight - 20;
+                newTop = Math.max(80, Math.min(newTop, maxTop));
+                element.style.top = newTop + 'px';
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (isDragging) {
+                    isDragging = false;
+                    document.body.style.userSelect = '';
+                    localStorage.setItem('devSidebarTop', element.style.top);
+                }
+            });
+
+            const savedTop = localStorage.getItem('devSidebarTop');
+            if (savedTop) {
+                element.style.top = savedTop;
+            }
+        };
+
+        window.generateIcsFile = function(events) {
+            let icsContent = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Lifecycle Dashboard//Tasks//EN\r\n';
+            events.forEach(event => {
+                icsContent += 'BEGIN:VEVENT\r\n';
+                icsContent += 'UID:' + event.id + '@@lifecycle-dashboard\r\n';
+                icsContent += 'DTSTART:' + event.dueDate + '\r\n';
+                icsContent += 'SUMMARY:' + event.title + '\r\n';
+                icsContent += 'DESCRIPTION:' + (event.description || '') + '\r\n';
+                icsContent += 'END:VEVENT\r\n';
+            });
+            icsContent += 'END:VCALENDAR';
+
+            const blob = new Blob([icsContent], { type: 'text/calendar' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'lifecycle-tasks.ics';
+            link.click();
+            URL.revokeObjectURL(link.href);
+        };
+    </script>
+</body>
+
+</html>

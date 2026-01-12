@@ -1,0 +1,2683 @@
+@page "/admin"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject IHealthScoringService HealthScoringService
+@inject IEolDataService EolDataService
+@inject ISecureStorageService SecureStorage
+@inject IAiRecommendationService AiService
+@inject NavigationManager Navigation
+
+<PageTitle>Administration - Lifecycle Dashboard</PageTitle>
+
+<div class="admin-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Administration</h1>
+            <p class="subtitle">System configuration and management</p>
+        </div>
+    </header>
+
+    <!-- Admin Navigation -->
+    <section class="admin-tabs">
+        <button class="admin-tab @(_activeSection == AdminSection.HealthScoring ? "active" : "")"
+                @onclick="() => SetActiveSection(AdminSection.HealthScoring)">
+            <i class="bi bi-sliders tab-icon"></i>
+            Health Scoring
+        </button>
+        <button class="admin-tab @(_activeSection == AdminSection.FrameworkVersions ? "active" : "")"
+                @onclick="() => SetActiveSection(AdminSection.FrameworkVersions)">
+            <i class="bi bi-stack tab-icon"></i>
+            Frameworks
+        </button>
+        <button class="admin-tab @(_activeSection == AdminSection.TaskDocumentation ? "active" : "")"
+                @onclick="() => SetActiveSection(AdminSection.TaskDocumentation)">
+            <i class="bi bi-file-earmark-text tab-icon"></i>
+            Task Docs
+        </button>
+        <button class="admin-tab @(_activeSection == AdminSection.Users ? "active" : "")"
+                @onclick="() => SetActiveSection(AdminSection.Users)">
+            <i class="bi bi-people tab-icon"></i>
+            Users
+        </button>
+        <button class="admin-tab @(_activeSection == AdminSection.TaskConfig ? "active" : "")"
+                @onclick="() => SetActiveSection(AdminSection.TaskConfig)">
+            <i class="bi bi-calendar3 tab-icon"></i>
+            Task Settings
+        </button>
+        <button class="admin-tab @(_activeSection == AdminSection.AuditLog ? "active" : "")"
+                @onclick="() => SetActiveSection(AdminSection.AuditLog)">
+            <i class="bi bi-journal-text tab-icon"></i>
+            Audit Log
+        </button>
+        <button class="admin-tab @(_activeSection == AdminSection.System ? "active" : "")"
+                @onclick="() => SetActiveSection(AdminSection.System)">
+            <i class="bi bi-tools tab-icon"></i>
+            System
+        </button>
+    </section>
+
+    @if (_activeSection == AdminSection.HealthScoring)
+    {
+        <!-- Health Scoring Configuration -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2>Health Scoring Configuration</h2>
+                <p class="section-desc">Configure how application health scores are calculated</p>
+            </div>
+
+            @if (_healthConfigSaved)
+            {
+                <div class="save-message success">
+                    <i class="bi bi-check-circle"></i>
+                    Health scoring configuration saved successfully
+                </div>
+            }
+
+            <div class="config-grid">
+                <!-- Security Weights -->
+                <div class="config-card">
+                    <h3>Security Penalties</h3>
+                    <p class="config-desc">Points deducted per vulnerability severity</p>
+                    <div class="config-items">
+                        <div class="config-item">
+                            <label>Critical Vulnerability</label>
+                            <div class="config-value">
+                                <input type="number" value="@_securityWeights.Critical" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>High Severity</label>
+                            <div class="config-value">
+                                <input type="number" value="@_securityWeights.High" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>Medium Severity</label>
+                            <div class="config-value">
+                                <input type="number" value="@_securityWeights.Medium" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>Low Severity</label>
+                            <div class="config-value">
+                                <input type="number" value="@_securityWeights.Low" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="config-footer">
+                        <button class="btn btn-sm" @onclick='() => OpenHealthConfigModal("security")'>
+                            <i class="bi bi-pencil"></i>
+                            Edit Weights
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Usage Adjustments -->
+                <div class="config-card">
+                    <h3>Usage Adjustments</h3>
+                    <p class="config-desc">Score adjustments based on application usage</p>
+                    <div class="config-items">
+                        <div class="config-item">
+                            <label>No Usage</label>
+                            <div class="config-value">
+                                <input type="number" value="@_usageWeights.None" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>Very Low Usage</label>
+                            <div class="config-value">
+                                <input type="number" value="@_usageWeights.VeryLow" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>High Usage</label>
+                            <div class="config-value">
+                                <input type="number" value="@_usageWeights.High" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="config-footer">
+                        <button class="btn btn-sm" @onclick='() => OpenHealthConfigModal("usage")'>
+                            <i class="bi bi-pencil"></i>
+                            Edit Weights
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Maintenance Adjustments -->
+                <div class="config-card">
+                    <h3>Maintenance Activity</h3>
+                    <p class="config-desc">Score adjustments based on recent activity</p>
+                    <div class="config-items">
+                        <div class="config-item">
+                            <label>Recent Activity (&lt;90 days)</label>
+                            <div class="config-value">
+                                <input type="number" value="@_maintenanceWeights.Recent" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>Stale (&gt;365 days)</label>
+                            <div class="config-value">
+                                <input type="number" value="@_maintenanceWeights.Stale" disabled />
+                                <span class="unit">pts</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="config-footer">
+                        <button class="btn btn-sm" @onclick='() => OpenHealthConfigModal("maintenance")'>
+                            <i class="bi bi-pencil"></i>
+                            Edit Weights
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Category Thresholds -->
+                <div class="config-card">
+                    <h3>Category Thresholds</h3>
+                    <p class="config-desc">Score ranges for health categories</p>
+                    <div class="config-items">
+                        <div class="config-item">
+                            <label class="text-healthy">Healthy</label>
+                            <div class="config-range">@_thresholds.HealthyMin - 100</div>
+                        </div>
+                        <div class="config-item">
+                            <label class="text-attention">Needs Attention</label>
+                            <div class="config-range">@_thresholds.AttentionMin - @(_thresholds.HealthyMin - 1)</div>
+                        </div>
+                        <div class="config-item">
+                            <label class="text-at-risk">At Risk</label>
+                            <div class="config-range">@_thresholds.AtRiskMin - @(_thresholds.AttentionMin - 1)</div>
+                        </div>
+                        <div class="config-item">
+                            <label class="text-critical">Critical</label>
+                            <div class="config-range">0 - @(_thresholds.AtRiskMin - 1)</div>
+                        </div>
+                    </div>
+                    <div class="config-footer">
+                        <button class="btn btn-sm" @onclick='() => OpenHealthConfigModal("thresholds")'>
+                            <i class="bi bi-pencil"></i>
+                            Edit Thresholds
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    }
+    else if (_activeSection == AdminSection.FrameworkVersions)
+    {
+        <!-- Framework Versions Management -->
+        <section class="admin-section">
+            <div class="section-header">
+                <div>
+                    <h2>Framework Version Management</h2>
+                    <p class="section-desc">Manage framework end-of-life dates and upgrade paths</p>
+                </div>
+                <div class="section-actions">
+                    <button class="btn btn-outline" @onclick="RefreshEolData" disabled="@_isRefreshingEol">
+                        @if (_isRefreshingEol)
+                        {
+                            <span class="spinner-sm"></span>
+                            <span>Refreshing...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-clockwise"></i>
+                            <span>Refresh from endoflife.date</span>
+                        }
+                    </button>
+                    <button class="btn btn-outline" @onclick='() => Navigation.NavigateTo("/frameworks")'>
+                        <i class="bi bi-eye"></i> View Data Page
+                    </button>
+                    <button class="btn btn-primary" @onclick="ShowAddFrameworkModal">
+                        <i class="bi bi-plus-lg"></i> Add Version
+                    </button>
+                </div>
+            </div>
+
+            <!-- EOL Refresh Results -->
+            @if (_eolRefreshResult != null)
+            {
+                <div class="refresh-result-banner @(_eolRefreshResult.Success ? "success" : "error")">
+                    <div class="result-header">
+                        @if (_eolRefreshResult.Success)
+                        {
+                            <i class="bi bi-check-circle"></i>
+                            <span>EOL Data Refresh Complete</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <span>EOL Data Refresh Completed with Errors</span>
+                        }
+                        <button class="btn-icon" @onclick="() => _eolRefreshResult = null">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    </div>
+                    <div class="result-details">
+                        @if (_eolRefreshResult.Added.Count > 0)
+                        {
+                            <div class="result-section added">
+                                <strong>@_eolRefreshResult.Added.Count Added:</strong>
+                                <ul>
+                                    @foreach (var v in _eolRefreshResult.Added.Take(5))
+                                    {
+                                        <li>@v.DisplayName (EOL: @(v.EndOfLifeDate?.ToString("MMM d, yyyy") ?? "N/A"))</li>
+                                    }
+                                    @if (_eolRefreshResult.Added.Count > 5)
+                                    {
+                                        <li>...and @(_eolRefreshResult.Added.Count - 5) more</li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                        @if (_eolRefreshResult.Updated.Count > 0)
+                        {
+                            <div class="result-section updated">
+                                <strong>@_eolRefreshResult.Updated.Count Updated:</strong>
+                                <ul>
+                                    @foreach (var u in _eolRefreshResult.Updated.Take(5))
+                                    {
+                                        <li>@u.Version.DisplayName - @u.ChangeDescription</li>
+                                    }
+                                    @if (_eolRefreshResult.Updated.Count > 5)
+                                    {
+                                        <li>...and @(_eolRefreshResult.Updated.Count - 5) more</li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                        @if (_eolRefreshResult.Errors.Count > 0)
+                        {
+                            <div class="result-section errors">
+                                <strong>Errors:</strong>
+                                <ul>
+                                    @foreach (var e in _eolRefreshResult.Errors)
+                                    {
+                                        <li>@GetFrameworkLabel(e.Framework): @e.ErrorMessage</li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                        @if (_eolRefreshResult.TotalChanges == 0 && _eolRefreshResult.Errors.Count == 0)
+                        {
+                            <p class="no-changes">All framework versions are up to date.</p>
+                        }
+                    </div>
+                </div>
+            }
+
+            <!-- Quick Stats -->
+            <div class="framework-stats">
+                <div class="stat-card">
+                    <div class="stat-value">@_frameworkVersions.Count</div>
+                    <div class="stat-label">Total Versions</div>
+                </div>
+                <div class="stat-card past-eol">
+                    <div class="stat-value">@_frameworkVersions.Count(v => v.IsPastEol)</div>
+                    <div class="stat-label">Past EOL</div>
+                </div>
+                <div class="stat-card critical">
+                    <div class="stat-value">@_frameworkVersions.Count(v => v.EolUrgency == EolUrgency.Critical)</div>
+                    <div class="stat-label">Critical</div>
+                </div>
+                <div class="stat-card supported">
+                    <div class="stat-value">@_frameworkVersions.Count(v => v.Status == SupportStatus.Active)</div>
+                    <div class="stat-label">Active Support</div>
+                </div>
+            </div>
+
+            <!-- Framework Filters -->
+            <div class="framework-filters">
+                <select class="filter-select" @bind="_frameworkTypeFilter" @bind:after="FilterFrameworks">
+                    <option value="">All Frameworks</option>
+                    @foreach (var type in Enum.GetValues<FrameworkType>())
+                    {
+                        <option value="@type">@GetFrameworkLabel(type)</option>
+                    }
+                </select>
+                <select class="filter-select" @bind="_frameworkStatusFilter" @bind:after="FilterFrameworks">
+                    <option value="">All Status</option>
+                    <option value="Active">Active</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="EndOfLife">End of Life</option>
+                </select>
+            </div>
+
+            <!-- Framework Versions Table -->
+            <div class="frameworks-table-container">
+                <table class="data-table frameworks-data-table">
+                    <thead>
+                        <tr>
+                            <th>Framework</th>
+                            <th>Version</th>
+                            <th>Status</th>
+                            <th>End of Life</th>
+                            <th>Days Until EOL</th>
+                            <th>Upgrade Path</th>
+                            <th>Apps</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var version in _filteredFrameworkVersions)
+                        {
+                            <tr class="@GetFrameworkRowClass(version)">
+                                <td>
+                                    <span class="framework-name">
+                                        <i class="bi @GetFrameworkIcon(version.Framework)"></i>
+                                        @GetFrameworkLabel(version.Framework)
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="version-name">@version.DisplayName</span>
+                                    @if (version.IsLts)
+                                    {
+                                        <span class="lts-badge">LTS</span>
+                                    }
+                                </td>
+                                <td>
+                                    <span class="status-badge @version.Status.ToString().ToLower()">
+                                        @GetStatusLabel(version.Status)
+                                    </span>
+                                </td>
+                                <td class="date-cell">
+                                    @if (version.EndOfLifeDate.HasValue)
+                                    {
+                                        <span class="@(version.IsPastEol ? "past-eol" : "")">
+                                            @version.EndOfLifeDate.Value.ToString("MMM d, yyyy")
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="indefinite">Indefinite</span>
+                                    }
+                                </td>
+                                <td class="urgency-cell">
+                                    @if (version.DaysUntilEol.HasValue)
+                                    {
+                                        <span class="urgency-badge @version.EolUrgency.ToString().ToLower()">
+                                            @if (version.IsPastEol)
+                                            {
+                                                @($"{Math.Abs(version.DaysUntilEol.Value)}d ago")
+                                            }
+                                            else
+                                            {
+                                                @($"{version.DaysUntilEol.Value}d")
+                                            }
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="no-eol">-</span>
+                                    }
+                                </td>
+                                <td class="upgrade-cell">
+                                    @if (!string.IsNullOrEmpty(version.RecommendedUpgradePath))
+                                    {
+                                        <span class="upgrade-path">@version.RecommendedUpgradePath</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="current">Current</span>
+                                    }
+                                </td>
+                                <td class="apps-cell">
+                                    @{
+                                        var appCount = GetFrameworkAppCount(version.Id);
+                                    }
+                                    @if (appCount > 0)
+                                    {
+                                        <span class="app-count @(version.IsPastEol ? "urgent" : "")">@appCount</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="no-apps">0</span>
+                                    }
+                                </td>
+                                <td class="actions-cell">
+                                    <button class="btn-icon" title="Edit" @onclick="() => EditFramework(version)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn-icon delete" title="Delete" @onclick="() => DeleteFramework(version)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Add/Edit Framework Modal -->
+        @if (_showFrameworkModal)
+        {
+            <div class="modal-overlay" @onclick="CloseFrameworkModal">
+                <div class="modal-content modal-large" @onclick:stopPropagation="true">
+                    <button class="modal-close" @onclick="CloseFrameworkModal"><i class="bi bi-x-lg"></i></button>
+                    <h2>@(_editingFramework == null ? "Add Framework Version" : "Edit Framework Version")</h2>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Framework Type</label>
+                            <select class="form-select" @bind="_formFrameworkType">
+                                @foreach (var type in Enum.GetValues<FrameworkType>())
+                                {
+                                    <option value="@type">@GetFrameworkLabel(type)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Version</label>
+                            <input type="text" class="form-input" @bind="_formVersion" placeholder="e.g., 8.0" />
+                        </div>
+                        <div class="form-group">
+                            <label>Display Name</label>
+                            <input type="text" class="form-input" @bind="_formDisplayName" placeholder="e.g., .NET 8.0" />
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select class="form-select" @bind="_formStatus">
+                                <option value="Active">Active</option>
+                                <option value="Maintenance">Maintenance</option>
+                                <option value="EndOfLife">End of Life</option>
+                                <option value="Preview">Preview</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Release Date</label>
+                            <input type="date" class="form-input" @bind="_formReleaseDate" />
+                        </div>
+                        <div class="form-group">
+                            <label>End of Life Date</label>
+                            <input type="date" class="form-input" @bind="_formEolDate" />
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" @bind="_formIsLts" /> Long Term Support (LTS)
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>Recommended Upgrade Path</label>
+                            <input type="text" class="form-input" @bind="_formUpgradePath" placeholder="e.g., Upgrade to .NET 8" />
+                        </div>
+                        <div class="form-group wide">
+                            <label>Notes</label>
+                            <textarea class="form-textarea" @bind="_formNotes" placeholder="Additional notes about this version..."></textarea>
+                        </div>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn btn-outline" @onclick="CloseFrameworkModal">Cancel</button>
+                        <button class="btn btn-primary" @onclick="SaveFramework">
+                            <i class="bi bi-check-lg"></i> @(_editingFramework == null ? "Add Version" : "Save Changes")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Delete Confirmation Modal -->
+        @if (_showDeleteConfirm)
+        {
+            <div class="modal-overlay" @onclick="() => _showDeleteConfirm = false">
+                <div class="modal-content modal-small" @onclick:stopPropagation="true">
+                    <h2>Delete Framework Version</h2>
+                    <p>Are you sure you want to delete <strong>@_frameworkToDelete?.DisplayName</strong>?</p>
+                    @{
+                        var deleteAppCount = _frameworkToDelete != null ? GetFrameworkAppCount(_frameworkToDelete.Id) : 0;
+                    }
+                    @if (deleteAppCount > 0)
+                    {
+                        <p class="warning-text">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            This version is used by @deleteAppCount application(s).
+                        </p>
+                    }
+                    <div class="modal-actions">
+                        <button class="btn btn-outline" @onclick="() => _showDeleteConfirm = false">Cancel</button>
+                        <button class="btn btn-danger" @onclick="ConfirmDeleteFramework">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+    else if (_activeSection == AdminSection.TaskDocumentation)
+    {
+        <!-- Task Documentation Management -->
+        <section class="admin-section">
+            <div class="section-header">
+                <div>
+                    <h2>Task Documentation</h2>
+                    <p class="section-desc">Configure instructions and guidance for each task type</p>
+                </div>
+            </div>
+
+            <div class="task-doc-grid">
+                @foreach (var doc in _taskDocumentation)
+                {
+                    <div class="task-doc-card">
+                        <div class="task-doc-header">
+                            <div class="task-type-info">
+                                <i class="bi @GetTaskTypeIcon(doc.TaskType)"></i>
+                                <h3>@GetTaskTypeLabel(doc.TaskType)</h3>
+                            </div>
+                            <button class="btn btn-sm btn-outline" @onclick="() => EditTaskDocumentation(doc)">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                        </div>
+                        <div class="task-doc-content">
+                            <p class="task-doc-desc">@doc.Description</p>
+                            <div class="task-doc-meta">
+                                <span><i class="bi bi-clock"></i> @FormatDuration(doc.EstimatedDuration)</span>
+                                <span><i class="bi bi-list-ol"></i> @doc.Instructions.Count steps</span>
+                                @if (doc.Prerequisites.Any())
+                                {
+                                    <span><i class="bi bi-check-circle"></i> @doc.Prerequisites.Count prereqs</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <!-- Edit Task Documentation Modal -->
+        @if (_showTaskDocModal && _editingTaskDoc != null)
+        {
+            <div class="modal-overlay" @onclick="CloseTaskDocModal">
+                <div class="modal-content modal-xlarge" @onclick:stopPropagation="true">
+                    <button class="modal-close" @onclick="CloseTaskDocModal"><i class="bi bi-x-lg"></i></button>
+                    <h2>Edit Task Documentation: @GetTaskTypeLabel(_editingTaskDoc.TaskType)</h2>
+
+                    <div class="task-doc-form">
+                        <div class="form-group wide">
+                            <label>Description</label>
+                            <textarea class="form-textarea" @bind="_docFormDescription" rows="3"></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Estimated Duration</label>
+                                <input type="text" class="form-input" @bind="_docFormDuration" placeholder="e.g., 15-30 minutes" />
+                            </div>
+                        </div>
+
+                        <div class="form-group wide">
+                            <label>Prerequisites (one per line)</label>
+                            <textarea class="form-textarea" @bind="_docFormPrereqs" rows="3" placeholder="Access to ServiceNow&#10;Application role assignment&#10;etc."></textarea>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="form-section-header">
+                                <h3>Instructions</h3>
+                                <button class="btn btn-sm btn-outline" @onclick="AddInstruction">
+                                    <i class="bi bi-plus"></i> Add Step
+                                </button>
+                            </div>
+                            <div class="instructions-list">
+                                @for (var i = 0; i < _docFormInstructions.Count; i++)
+                                {
+                                    var index = i;
+                                    var instruction = _docFormInstructions[i];
+                                    <div class="instruction-item">
+                                        <div class="instruction-number">@(index + 1)</div>
+                                        <div class="instruction-content">
+                                            <input type="text" class="form-input"
+                                                   value="@instruction.Title"
+                                                   @onchange="@(e => UpdateInstructionTitle(index, e.Value?.ToString() ?? string.Empty))"
+                                                   placeholder="Step title" />
+                                            <textarea class="form-textarea small"
+                                                      value="@instruction.Description"
+                                                      @onchange="@(e => UpdateInstructionDescription(index, e.Value?.ToString() ?? string.Empty))"
+                                                      placeholder="Step description"></textarea>
+                                        </div>
+                                        <button class="btn-icon delete" @onclick="() => RemoveInstruction(index)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="form-section-header">
+                                <h3>System Guidance</h3>
+                                <button class="btn btn-sm btn-outline" @onclick="AddSystemGuidance">
+                                    <i class="bi bi-plus"></i> Add Guidance
+                                </button>
+                            </div>
+                            <div class="guidance-list">
+                                @for (var i = 0; i < _docFormGuidance.Count; i++)
+                                {
+                                    var index = i;
+                                    var guidance = _docFormGuidance[i];
+                                    <div class="guidance-item">
+                                        <div class="guidance-header">
+                                            <select class="form-select small"
+                                                    value="@guidance.SystemName"
+                                                    @onchange="@(e => UpdateGuidanceSystem(index, e.Value?.ToString() ?? string.Empty))">
+                                                <option value="ServiceNow">ServiceNow</option>
+                                                <option value="SharePoint">SharePoint</option>
+                                                <option value="Azure DevOps">Azure DevOps</option>
+                                                <option value="IIS">IIS</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                            <input type="text" class="form-input small"
+                                                   value="@guidance.ActionType"
+                                                   @onchange="@(e => UpdateGuidanceAction(index, e.Value?.ToString() ?? string.Empty))"
+                                                   placeholder="Action type (e.g., Create ticket)" />
+                                            <button class="btn-icon delete" @onclick="() => RemoveGuidance(index)">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                        <textarea class="form-textarea small"
+                                                  value="@guidance.Instructions"
+                                                  @onchange="@(e => UpdateGuidanceInstructions(index, e.Value?.ToString() ?? string.Empty))"
+                                                  placeholder="Instructions for this system action..."></textarea>
+                                        <input type="text" class="form-input"
+                                               value="@guidance.DirectLink"
+                                               @onchange="@(e => UpdateGuidanceLink(index, e.Value?.ToString() ?? string.Empty))"
+                                               placeholder="Direct link (optional)" />
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="form-section-header">
+                                <h3>Documentation Links</h3>
+                                <button class="btn btn-sm btn-outline" @onclick="AddDocLink">
+                                    <i class="bi bi-plus"></i> Add Link
+                                </button>
+                            </div>
+                            <div class="doc-links-list">
+                                @for (var i = 0; i < _docFormLinks.Count; i++)
+                                {
+                                    var index = i;
+                                    var link = _docFormLinks[i];
+                                    <div class="doc-link-item">
+                                        <input type="text" class="form-input"
+                                               value="@link.Title"
+                                               @onchange="@(e => UpdateLinkTitle(index, e.Value?.ToString() ?? string.Empty))"
+                                               placeholder="Link title" />
+                                        <input type="url" class="form-input"
+                                               value="@link.Url"
+                                               @onchange="@(e => UpdateLinkUrl(index, e.Value?.ToString() ?? string.Empty))"
+                                               placeholder="URL" />
+                                        <button class="btn-icon delete" @onclick="() => RemoveDocLink(index)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn btn-outline" @onclick="CloseTaskDocModal">Cancel</button>
+                        <button class="btn btn-primary" @onclick="SaveTaskDocumentation">
+                            <i class="bi bi-check-lg"></i> Save Documentation
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+    else if (_activeSection == AdminSection.Users)
+    {
+        <!-- User Management -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2>User Management</h2>
+                <div class="section-actions">
+                    <button class="btn btn-primary" @onclick="ShowAddUserModal">
+                        <i class="bi bi-plus-lg"></i>
+                        Add User
+                    </button>
+                </div>
+            </div>
+
+            <div class="users-table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Assigned Apps</th>
+                            <th>Last Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var user in _users)
+                        {
+                            <tr>
+                                <td class="user-cell">
+                                    <span class="user-avatar">@GetInitials(user.Name)</span>
+                                    <span>@user.Name</span>
+                                </td>
+                                <td>@user.Email</td>
+                                <td>
+                                    <span class="role-badge @GetRoleClass(user.Role)">@GetRoleLabel(user.Role)</span>
+                                </td>
+                                <td>@GetUserAppCount(user.Id)</td>
+                                <td>@FormatDate(user.LastLoginDate)</td>
+                                <td>
+                                    <button class="btn-icon" title="Edit" @onclick="() => EditUser(user)"><i class="bi bi-pencil"></i></button>
+                                    <button class="btn-icon" title="View Apps" @onclick="() => ViewUserApps(user)"><i class="bi bi-search"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Add/Edit User Modal -->
+        @if (_showUserModal)
+        {
+            <div class="modal-overlay" @onclick="CloseUserModal">
+                <div class="modal-content modal-large" @onclick:stopPropagation="true">
+                    <button class="modal-close" @onclick="CloseUserModal"><i class="bi bi-x-lg"></i></button>
+                    <h2>@(_editingUser == null ? "Add User" : "Edit User")</h2>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" class="form-input" @bind="_userFormName" placeholder="Full name" />
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" class="form-input" @bind="_userFormEmail" placeholder="email@company.com" />
+                        </div>
+                        <div class="form-group">
+                            <label>Department</label>
+                            <input type="text" class="form-input" @bind="_userFormDepartment" placeholder="e.g., IT, Finance" />
+                        </div>
+                        <div class="form-group">
+                            <label>System Role</label>
+                            <select class="form-select" @bind="_userFormRole">
+                                <option value="StandardUser">Standard User</option>
+                                <option value="PowerUser">Power User</option>
+                                <option value="SecurityAdministrator">Security Admin</option>
+                                <option value="Administrator">Administrator</option>
+                                <option value="ReadOnly">Read Only</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn btn-outline" @onclick="CloseUserModal">Cancel</button>
+                        <button class="btn btn-primary" @onclick="SaveUser">
+                            <i class="bi bi-check-lg"></i> @(_editingUser == null ? "Add User" : "Save Changes")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- View User Apps Modal -->
+        @if (_showUserAppsModal && _viewingUser != null)
+        {
+            <div class="modal-overlay" @onclick="CloseUserAppsModal">
+                <div class="modal-content" @onclick:stopPropagation="true">
+                    <button class="modal-close" @onclick="CloseUserAppsModal"><i class="bi bi-x-lg"></i></button>
+                    <h2>Applications for @_viewingUser.Name</h2>
+                    <p class="modal-subtitle">@_viewingUser.Department</p>
+
+                    @if (_userApps.Count > 0)
+                    {
+                        <div class="apps-list">
+                            @foreach (var app in _userApps)
+                            {
+                                var role = app.RoleAssignments.FirstOrDefault(r => r.UserId == _viewingUser.Id);
+                                <div class="app-item" @onclick="() => ViewApplication(app.Id)">
+                                    <span class="health-indicator @app.HealthCategory.ToString().ToLower()"></span>
+                                    <span class="app-name">@app.Name</span>
+                                    <span class="app-capability">@(role?.Role.ToString() ?? "Unknown")</span>
+                                    <i class="bi bi-chevron-right"></i>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="no-changes">No applications assigned to this user.</p>
+                    }
+                </div>
+            </div>
+        }
+    }
+    else if (_activeSection == AdminSection.TaskConfig)
+    {
+        <!-- Task Configuration -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2>Task Settings</h2>
+                <p class="section-desc">Configure task scheduling and escalation rules</p>
+            </div>
+
+            @if (_taskConfigSaveMessage != null)
+            {
+                <div class="save-message @(_taskConfigSaveSuccess ? "success" : "error")">
+                    <i class="bi @(_taskConfigSaveSuccess ? "bi-check-circle" : "bi-exclamation-triangle")"></i>
+                    @_taskConfigSaveMessage
+                    <button class="btn-icon" @onclick="() => _taskConfigSaveMessage = null"><i class="bi bi-x"></i></button>
+                </div>
+            }
+
+            <div class="config-grid">
+                <div class="config-card wide">
+                    <h3>Role Validation Schedule</h3>
+                    <p class="config-desc">How often users must validate their application roles</p>
+                    <div class="config-items">
+                        <div class="config-item">
+                            <label>Validation Frequency</label>
+                            <select class="config-select" @bind="_taskConfigValidationFrequency">
+                                <option value="90">Every 90 days</option>
+                                <option value="180">Every 180 days</option>
+                                <option value="365">Annually</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Reminder Before Due</label>
+                            <select class="config-select" @bind="_taskConfigReminderDays">
+                                <option value="7">7 days</option>
+                                <option value="14">14 days</option>
+                                <option value="30">30 days</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="config-card wide">
+                    <h3>Escalation Rules</h3>
+                    <p class="config-desc">When tasks are escalated to managers</p>
+                    <div class="config-items">
+                        <div class="config-item">
+                            <label>Escalate After Overdue</label>
+                            <select class="config-select" @bind="_taskConfigEscalationDays">
+                                <option value="7">7 days</option>
+                                <option value="14">14 days</option>
+                                <option value="30">30 days</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Critical Tasks Escalation</label>
+                            <select class="config-select" @bind="_taskConfigCriticalEscalation">
+                                <option value="0">Immediately when overdue</option>
+                                <option value="3">After 3 days</option>
+                                <option value="7">After 7 days</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="config-card wide">
+                    <h3>Workload Distribution</h3>
+                    <p class="config-desc">Maximum concurrent tasks per user</p>
+                    <div class="config-items">
+                        <div class="config-item">
+                            <label>Max Active Tasks</label>
+                            <div class="config-value">
+                                <input type="number" min="1" max="50" @bind="_taskConfigMaxTasks" />
+                                <span class="unit">tasks</span>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>Enable Smart Scheduling</label>
+                            <label class="toggle">
+                                <input type="checkbox" @bind="_taskConfigSmartScheduling" />
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="config-footer-actions">
+                <button class="btn btn-outline" @onclick="ResetTaskConfig">Reset to Defaults</button>
+                <button class="btn btn-primary" @onclick="SaveTaskConfig" disabled="@_isSavingTaskConfig">
+                    @if (_isSavingTaskConfig)
+                    {
+                        <span class="spinner-sm"></span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-check-lg"></i>
+                    }
+                    Save Changes
+                </button>
+            </div>
+        </section>
+    }
+    else if (_activeSection == AdminSection.AuditLog)
+    {
+        <!-- Audit Log -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2>Audit Log</h2>
+                <div class="section-actions">
+                    <select class="filter-select" @bind="_auditLogCategoryFilter" @bind:after="LoadAuditLog">
+                        <option value="">All Events</option>
+                        <option value="Config">Configuration Changes</option>
+                        <option value="User">User Actions</option>
+                        <option value="Sync">Data Syncs</option>
+                        <option value="Task">Task Events</option>
+                    </select>
+                    <button class="btn btn-outline" @onclick="ExportAuditLog">
+                        <i class="bi bi-download"></i>
+                        Export CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="audit-log">
+                @foreach (var entry in _auditLogEntries)
+                {
+                    <div class="audit-entry">
+                        <div class="audit-icon @entry.Category.ToLower()">
+                            @GetAuditCategoryIcon(entry.Category)
+                        </div>
+                        <div class="audit-content">
+                            <div class="audit-message">@entry.Message</div>
+                            <div class="audit-meta">
+                                <span class="audit-user">@entry.UserName</span>
+                                <span class="audit-time">@entry.Timestamp.ToString("MMM d, yyyy h:mm tt")</span>
+                            </div>
+                        </div>
+                    </div>
+                }
+                @if (_auditLogEntries.Count == 0)
+                {
+                    <p class="no-changes">No audit log entries match the selected filter.</p>
+                }
+            </div>
+        </section>
+    }
+    else if (_activeSection == AdminSection.System)
+    {
+        <!-- System Settings -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2>System Settings</h2>
+                <p class="section-desc">General application configuration and data source connections</p>
+            </div>
+
+            <div class="system-info">
+                <div class="info-card">
+                    <h3>Environment</h3>
+                    <div class="info-items">
+                        <div class="info-item">
+                            <span class="info-label">Mode</span>
+                            <span class="info-value badge-dev">@_systemSettings.EnvironmentMode</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Data Source</span>
+                            <span class="info-value @(_systemSettings.MockDataEnabled ? "badge-mock" : "badge-live")">
+                                @(_systemSettings.MockDataEnabled ? "Mock Data" : "Live Data")
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Version</span>
+                            <span class="info-value">@_systemSettings.ApplicationVersion</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-card">
+                    <h3>Feature Flags</h3>
+                    <div class="feature-flags">
+                        <div class="feature-flag">
+                            <span class="flag-name">Mock Data Mode</span>
+                            <label class="toggle" title="Toggle mock data mode">
+                                <input type="checkbox" checked="@_systemSettings.MockDataEnabled"
+                                       @onchange="@(e => ToggleFeatureFlag("MockData", (bool)(e.Value ?? false)))" />
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="feature-flag">
+                            <span class="flag-name">Dev Mode Sidebar</span>
+                            <label class="toggle">
+                                <input type="checkbox" checked="@_systemSettings.DevModeSidebarEnabled"
+                                       @onchange="@(e => ToggleFeatureFlag("DevSidebar", (bool)(e.Value ?? false)))" />
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="feature-flag">
+                            <span class="flag-name">AI Recommendations</span>
+                            <label class="toggle">
+                                <input type="checkbox" checked="@_systemSettings.AiRecommendationsEnabled"
+                                       @onchange="@(e => ToggleFeatureFlag("AiRecommendations", (bool)(e.Value ?? false)))" />
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Configuration -->
+            <div class="ai-config-section">
+                <h3>AI Configuration</h3>
+                <p class="section-desc">Configure AI-powered recommendation services</p>
+
+                <div class="ai-status-card">
+                    <div class="ai-provider">
+                        <i class="bi bi-robot"></i>
+                        <div class="provider-info">
+                            <h4>Ollama (Local)</h4>
+                            <span class="status-badge @(_aiStatus?.IsAvailable == true ? "connected" : "disconnected")">
+                                @(_aiStatus?.IsAvailable == true ? "Connected" : _aiStatus?.Error ?? "Not Connected")
+                            </span>
+                        </div>
+                        <button class="btn btn-sm btn-outline" @onclick="TestAiConnection">
+                            <i class="bi bi-plug"></i> Test
+                        </button>
+                    </div>
+                    @if (_aiStatus?.IsAvailable == true)
+                    {
+                        <div class="ai-details">
+                            <span class="detail">Model: @_aiStatus.Model</span>
+                            <span class="detail">Response time: @(_aiStatus.ResponseTime?.TotalMilliseconds.ToString("F0") ?? "-")ms</span>
+                        </div>
+                    }
+                </div>
+
+                <div class="ai-credentials-grid">
+                    <div class="credential-card">
+                        <h4><i class="bi bi-hdd-network"></i> Ollama Settings</h4>
+                        <div class="form-group">
+                            <label>Endpoint</label>
+                            <input type="text" class="form-control" placeholder="http://localhost:11434"
+                                   @bind="_ollamaEndpoint" />
+                        </div>
+                        <div class="form-group">
+                            <label>Model</label>
+                            <input type="text" class="form-control" placeholder="llama3.2"
+                                   @bind="_ollamaModel" />
+                        </div>
+                        <button class="btn btn-sm btn-primary" @onclick="SaveOllamaConfig">
+                            <i class="bi bi-check-lg"></i> Save
+                        </button>
+                    </div>
+
+                    <div class="credential-card">
+                        <h4><i class="bi bi-cloud"></i> Azure OpenAI</h4>
+                        <div class="form-group">
+                            <label>Endpoint</label>
+                            @if (_hasAzureOpenAiEndpoint)
+                            {
+                                <div class="masked-value">
+                                    <span>••••••••••••••••</span>
+                                    <button class="btn-icon" @onclick="() => _editAzureOpenAiEndpoint = true">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                <input type="text" class="form-control" placeholder="https://your-resource.openai.azure.com"
+                                       @bind="_azureOpenAiEndpoint" />
+                            }
+                        </div>
+                        <div class="form-group">
+                            <label>API Key</label>
+                            @if (_hasAzureOpenAiKey)
+                            {
+                                <div class="masked-value">
+                                    <span>••••••••••••••••</span>
+                                    <button class="btn-icon" @onclick="() => _editAzureOpenAiKey = true">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                <input type="password" class="form-control" placeholder="API Key"
+                                       @bind="_azureOpenAiKey" />
+                            }
+                        </div>
+                        <div class="form-group">
+                            <label>Deployment Name</label>
+                            <input type="text" class="form-control" placeholder="gpt-4"
+                                   @bind="_azureOpenAiDeployment" />
+                        </div>
+                        <button class="btn btn-sm btn-primary" @onclick="SaveAzureOpenAiConfig">
+                            <i class="bi bi-check-lg"></i> Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Source Configurations -->
+            <div class="data-sources-config">
+                <h3>Data Source Connections</h3>
+                <p class="section-desc">Configure connections to external data sources</p>
+
+                @foreach (var ds in _dataSourceConfigs)
+                {
+                    <div class="data-source-card @(ds.IsConnected ? "connected" : "")">
+                        <div class="ds-header">
+                            <div class="ds-info">
+                                <i class="bi @GetDataSourceIcon(ds.Type)"></i>
+                                <div>
+                                    <h4>@ds.Name</h4>
+                                    <span class="ds-status @(ds.IsConnected ? "connected" : "disconnected")">
+                                        @(ds.IsConnected ? "Connected" : ds.LastSyncStatus ?? "Not configured")
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="ds-actions">
+                                <label class="toggle" title="Enable/disable this data source">
+                                    <input type="checkbox" checked="@ds.IsEnabled"
+                                           @onchange="@(e => ToggleDataSource(ds.Id, (bool)(e.Value ?? false)))" />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <button class="btn btn-sm btn-outline" @onclick="() => ConfigureDataSource(ds)">
+                                    <i class="bi bi-gear"></i> Configure
+                                </button>
+                                <button class="btn btn-sm btn-outline" @onclick="() => TestDataSourceConnection(ds.Id)" disabled="@(!ds.IsEnabled)">
+                                    <i class="bi bi-plug"></i> Test
+                                </button>
+                            </div>
+                        </div>
+                        @if (ds.LastSyncTime.HasValue)
+                        {
+                            <div class="ds-sync-info">
+                                Last sync: @ds.LastSyncTime.Value.ToString("MMM d, yyyy h:mm tt")
+                                @if (ds.LastSyncRecordCount.HasValue)
+                                {
+                                    <span>(@ds.LastSyncRecordCount records)</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+
+        <!-- Data Source Configuration Modal -->
+        @if (_showDataSourceModal && _editingDataSource != null)
+        {
+            <div class="modal-overlay" @onclick="CloseDataSourceModal">
+                <div class="modal-content modal-large" @onclick:stopPropagation="true">
+                    <button class="modal-close" @onclick="CloseDataSourceModal"><i class="bi bi-x-lg"></i></button>
+                    <h2>Configure @_editingDataSource.Name</h2>
+
+                    <div class="form-grid">
+                        @switch (_editingDataSource.Type)
+                        {
+                            case DataSourceType.AzureDevOps:
+                                <div class="form-group">
+                                    <label>Organization</label>
+                                    <input type="text" class="form-input" @bind="_dsFormOrganization" placeholder="e.g., mycompany" />
+                                </div>
+                                <div class="form-group">
+                                    <label>Project</label>
+                                    <input type="text" class="form-input" @bind="_dsFormProject" placeholder="e.g., MyProject" />
+                                </div>
+                                <div class="form-group wide">
+                                    <label>Personal Access Token (PAT)</label>
+                                    @if (_dsHasApiKey && !_dsEditApiKey)
+                                    {
+                                        <div class="masked-value">
+                                            <span class="masked-text">••••••••••••••••</span>
+                                            <button type="button" class="btn-icon" @onclick="() => _dsEditApiKey = true" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <input type="password" class="form-input" @bind="_dsFormApiKey" placeholder="Enter PAT" />
+                                    }
+                                </div>
+                                break;
+
+                            case DataSourceType.SharePoint:
+                                <div class="form-group wide">
+                                    <label>Site URL</label>
+                                    <input type="url" class="form-input" @bind="_dsFormSiteUrl" placeholder="https://company.sharepoint.com/sites/applications" />
+                                </div>
+                                <div class="form-group">
+                                    <label>List Name</label>
+                                    <input type="text" class="form-input" @bind="_dsFormListName" placeholder="e.g., Applications" />
+                                </div>
+                                break;
+
+                            case DataSourceType.ServiceNow:
+                                <div class="form-group">
+                                    <label>Instance</label>
+                                    <input type="text" class="form-input" @bind="_dsFormInstance" placeholder="e.g., company.service-now.com" />
+                                </div>
+                                <div class="form-group">
+                                    <label>API Key / Password</label>
+                                    @if (_dsHasApiKey && !_dsEditApiKey)
+                                    {
+                                        <div class="masked-value">
+                                            <span class="masked-text">••••••••••••••••</span>
+                                            <button type="button" class="btn-icon" @onclick="() => _dsEditApiKey = true" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <input type="password" class="form-input" @bind="_dsFormApiKey" placeholder="Enter credentials" />
+                                    }
+                                </div>
+                                <div class="form-group">
+                                    <label>Table</label>
+                                    <input type="text" class="form-input" @bind="_dsFormTable" placeholder="e.g., cmdb_ci_appl" />
+                                </div>
+                                break;
+
+                            case DataSourceType.IisDatabase:
+                                <div class="form-group wide">
+                                    <label>Connection String</label>
+                                    @if (_dsHasConnectionString && !_dsEditConnectionString)
+                                    {
+                                        <div class="masked-value">
+                                            <span class="masked-text">••••••••••••••••</span>
+                                            <button type="button" class="btn-icon" @onclick="() => _dsEditConnectionString = true" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <input type="password" class="form-input" @bind="_dsFormConnectionString" placeholder="Server=...;Database=...;..." />
+                                    }
+                                </div>
+                                break;
+                        }
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn btn-outline" @onclick="CloseDataSourceModal">Cancel</button>
+                        <button class="btn btn-primary" @onclick="SaveDataSourceConfig">
+                            <i class="bi bi-check-lg"></i> Save Configuration
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Test Result Modal -->
+        @if (_dataSourceTestResult != null)
+        {
+            <div class="modal-overlay" @onclick="() => _dataSourceTestResult = null">
+                <div class="modal-content modal-small" @onclick:stopPropagation="true">
+                    <h2>Connection Test Result</h2>
+                    <div class="test-result @(_dataSourceTestResult.Success ? "success" : "error")">
+                        <i class="bi @(_dataSourceTestResult.Success ? "bi-check-circle" : "bi-exclamation-triangle")"></i>
+                        <p>@_dataSourceTestResult.Message</p>
+                        @if (_dataSourceTestResult.ResponseTime.HasValue)
+                        {
+                            <span class="test-time">Response time: @_dataSourceTestResult.ResponseTime.Value.TotalMilliseconds ms</span>
+                        }
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-primary" @onclick="() => _dataSourceTestResult = null">Close</button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Health Scoring Config Modal -->
+@if (_showHealthConfigModal)
+{
+    <div class="modal-overlay" @onclick="CloseHealthConfigModal">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <h2>@GetHealthConfigModalTitle()</h2>
+
+            @if (_healthConfigType == "security")
+            {
+                <div class="form-group">
+                    <label>Critical Vulnerability</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editSecurityWeights.Critical" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>High Severity</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editSecurityWeights.High" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Medium Severity</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editSecurityWeights.Medium" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Low Severity</label>
+                    <div class="input-group">
+                        <input type="number" step="0.1" @bind="_editSecurityWeights.Low" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+            }
+            else if (_healthConfigType == "usage")
+            {
+                <div class="form-group">
+                    <label>No Usage</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editUsageWeights.None" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Very Low Usage</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editUsageWeights.VeryLow" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>High Usage</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editUsageWeights.High" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+            }
+            else if (_healthConfigType == "maintenance")
+            {
+                <div class="form-group">
+                    <label>Recent Activity (&lt;90 days)</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editMaintenanceWeights.Recent" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Stale (&gt;365 days)</label>
+                    <div class="input-group">
+                        <input type="number" @bind="_editMaintenanceWeights.Stale" />
+                        <span class="unit">pts</span>
+                    </div>
+                </div>
+            }
+            else if (_healthConfigType == "thresholds")
+            {
+                <div class="form-group">
+                    <label>Healthy Minimum Score</label>
+                    <div class="input-group">
+                        <input type="number" min="0" max="100" @bind="_editThresholds.HealthyMin" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Needs Attention Minimum Score</label>
+                    <div class="input-group">
+                        <input type="number" min="0" max="100" @bind="_editThresholds.AttentionMin" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>At Risk Minimum Score</label>
+                    <div class="input-group">
+                        <input type="number" min="0" max="100" @bind="_editThresholds.AtRiskMin" />
+                    </div>
+                </div>
+                <p class="threshold-note">Critical category is automatically 0 to @(_editThresholds.AtRiskMin - 1)</p>
+            }
+
+            <div class="modal-actions">
+                <button class="btn btn-outline" @onclick="CloseHealthConfigModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveHealthConfig">Save Changes</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<User> _users = [];
+    private List<Application> _applications = [];
+    private AdminSection _activeSection = AdminSection.HealthScoring;
+
+    // Framework Versions state
+    private List<FrameworkVersion> _frameworkVersions = [];
+    private List<FrameworkVersion> _filteredFrameworkVersions = [];
+    private Dictionary<string, int> _frameworkAppCounts = [];
+    private string _frameworkTypeFilter = "";
+    private string _frameworkStatusFilter = "";
+    private bool _showFrameworkModal;
+    private bool _showDeleteConfirm;
+    private FrameworkVersion? _editingFramework;
+    private FrameworkVersion? _frameworkToDelete;
+    private bool _isRefreshingEol;
+    private EolRefreshResult? _eolRefreshResult;
+
+    // Framework form fields
+    private FrameworkType _formFrameworkType = FrameworkType.DotNet;
+    private string _formVersion = "";
+    private string _formDisplayName = "";
+    private string _formStatus = "Active";
+    private DateTime? _formReleaseDate;
+    private DateTime? _formEolDate;
+    private bool _formIsLts;
+    private string _formUpgradePath = "";
+    private string _formNotes = "";
+
+    // Task Documentation state
+    private List<TaskDocumentation> _taskDocumentation = [];
+    private bool _showTaskDocModal;
+    private TaskDocumentation? _editingTaskDoc;
+
+    // Task Documentation form fields
+    private string _docFormDescription = "";
+    private string _docFormDuration = "";
+    private string _docFormPrereqs = "";
+    private List<EditableInstruction> _docFormInstructions = [];
+    private List<EditableGuidance> _docFormGuidance = [];
+    private List<EditableLink> _docFormLinks = [];
+
+    // User Management state
+    private bool _showUserModal;
+    private bool _showUserAppsModal;
+    private User? _editingUser;
+    private User? _viewingUser;
+    private List<Application> _userApps = [];
+    private string _userFormName = "";
+    private string _userFormEmail = "";
+    private string _userFormDepartment = "";
+    private string _userFormRole = "StandardUser";
+
+    // Task Config state
+    private int _taskConfigValidationFrequency = 90;
+    private int _taskConfigReminderDays = 7;
+    private int _taskConfigEscalationDays = 14;
+    private int _taskConfigCriticalEscalation = 0;
+    private int _taskConfigMaxTasks = 10;
+    private bool _taskConfigSmartScheduling = true;
+    private bool _isSavingTaskConfig;
+    private string? _taskConfigSaveMessage;
+    private bool _taskConfigSaveSuccess;
+
+    // Audit Log state
+    private List<AuditLogEntry> _auditLogEntries = [];
+    private string _auditLogCategoryFilter = "";
+
+    // System Settings state
+    private SystemSettings _systemSettings = new();
+    private List<DataSourceConfig> _dataSourceConfigs = [];
+    private bool _showDataSourceModal;
+    private DataSourceConfig? _editingDataSource;
+    private DataSourceTestResult? _dataSourceTestResult;
+
+    // Data Source form fields
+    private string _dsFormOrganization = "";
+    private string _dsFormProject = "";
+    private string _dsFormApiKey = "";
+    private string _dsFormSiteUrl = "";
+    private string _dsFormListName = "";
+    private string _dsFormInstance = "";
+    private string _dsFormTable = "";
+    private string _dsFormConnectionString = "";
+    // Credential status tracking for data sources
+    private bool _dsHasApiKey;
+    private bool _dsHasConnectionString;
+    private bool _dsEditApiKey;
+    private bool _dsEditConnectionString;
+
+    // Health Scoring Config state
+    private bool _showHealthConfigModal;
+    private string _healthConfigType = "";
+    private bool _healthConfigSaved;
+    private SecurityWeights _securityWeights = new();
+    private UsageWeights _usageWeights = new();
+    private MaintenanceWeights _maintenanceWeights = new();
+    private CategoryThresholds _thresholds = new();
+    // Editing copies
+    private SecurityWeights _editSecurityWeights = new();
+    private UsageWeights _editUsageWeights = new();
+    private MaintenanceWeights _editMaintenanceWeights = new();
+    private CategoryThresholds _editThresholds = new();
+
+    // AI Configuration state
+    private AiServiceStatus? _aiStatus;
+    private string _ollamaEndpoint = "http://localhost:11434";
+    private string _ollamaModel = "llama3.2";
+    private string _azureOpenAiEndpoint = "";
+    private string _azureOpenAiKey = "";
+    private string _azureOpenAiDeployment = "";
+    private bool _hasAzureOpenAiEndpoint;
+    private bool _hasAzureOpenAiKey;
+    private bool _editAzureOpenAiEndpoint;
+    private bool _editAzureOpenAiKey;
+    private bool _aiConfigSaving;
+
+    private enum AdminSection
+    {
+        HealthScoring,
+        FrameworkVersions,
+        TaskDocumentation,
+        Users,
+        TaskConfig,
+        AuditLog,
+        System
+    }
+
+    // Editable helper classes for forms
+    private class EditableInstruction
+    {
+        public int StepNumber { get; set; }
+        public string Title { get; set; } = "";
+        public string Description { get; set; } = "";
+    }
+
+    private class EditableGuidance
+    {
+        public string SystemName { get; set; } = "ServiceNow";
+        public string ActionType { get; set; } = "";
+        public string Instructions { get; set; } = "";
+        public string DirectLink { get; set; } = "";
+    }
+
+    private class EditableLink
+    {
+        public string Title { get; set; } = "";
+        public string Url { get; set; } = "";
+    }
+
+    // Health Scoring Config classes
+    private class SecurityWeights
+    {
+        public int Critical { get; set; } = -15;
+        public int High { get; set; } = -8;
+        public int Medium { get; set; } = -2;
+        public double Low { get; set; } = -0.5;
+    }
+
+    private class UsageWeights
+    {
+        public int None { get; set; } = -20;
+        public int VeryLow { get; set; } = -10;
+        public int High { get; set; } = 5;
+    }
+
+    private class MaintenanceWeights
+    {
+        public int Recent { get; set; } = 10;
+        public int Stale { get; set; } = -10;
+    }
+
+    private class CategoryThresholds
+    {
+        public int HealthyMin { get; set; } = 80;
+        public int AttentionMin { get; set; } = 60;
+        public int AtRiskMin { get; set; } = 40;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = (await DataService.GetUsersAsync()).ToList();
+        _applications = (await DataService.GetApplicationsAsync()).ToList();
+        _frameworkVersions = (await DataService.GetAllFrameworkVersionsAsync()).ToList();
+        _taskDocumentation = (await DataService.GetAllTaskDocumentationAsync()).ToList();
+
+        // Pre-calculate app counts for frameworks
+        foreach (var version in _frameworkVersions)
+        {
+            var apps = await DataService.GetApplicationsByFrameworkAsync(version.Id);
+            _frameworkAppCounts[version.Id] = apps.Count;
+        }
+
+        FilterFrameworks();
+
+        // Load task scheduling config
+        var taskConfig = await DataService.GetTaskSchedulingConfigAsync();
+        _taskConfigValidationFrequency = taskConfig.RoleValidationFrequencyDays;
+        _taskConfigReminderDays = taskConfig.ReminderDaysBeforeDue;
+        _taskConfigEscalationDays = taskConfig.EscalationDaysAfterOverdue;
+        _taskConfigCriticalEscalation = taskConfig.CriticalTaskEscalationDays;
+        _taskConfigMaxTasks = taskConfig.MaxActiveTasksPerUser;
+        _taskConfigSmartScheduling = taskConfig.SmartSchedulingEnabled;
+
+        // Load audit log
+        await LoadAuditLog();
+
+        // Load system settings
+        _systemSettings = await DataService.GetSystemSettingsAsync();
+        _dataSourceConfigs = (await DataService.GetDataSourceConfigsAsync()).ToList();
+
+        // Load AI configuration from secure storage
+        await LoadAiConfiguration();
+    }
+
+    private void SetActiveSection(AdminSection section)
+    {
+        _activeSection = section;
+    }
+
+    #region Framework Version Management
+
+    private void FilterFrameworks()
+    {
+        var filtered = _frameworkVersions.AsEnumerable();
+
+        if (!string.IsNullOrEmpty(_frameworkTypeFilter) && Enum.TryParse<FrameworkType>(_frameworkTypeFilter, out var type))
+        {
+            filtered = filtered.Where(v => v.Framework == type);
+        }
+
+        if (!string.IsNullOrEmpty(_frameworkStatusFilter) && Enum.TryParse<SupportStatus>(_frameworkStatusFilter, out var status))
+        {
+            filtered = filtered.Where(v => v.Status == status);
+        }
+
+        _filteredFrameworkVersions = filtered
+            .OrderBy(v => v.Framework)
+            .ThenBy(v => v.EndOfLifeDate ?? DateTimeOffset.MaxValue)
+            .ToList();
+    }
+
+    private void ShowAddFrameworkModal()
+    {
+        _editingFramework = null;
+        ResetFrameworkForm();
+        _showFrameworkModal = true;
+    }
+
+    private void EditFramework(FrameworkVersion version)
+    {
+        _editingFramework = version;
+        _formFrameworkType = version.Framework;
+        _formVersion = version.Version;
+        _formDisplayName = version.DisplayName;
+        _formStatus = version.Status.ToString();
+        _formReleaseDate = version.ReleaseDate?.DateTime;
+        _formEolDate = version.EndOfLifeDate?.DateTime;
+        _formIsLts = version.IsLts;
+        _formUpgradePath = version.RecommendedUpgradePath ?? "";
+        _formNotes = version.Notes ?? "";
+        _showFrameworkModal = true;
+    }
+
+    private void CloseFrameworkModal()
+    {
+        _showFrameworkModal = false;
+        _editingFramework = null;
+        ResetFrameworkForm();
+    }
+
+    private void ResetFrameworkForm()
+    {
+        _formFrameworkType = FrameworkType.DotNet;
+        _formVersion = "";
+        _formDisplayName = "";
+        _formStatus = "Active";
+        _formReleaseDate = null;
+        _formEolDate = null;
+        _formIsLts = false;
+        _formUpgradePath = "";
+        _formNotes = "";
+    }
+
+    private async Task SaveFramework()
+    {
+        if (string.IsNullOrWhiteSpace(_formVersion) || string.IsNullOrWhiteSpace(_formDisplayName))
+            return;
+
+        if (!Enum.TryParse<SupportStatus>(_formStatus, out var status))
+            status = SupportStatus.Active;
+
+        var version = new FrameworkVersion
+        {
+            Id = _editingFramework?.Id ?? Guid.NewGuid().ToString(),
+            Framework = _formFrameworkType,
+            Version = _formVersion,
+            DisplayName = _formDisplayName,
+            Status = status,
+            ReleaseDate = _formReleaseDate.HasValue ? new DateTimeOffset(_formReleaseDate.Value, TimeSpan.Zero) : null,
+            EndOfLifeDate = _formEolDate.HasValue ? new DateTimeOffset(_formEolDate.Value, TimeSpan.Zero) : null,
+            IsLts = _formIsLts,
+            RecommendedUpgradePath = string.IsNullOrWhiteSpace(_formUpgradePath) ? null : _formUpgradePath,
+            Notes = string.IsNullOrWhiteSpace(_formNotes) ? null : _formNotes,
+            LastUpdated = DateTimeOffset.UtcNow
+        };
+
+        if (_editingFramework != null)
+        {
+            await DataService.UpdateFrameworkVersionAsync(version);
+            var index = _frameworkVersions.FindIndex(v => v.Id == version.Id);
+            if (index >= 0) _frameworkVersions[index] = version;
+        }
+        else
+        {
+            var created = await DataService.CreateFrameworkVersionAsync(version);
+            _frameworkVersions.Add(created);
+            _frameworkAppCounts[created.Id] = 0;
+        }
+
+        FilterFrameworks();
+        CloseFrameworkModal();
+    }
+
+    private void DeleteFramework(FrameworkVersion version)
+    {
+        _frameworkToDelete = version;
+        _showDeleteConfirm = true;
+    }
+
+    private async Task ConfirmDeleteFramework()
+    {
+        if (_frameworkToDelete != null)
+        {
+            await DataService.DeleteFrameworkVersionAsync(_frameworkToDelete.Id);
+            _frameworkVersions.RemoveAll(v => v.Id == _frameworkToDelete.Id);
+            _frameworkAppCounts.Remove(_frameworkToDelete.Id);
+            FilterFrameworks();
+        }
+        _showDeleteConfirm = false;
+        _frameworkToDelete = null;
+    }
+
+    private async Task RefreshEolData()
+    {
+        _isRefreshingEol = true;
+        _eolRefreshResult = null;
+        StateHasChanged();
+
+        try
+        {
+            _eolRefreshResult = await EolDataService.RefreshEolDataAsync();
+
+            // Reload framework versions to show any changes
+            _frameworkVersions = (await DataService.GetAllFrameworkVersionsAsync()).ToList();
+
+            // Recalculate app counts for any new versions
+            foreach (var version in _frameworkVersions)
+            {
+                if (!_frameworkAppCounts.ContainsKey(version.Id))
+                {
+                    var apps = await DataService.GetApplicationsByFrameworkAsync(version.Id);
+                    _frameworkAppCounts[version.Id] = apps.Count;
+                }
+            }
+
+            FilterFrameworks();
+        }
+        catch (Exception ex)
+        {
+            _eolRefreshResult = new EolRefreshResult
+            {
+                Success = false,
+                ErrorMessage = $"Unexpected error: {ex.Message}",
+                Errors = [new EolFetchError { Framework = FrameworkType.Other, ErrorMessage = ex.Message }]
+            };
+        }
+        finally
+        {
+            _isRefreshingEol = false;
+            StateHasChanged();
+        }
+    }
+
+    private int GetFrameworkAppCount(string versionId)
+    {
+        return _frameworkAppCounts.TryGetValue(versionId, out var count) ? count : 0;
+    }
+
+    private static string GetFrameworkRowClass(FrameworkVersion version) => version.EolUrgency switch
+    {
+        EolUrgency.PastEol => "row-past-eol",
+        EolUrgency.Critical => "row-critical",
+        EolUrgency.High => "row-high",
+        _ => ""
+    };
+
+    private static string GetFrameworkIcon(FrameworkType type) => type switch
+    {
+        FrameworkType.DotNet => "bi-microsoft",
+        FrameworkType.DotNetFramework => "bi-microsoft",
+        FrameworkType.Python => "bi-filetype-py",
+        FrameworkType.R => "bi-bar-chart",
+        FrameworkType.NodeJs => "bi-nodejs",
+        FrameworkType.Java => "bi-cup-hot",
+        _ => "bi-code-slash"
+    };
+
+    private static string GetFrameworkLabel(FrameworkType type) => type switch
+    {
+        FrameworkType.DotNet => ".NET",
+        FrameworkType.DotNetFramework => ".NET Framework",
+        FrameworkType.Python => "Python",
+        FrameworkType.R => "R",
+        FrameworkType.NodeJs => "Node.js",
+        FrameworkType.Java => "Java",
+        _ => "Other"
+    };
+
+    private static string GetStatusLabel(SupportStatus status) => status switch
+    {
+        SupportStatus.Active => "Active",
+        SupportStatus.Maintenance => "Maintenance",
+        SupportStatus.EndOfLife => "End of Life",
+        SupportStatus.Preview => "Preview",
+        _ => "Unknown"
+    };
+
+    #endregion
+
+    #region Task Documentation Management
+
+    private void EditTaskDocumentation(TaskDocumentation doc)
+    {
+        _editingTaskDoc = doc;
+        _docFormDescription = doc.Description;
+        _docFormDuration = FormatDuration(doc.EstimatedDuration);
+        _docFormPrereqs = string.Join("\n", doc.Prerequisites);
+
+        _docFormInstructions = doc.Instructions.Select(i => new EditableInstruction
+        {
+            StepNumber = i.StepNumber,
+            Title = i.Title,
+            Description = i.Description
+        }).ToList();
+
+        _docFormGuidance = doc.SystemGuidance.Select(g => new EditableGuidance
+        {
+            SystemName = g.SystemName,
+            ActionType = g.ActionType,
+            Instructions = g.Instructions,
+            DirectLink = g.DirectLink ?? ""
+        }).ToList();
+
+        _docFormLinks = doc.RelatedLinks.Select(l => new EditableLink
+        {
+            Title = l.Title,
+            Url = l.Url
+        }).ToList();
+
+        _showTaskDocModal = true;
+    }
+
+    private void CloseTaskDocModal()
+    {
+        _showTaskDocModal = false;
+        _editingTaskDoc = null;
+        ResetTaskDocForm();
+    }
+
+    private void ResetTaskDocForm()
+    {
+        _docFormDescription = "";
+        _docFormDuration = "";
+        _docFormPrereqs = "";
+        _docFormInstructions = [];
+        _docFormGuidance = [];
+        _docFormLinks = [];
+    }
+
+    private async Task SaveTaskDocumentation()
+    {
+        if (_editingTaskDoc == null) return;
+
+        var prereqs = _docFormPrereqs
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Trim())
+            .Where(p => !string.IsNullOrEmpty(p))
+            .ToList();
+
+        var instructions = _docFormInstructions
+            .Where(i => !string.IsNullOrWhiteSpace(i.Title))
+            .Select((i, idx) => new TaskInstruction
+            {
+                StepNumber = idx + 1,
+                Title = i.Title,
+                Description = string.IsNullOrWhiteSpace(i.Description) ? i.Title : i.Description
+            }).ToList();
+
+        var guidance = _docFormGuidance.Select(g => new SystemGuidance
+        {
+            SystemName = g.SystemName,
+            ActionType = g.ActionType,
+            Instructions = g.Instructions,
+            DirectLink = string.IsNullOrWhiteSpace(g.DirectLink) ? null : g.DirectLink
+        }).ToList();
+
+        var links = _docFormLinks
+            .Where(l => !string.IsNullOrWhiteSpace(l.Title) && !string.IsNullOrWhiteSpace(l.Url))
+            .Select(l => new DocumentationLink
+            {
+                Title = l.Title,
+                Url = l.Url
+            }).ToList();
+
+        var updated = _editingTaskDoc with
+        {
+            Description = _docFormDescription,
+            EstimatedDuration = ParseDuration(_docFormDuration),
+            Prerequisites = prereqs,
+            Instructions = instructions,
+            SystemGuidance = guidance,
+            RelatedLinks = links
+        };
+
+        await DataService.UpdateTaskDocumentationAsync(updated);
+
+        var index = _taskDocumentation.FindIndex(d => d.TaskType == updated.TaskType);
+        if (index >= 0) _taskDocumentation[index] = updated;
+
+        CloseTaskDocModal();
+    }
+
+    private void AddInstruction()
+    {
+        _docFormInstructions.Add(new EditableInstruction
+        {
+            StepNumber = _docFormInstructions.Count + 1,
+            Title = "",
+            Description = ""
+        });
+    }
+
+    private void RemoveInstruction(int index)
+    {
+        if (index >= 0 && index < _docFormInstructions.Count)
+        {
+            _docFormInstructions.RemoveAt(index);
+        }
+    }
+
+    private void UpdateInstructionTitle(int index, string title)
+    {
+        if (index >= 0 && index < _docFormInstructions.Count)
+        {
+            _docFormInstructions[index].Title = title;
+        }
+    }
+
+    private void AddSystemGuidance()
+    {
+        _docFormGuidance.Add(new EditableGuidance());
+    }
+
+    private void RemoveGuidance(int index)
+    {
+        if (index >= 0 && index < _docFormGuidance.Count)
+        {
+            _docFormGuidance.RemoveAt(index);
+        }
+    }
+
+    private void UpdateGuidanceSystem(int index, string system)
+    {
+        if (index >= 0 && index < _docFormGuidance.Count)
+        {
+            _docFormGuidance[index].SystemName = system;
+        }
+    }
+
+    private void UpdateGuidanceAction(int index, string action)
+    {
+        if (index >= 0 && index < _docFormGuidance.Count)
+        {
+            _docFormGuidance[index].ActionType = action;
+        }
+    }
+
+    private void UpdateGuidanceLink(int index, string link)
+    {
+        if (index >= 0 && index < _docFormGuidance.Count)
+        {
+            _docFormGuidance[index].DirectLink = link;
+        }
+    }
+
+    private void AddDocLink()
+    {
+        _docFormLinks.Add(new EditableLink());
+    }
+
+    private void RemoveDocLink(int index)
+    {
+        if (index >= 0 && index < _docFormLinks.Count)
+        {
+            _docFormLinks.RemoveAt(index);
+        }
+    }
+
+    private void UpdateLinkTitle(int index, string title)
+    {
+        if (index >= 0 && index < _docFormLinks.Count)
+        {
+            _docFormLinks[index].Title = title;
+        }
+    }
+
+    private void UpdateLinkUrl(int index, string url)
+    {
+        if (index >= 0 && index < _docFormLinks.Count)
+        {
+            _docFormLinks[index].Url = url;
+        }
+    }
+
+    private void UpdateInstructionDescription(int index, string description)
+    {
+        if (index >= 0 && index < _docFormInstructions.Count)
+        {
+            _docFormInstructions[index].Description = description;
+        }
+    }
+
+    private void UpdateGuidanceInstructions(int index, string instructions)
+    {
+        if (index >= 0 && index < _docFormGuidance.Count)
+        {
+            _docFormGuidance[index].Instructions = instructions;
+        }
+    }
+
+    private static string FormatDuration(TimeSpan? duration)
+    {
+        if (!duration.HasValue) return "Not specified";
+        var d = duration.Value;
+        if (d.TotalMinutes < 60)
+            return $"{(int)d.TotalMinutes} minutes";
+        if (d.TotalHours < 24)
+            return $"{d.Hours}h {d.Minutes}m";
+        return $"{d.Days}d {d.Hours}h";
+    }
+
+    private static TimeSpan? ParseDuration(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input) || input == "Not specified")
+            return null;
+
+        // Try to parse common formats
+        if (int.TryParse(input.Replace("minutes", "").Replace("min", "").Trim(), out var minutes))
+            return TimeSpan.FromMinutes(minutes);
+
+        // Try "Xh Ym" format
+        var hourMatch = System.Text.RegularExpressions.Regex.Match(input, @"(\d+)h");
+        var minMatch = System.Text.RegularExpressions.Regex.Match(input, @"(\d+)m");
+        if (hourMatch.Success || minMatch.Success)
+        {
+            var hours = hourMatch.Success ? int.Parse(hourMatch.Groups[1].Value) : 0;
+            var mins = minMatch.Success ? int.Parse(minMatch.Groups[1].Value) : 0;
+            return TimeSpan.FromHours(hours) + TimeSpan.FromMinutes(mins);
+        }
+
+        return null;
+    }
+
+    private static string GetTaskTypeIcon(TaskType type) => type switch
+    {
+        TaskType.RoleValidation => "bi-person-check",
+        TaskType.SecurityRemediation => "bi-shield-exclamation",
+        TaskType.DocumentationReview => "bi-file-earmark-text",
+        TaskType.ArchitectureReview => "bi-diagram-3",
+        TaskType.RetirementReview => "bi-calendar-x",
+        TaskType.ComplianceCheck => "bi-shield-check",
+        TaskType.DataConflictResolution => "bi-exclamation-triangle",
+        TaskType.MaintenanceReview => "bi-wrench",
+        _ => "bi-check-square"
+    };
+
+    private static string GetTaskTypeLabel(TaskType type) => type switch
+    {
+        TaskType.RoleValidation => "Role Validation",
+        TaskType.SecurityRemediation => "Security Remediation",
+        TaskType.DocumentationReview => "Documentation Review",
+        TaskType.ArchitectureReview => "Architecture Review",
+        TaskType.RetirementReview => "Retirement Review",
+        TaskType.ComplianceCheck => "Compliance Check",
+        TaskType.DataConflictResolution => "Data Conflict Resolution",
+        TaskType.MaintenanceReview => "Maintenance Review",
+        _ => type.ToString()
+    };
+
+    #endregion
+
+    private int GetUserAppCount(string userId)
+    {
+        return _applications.Count(a => a.RoleAssignments.Any(r => r.UserId == userId));
+    }
+
+    private static string GetInitials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+            return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+        return parts.Length > 0 ? parts[0][0].ToString().ToUpper() : "?";
+    }
+
+    private static string GetRoleLabel(SystemRole role) => role switch
+    {
+        SystemRole.Administrator => "Admin",
+        SystemRole.SecurityAdministrator => "Security Admin",
+        SystemRole.PowerUser => "Power User",
+        SystemRole.StandardUser => "User",
+        SystemRole.ReadOnly => "Viewer",
+        _ => role.ToString()
+    };
+
+    private static string GetRoleClass(SystemRole role) => role switch
+    {
+        SystemRole.Administrator => "admin",
+        SystemRole.SecurityAdministrator => "admin",
+        SystemRole.PowerUser => "manager",
+        SystemRole.StandardUser => "developer",
+        SystemRole.ReadOnly => "viewer",
+        _ => ""
+    };
+
+    private static string FormatDate(DateTimeOffset? date)
+    {
+        if (!date.HasValue) return "Never";
+        var days = (DateTimeOffset.UtcNow - date.Value).TotalDays;
+        if (days < 1) return "Today";
+        if (days < 2) return "Yesterday";
+        if (days < 7) return $"{(int)days} days ago";
+        return date.Value.ToString("MMM d, yyyy");
+    }
+
+    #region User Management
+
+    private void ShowAddUserModal()
+    {
+        _editingUser = null;
+        _userFormName = "";
+        _userFormEmail = "";
+        _userFormDepartment = "";
+        _userFormRole = "StandardUser";
+        _showUserModal = true;
+    }
+
+    private void EditUser(User user)
+    {
+        _editingUser = user;
+        _userFormName = user.Name;
+        _userFormEmail = user.Email;
+        _userFormDepartment = user.Department;
+        _userFormRole = user.Role.ToString();
+        _showUserModal = true;
+    }
+
+    private async Task ViewUserApps(User user)
+    {
+        _viewingUser = user;
+        _userApps = (await DataService.GetApplicationsForUserAsync(user.Id)).ToList();
+        _showUserAppsModal = true;
+    }
+
+    private async Task SaveUser()
+    {
+        if (string.IsNullOrWhiteSpace(_userFormName) || string.IsNullOrWhiteSpace(_userFormEmail))
+            return;
+
+        var role = Enum.TryParse<SystemRole>(_userFormRole, out var r) ? r : SystemRole.StandardUser;
+
+        if (_editingUser == null)
+        {
+            var newUser = new User
+            {
+                Id = Guid.NewGuid().ToString(),
+                Name = _userFormName,
+                Email = _userFormEmail,
+                Department = _userFormDepartment,
+                Role = role,
+                IsActive = true
+            };
+            var created = await DataService.CreateUserAsync(newUser);
+            _users.Add(created);
+        }
+        else
+        {
+            var updated = _editingUser with
+            {
+                Name = _userFormName,
+                Email = _userFormEmail,
+                Department = _userFormDepartment,
+                Role = role
+            };
+            await DataService.UpdateUserAsync(updated);
+            var index = _users.FindIndex(u => u.Id == updated.Id);
+            if (index >= 0) _users[index] = updated;
+        }
+
+        CloseUserModal();
+    }
+
+    private void CloseUserModal()
+    {
+        _showUserModal = false;
+        _editingUser = null;
+    }
+
+    private void CloseUserAppsModal()
+    {
+        _showUserAppsModal = false;
+        _viewingUser = null;
+        _userApps = [];
+    }
+
+    private void ViewApplication(string appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+
+    #endregion
+
+    #region Task Config
+
+    private async Task SaveTaskConfig()
+    {
+        _isSavingTaskConfig = true;
+        StateHasChanged();
+
+        try
+        {
+            var config = new TaskSchedulingConfig
+            {
+                RoleValidationFrequencyDays = _taskConfigValidationFrequency,
+                ReminderDaysBeforeDue = _taskConfigReminderDays,
+                EscalationDaysAfterOverdue = _taskConfigEscalationDays,
+                CriticalTaskEscalationDays = _taskConfigCriticalEscalation,
+                MaxActiveTasksPerUser = _taskConfigMaxTasks,
+                SmartSchedulingEnabled = _taskConfigSmartScheduling,
+                UpdatedBy = "Current User"
+            };
+
+            await DataService.UpdateTaskSchedulingConfigAsync(config);
+            _taskConfigSaveMessage = "Task settings saved successfully.";
+            _taskConfigSaveSuccess = true;
+        }
+        catch (Exception ex)
+        {
+            _taskConfigSaveMessage = $"Failed to save: {ex.Message}";
+            _taskConfigSaveSuccess = false;
+        }
+        finally
+        {
+            _isSavingTaskConfig = false;
+        }
+    }
+
+    private void ResetTaskConfig()
+    {
+        _taskConfigValidationFrequency = 90;
+        _taskConfigReminderDays = 7;
+        _taskConfigEscalationDays = 14;
+        _taskConfigCriticalEscalation = 0;
+        _taskConfigMaxTasks = 10;
+        _taskConfigSmartScheduling = true;
+    }
+
+    #endregion
+
+    #region Audit Log
+
+    private async Task LoadAuditLog()
+    {
+        var filter = string.IsNullOrEmpty(_auditLogCategoryFilter) ? null : new AuditLogFilter
+        {
+            Category = _auditLogCategoryFilter
+        };
+        _auditLogEntries = (await DataService.GetAuditLogAsync(filter)).ToList();
+    }
+
+    private async Task ExportAuditLog()
+    {
+        var entries = await DataService.GetAuditLogAsync(null);
+        var csv = "Timestamp,Category,Event,User,Message\n";
+        foreach (var e in entries)
+        {
+            csv += $"\"{e.Timestamp:yyyy-MM-dd HH:mm:ss}\",\"{e.Category}\",\"{e.EventType}\",\"{e.UserName}\",\"{e.Message.Replace("\"", "\"\"")}\"\n";
+        }
+
+        // Trigger download - in a real app this would use JS interop
+        // For now we'll just log it
+        Console.WriteLine("CSV Export:\n" + csv);
+    }
+
+    private static MarkupString GetAuditCategoryIcon(string category) => category switch
+    {
+        "Sync" => new MarkupString("<i class=\"bi bi-arrow-repeat\"></i>"),
+        "Config" => new MarkupString("<i class=\"bi bi-gear\"></i>"),
+        "User" => new MarkupString("<i class=\"bi bi-person\"></i>"),
+        "Task" => new MarkupString("<i class=\"bi bi-check-square\"></i>"),
+        _ => new MarkupString("<i class=\"bi bi-file-text\"></i>")
+    };
+
+    #endregion
+
+    #region System Settings
+
+    private async Task ToggleFeatureFlag(string flag, bool value)
+    {
+        _systemSettings = flag switch
+        {
+            "MockData" => _systemSettings with { MockDataEnabled = value },
+            "DevSidebar" => _systemSettings with { DevModeSidebarEnabled = value },
+            "AiRecommendations" => _systemSettings with { AiRecommendationsEnabled = value },
+            _ => _systemSettings
+        };
+        await DataService.UpdateSystemSettingsAsync(_systemSettings);
+    }
+
+    private async Task ToggleDataSource(string dataSourceId, bool enabled)
+    {
+        var ds = _dataSourceConfigs.FirstOrDefault(d => d.Id == dataSourceId);
+        if (ds != null)
+        {
+            var updated = ds with { IsEnabled = enabled };
+            await DataService.UpdateDataSourceConfigAsync(updated);
+            var index = _dataSourceConfigs.FindIndex(d => d.Id == dataSourceId);
+            if (index >= 0) _dataSourceConfigs[index] = updated;
+        }
+    }
+
+    private async Task ConfigureDataSource(DataSourceConfig ds)
+    {
+        _editingDataSource = ds;
+        var settings = ds.ConnectionSettings;
+        _dsFormOrganization = settings?.Organization ?? "";
+        _dsFormProject = settings?.Project ?? "";
+        _dsFormSiteUrl = settings?.SiteUrl ?? "";
+        _dsFormListName = settings?.ListName ?? "";
+        _dsFormInstance = settings?.Instance ?? "";
+        _dsFormTable = settings?.Table ?? "";
+
+        // Check for existing credentials in secure storage (don't load actual values)
+        var prefix = SecretKeys.GetDataSourcePrefix(ds.Id);
+        _dsHasApiKey = await SecureStorage.HasSecretAsync($"{prefix}apikey");
+        _dsHasConnectionString = await SecureStorage.HasSecretAsync($"{prefix}connectionstring");
+        _dsFormApiKey = "";
+        _dsFormConnectionString = "";
+        _dsEditApiKey = false;
+        _dsEditConnectionString = false;
+
+        _showDataSourceModal = true;
+    }
+
+    private async Task SaveDataSourceConfig()
+    {
+        if (_editingDataSource == null) return;
+
+        var prefix = SecretKeys.GetDataSourcePrefix(_editingDataSource.Id);
+
+        // Store sensitive values in secure storage (not in config object)
+        if (!string.IsNullOrEmpty(_dsFormApiKey))
+        {
+            await SecureStorage.StoreSecretAsync($"{prefix}apikey", _dsFormApiKey);
+            _dsHasApiKey = true;
+        }
+
+        if (!string.IsNullOrEmpty(_dsFormConnectionString))
+        {
+            await SecureStorage.StoreSecretAsync($"{prefix}connectionstring", _dsFormConnectionString);
+            _dsHasConnectionString = true;
+        }
+
+        // Non-sensitive settings go to config object
+        var settings = new DataSourceConnectionSettings
+        {
+            Organization = _dsFormOrganization,
+            Project = _dsFormProject,
+            SiteUrl = _dsFormSiteUrl,
+            ListName = _dsFormListName,
+            Instance = _dsFormInstance,
+            Table = _dsFormTable
+            // ApiKey and ConnectionString are now in secure storage
+        };
+
+        var updated = _editingDataSource with
+        {
+            ConnectionSettings = settings,
+            LastSyncStatus = "Configured - not tested"
+        };
+
+        await DataService.UpdateDataSourceConfigAsync(updated);
+        var index = _dataSourceConfigs.FindIndex(d => d.Id == updated.Id);
+        if (index >= 0) _dataSourceConfigs[index] = updated;
+
+        CloseDataSourceModal();
+    }
+
+    private void CloseDataSourceModal()
+    {
+        _showDataSourceModal = false;
+        _editingDataSource = null;
+    }
+
+    private async Task TestDataSourceConnection(string dataSourceId)
+    {
+        _dataSourceTestResult = await DataService.TestDataSourceConnectionAsync(dataSourceId);
+    }
+
+    private static string GetDataSourceIcon(DataSourceType type) => type switch
+    {
+        DataSourceType.AzureDevOps => "bi-azure",
+        DataSourceType.SharePoint => "bi-microsoft",
+        DataSourceType.ServiceNow => "bi-ticket-detailed",
+        DataSourceType.IisDatabase => "bi-database",
+        _ => "bi-cloud"
+    };
+
+    #endregion
+
+    #region Health Scoring Config
+
+    private void OpenHealthConfigModal(string configType)
+    {
+        _healthConfigType = configType;
+        _healthConfigSaved = false;
+
+        // Copy current values to edit copies
+        switch (configType)
+        {
+            case "security":
+                _editSecurityWeights = new SecurityWeights
+                {
+                    Critical = _securityWeights.Critical,
+                    High = _securityWeights.High,
+                    Medium = _securityWeights.Medium,
+                    Low = _securityWeights.Low
+                };
+                break;
+            case "usage":
+                _editUsageWeights = new UsageWeights
+                {
+                    None = _usageWeights.None,
+                    VeryLow = _usageWeights.VeryLow,
+                    High = _usageWeights.High
+                };
+                break;
+            case "maintenance":
+                _editMaintenanceWeights = new MaintenanceWeights
+                {
+                    Recent = _maintenanceWeights.Recent,
+                    Stale = _maintenanceWeights.Stale
+                };
+                break;
+            case "thresholds":
+                _editThresholds = new CategoryThresholds
+                {
+                    HealthyMin = _thresholds.HealthyMin,
+                    AttentionMin = _thresholds.AttentionMin,
+                    AtRiskMin = _thresholds.AtRiskMin
+                };
+                break;
+        }
+
+        _showHealthConfigModal = true;
+    }
+
+    private void CloseHealthConfigModal()
+    {
+        _showHealthConfigModal = false;
+        _healthConfigType = "";
+    }
+
+    private void SaveHealthConfig()
+    {
+        switch (_healthConfigType)
+        {
+            case "security":
+                _securityWeights = new SecurityWeights
+                {
+                    Critical = _editSecurityWeights.Critical,
+                    High = _editSecurityWeights.High,
+                    Medium = _editSecurityWeights.Medium,
+                    Low = _editSecurityWeights.Low
+                };
+                break;
+            case "usage":
+                _usageWeights = new UsageWeights
+                {
+                    None = _editUsageWeights.None,
+                    VeryLow = _editUsageWeights.VeryLow,
+                    High = _editUsageWeights.High
+                };
+                break;
+            case "maintenance":
+                _maintenanceWeights = new MaintenanceWeights
+                {
+                    Recent = _editMaintenanceWeights.Recent,
+                    Stale = _editMaintenanceWeights.Stale
+                };
+                break;
+            case "thresholds":
+                _thresholds = new CategoryThresholds
+                {
+                    HealthyMin = _editThresholds.HealthyMin,
+                    AttentionMin = _editThresholds.AttentionMin,
+                    AtRiskMin = _editThresholds.AtRiskMin
+                };
+                break;
+        }
+
+        _healthConfigSaved = true;
+        CloseHealthConfigModal();
+    }
+
+    private string GetHealthConfigModalTitle() => _healthConfigType switch
+    {
+        "security" => "Edit Security Penalties",
+        "usage" => "Edit Usage Adjustments",
+        "maintenance" => "Edit Maintenance Activity Weights",
+        "thresholds" => "Edit Category Thresholds",
+        _ => "Edit Configuration"
+    };
+
+    #endregion
+
+    #region AI Configuration
+
+    private async Task LoadAiConfiguration()
+    {
+        // Load Ollama config from secure storage
+        var savedEndpoint = await SecureStorage.GetSecretAsync(SecretKeys.OllamaEndpoint);
+        if (!string.IsNullOrEmpty(savedEndpoint))
+            _ollamaEndpoint = savedEndpoint;
+
+        var savedModel = await SecureStorage.GetSecretAsync(SecretKeys.OllamaModel);
+        if (!string.IsNullOrEmpty(savedModel))
+            _ollamaModel = savedModel;
+
+        // Check if Azure OpenAI credentials exist (we don't load the actual values)
+        _hasAzureOpenAiEndpoint = await SecureStorage.HasSecretAsync(SecretKeys.AzureOpenAiEndpoint);
+        _hasAzureOpenAiKey = await SecureStorage.HasSecretAsync(SecretKeys.AzureOpenAiKey);
+
+        // Load deployment name (non-sensitive)
+        var savedDeployment = await SecureStorage.GetSecretAsync(SecretKeys.AzureOpenAiDeployment);
+        if (!string.IsNullOrEmpty(savedDeployment))
+            _azureOpenAiDeployment = savedDeployment;
+
+        // Test AI connection on load
+        await TestAiConnection();
+    }
+
+    private async Task TestAiConnection()
+    {
+        try
+        {
+            _aiStatus = await AiService.GetServiceStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            _aiStatus = new AiServiceStatus
+            {
+                IsAvailable = false,
+                Provider = "None",
+                Error = ex.Message
+            };
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveOllamaConfig()
+    {
+        _aiConfigSaving = true;
+        try
+        {
+            await SecureStorage.StoreSecretAsync(SecretKeys.OllamaEndpoint, _ollamaEndpoint);
+            await SecureStorage.StoreSecretAsync(SecretKeys.OllamaModel, _ollamaModel);
+
+            // Test the connection after saving
+            await TestAiConnection();
+        }
+        finally
+        {
+            _aiConfigSaving = false;
+        }
+    }
+
+    private async Task SaveAzureOpenAiConfig()
+    {
+        _aiConfigSaving = true;
+        try
+        {
+            // Only save if values are provided (not masked)
+            if (!string.IsNullOrEmpty(_azureOpenAiEndpoint))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiEndpoint, _azureOpenAiEndpoint);
+                _hasAzureOpenAiEndpoint = true;
+                _azureOpenAiEndpoint = ""; // Clear after saving
+                _editAzureOpenAiEndpoint = false;
+            }
+
+            if (!string.IsNullOrEmpty(_azureOpenAiKey))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiKey, _azureOpenAiKey);
+                _hasAzureOpenAiKey = true;
+                _azureOpenAiKey = ""; // Clear after saving
+                _editAzureOpenAiKey = false;
+            }
+
+            if (!string.IsNullOrEmpty(_azureOpenAiDeployment))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiDeployment, _azureOpenAiDeployment);
+            }
+        }
+        finally
+        {
+            _aiConfigSaving = false;
+        }
+    }
+
+    #endregion
+}

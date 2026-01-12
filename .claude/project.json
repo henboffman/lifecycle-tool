@@ -1,0 +1,106 @@
+{
+  "name": "Application Portfolio Lifecycle Dashboard",
+  "version": "0.1.0",
+  "description": "IT dashboard for tracking application portfolio lifecycle health using data from Azure DevOps, SharePoint, ServiceNow, and IIS logs",
+  "type": "blazor-server",
+  "framework": {
+    "name": ".NET",
+    "version": "10.0"
+  },
+  "languages": [
+    "C#",
+    "Razor",
+    "JavaScript",
+    "CSS"
+  ],
+  "mainFiles": [
+    "CLAUDE.md",
+    "docs/requirements.md",
+    "docs/session-context.md",
+    "docs/ideas.md"
+  ],
+  "importantDirectories": [
+    "docs"
+  ],
+  "conventions": {
+    "namingConventions": {
+      "services": "PascalCase with 'Service' suffix",
+      "repositories": "PascalCase with 'Repository' suffix",
+      "components": "PascalCase",
+      "jobs": "PascalCase with 'Job' suffix"
+    },
+    "patterns": {
+      "dataAccess": "Repository Pattern",
+      "healthScoring": "Configurable weighted algorithm (0-100 scale)",
+      "dataIntegration": "Scheduled jobs with monitoring",
+      "userSettings": "IndexedDB with export/import backup"
+    },
+    "testing": {
+      "framework": "xUnit with bUnit for Blazor components",
+      "mockData": "Comprehensive mock data for network-isolated development"
+    }
+  },
+  "quickStart": {
+    "setup": [
+      "dotnet restore",
+      "dotnet ef database update",
+      "dotnet run"
+    ],
+    "test": "dotnet test",
+    "build": "dotnet build"
+  },
+  "projectPhase": "Requirements Complete - Ready for Implementation",
+  "keyFeatures": [
+    "Health scoring algorithm (0-100 scale with configurable weights)",
+    "Heatmap visualizations (grid and treemap views)",
+    "Task management with intelligent scheduling",
+    "Data integration jobs with monitoring dashboard",
+    "User customization (themes, dashboards, saved views)",
+    "Export capabilities (CSV, JSON, RSS/Atom feeds)",
+    "AI/ML integration (Azure OpenAI prod, Ollama local)",
+    "Extensible API-first architecture"
+  ],
+  "dataSources": [
+    {
+      "name": "Azure DevOps",
+      "method": "REST API",
+      "frequency": "Weekly",
+      "data": ["repositories", "security findings", "dependencies"]
+    },
+    {
+      "name": "SharePoint",
+      "method": "Graph API",
+      "frequency": "Weekly",
+      "data": ["documentation hierarchy", "metadata"]
+    },
+    {
+      "name": "ServiceNow",
+      "method": "CSV export",
+      "frequency": "Weekly",
+      "data": ["role assignments", "application metadata"]
+    },
+    {
+      "name": "IIS Database",
+      "method": "SQL (read-only)",
+      "frequency": "Weekly",
+      "data": ["usage metrics (requests, users, sessions)"]
+    }
+  ],
+  "constraints": {
+    "development": "Network-isolated - requires mock data",
+    "deployment": "On-premise Windows Server",
+    "database": "SQL Server (self-hosted)",
+    "authentication": "Microsoft Entra ID (SSO)",
+    "privacy": "Aggregate metrics only, no individual user tracking"
+  },
+  "scale": {
+    "applications": "~300",
+    "users": "~100"
+  },
+  "databaseProvider": "SQL Server (self-hosted)",
+  "authentication": "Microsoft Entra ID (SSO)",
+  "aiIntegration": {
+    "production": "Azure OpenAI via API",
+    "development": "Ollama for local testing"
+  }
+}

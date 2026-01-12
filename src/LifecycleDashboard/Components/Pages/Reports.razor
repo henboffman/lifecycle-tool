@@ -1,0 +1,652 @@
+@page "/reports"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@using System.Text.Json
+@inject IMockDataService DataService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Reports - Lifecycle Dashboard</PageTitle>
+
+<div class="reports-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Reports & Analytics</h1>
+            <p class="subtitle">Portfolio insights and data export</p>
+        </div>
+        <div class="header-actions">
+            <div class="export-dropdown">
+                <button class="btn btn-outline" @onclick="ToggleExportMenu">
+                    <i class="bi bi-download"></i> Export Data
+                </button>
+                @if (_showExportMenu)
+                {
+                    <div class="export-menu">
+                        <button class="export-option" @onclick="ExportApplicationsCsv">
+                            Applications (CSV)
+                        </button>
+                        <button class="export-option" @onclick="ExportApplicationsJson">
+                            Applications (JSON)
+                        </button>
+                        <button class="export-option" @onclick="ExportTasksCsv">
+                            Tasks (CSV)
+                        </button>
+                        <button class="export-option" @onclick="ExportTasksJson">
+                            Tasks (JSON)
+                        </button>
+                        <button class="export-option" @onclick="ExportFullReportJson">
+                            Full Report (JSON)
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </header>
+
+    @if (_isLoading)
+    {
+        <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <span>Loading report data...</span>
+        </div>
+    }
+    else
+    {
+        <!-- Report Navigation -->
+        <section class="report-tabs">
+            <button class="report-tab @(_activeReport == ReportType.PortfolioHealth ? "active" : "")"
+                    @onclick="() => SetActiveReport(ReportType.PortfolioHealth)">
+                <i class="bi bi-graph-up tab-icon"></i>
+                Portfolio Health
+            </button>
+            <button class="report-tab @(_activeReport == ReportType.TaskAnalytics ? "active" : "")"
+                    @onclick="() => SetActiveReport(ReportType.TaskAnalytics)">
+                <i class="bi bi-check-square tab-icon"></i>
+                Task Analytics
+            </button>
+            <button class="report-tab @(_activeReport == ReportType.SecurityTrends ? "active" : "")"
+                    @onclick="() => SetActiveReport(ReportType.SecurityTrends)">
+                <i class="bi bi-shield-lock tab-icon"></i>
+                Security Trends
+            </button>
+            <button class="report-tab @(_activeReport == ReportType.CapabilityBreakdown ? "active" : "")"
+                    @onclick="() => SetActiveReport(ReportType.CapabilityBreakdown)">
+                <i class="bi bi-pie-chart tab-icon"></i>
+                Capability Breakdown
+            </button>
+        </section>
+
+        @if (_activeReport == ReportType.PortfolioHealth)
+        {
+            <!-- Portfolio Health Report -->
+            <section class="report-section">
+                <h2>Portfolio Health Overview</h2>
+
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <div class="summary-value">@_applications.Count</div>
+                        <div class="summary-label">Total Applications</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-value">@GetAverageHealthScore()</div>
+                        <div class="summary-label">Avg Health Score</div>
+                    </div>
+                    <div class="summary-card healthy">
+                        <div class="summary-value">@_healthyCount</div>
+                        <div class="summary-label">Healthy Apps</div>
+                    </div>
+                    <div class="summary-card critical">
+                        <div class="summary-value">@_criticalCount</div>
+                        <div class="summary-label">Critical Apps</div>
+                    </div>
+                </div>
+
+                <!-- Health Distribution Chart -->
+                <div class="chart-container">
+                    <h3>Health Distribution</h3>
+                    <div class="bar-chart">
+                        <div class="bar-item">
+                            <div class="bar-label">Healthy</div>
+                            <div class="bar-track">
+                                <div class="bar-fill healthy" style="width: @GetPercentage(_healthyCount)%"></div>
+                            </div>
+                            <div class="bar-value">@_healthyCount (@GetPercentage(_healthyCount)%)</div>
+                        </div>
+                        <div class="bar-item">
+                            <div class="bar-label">Needs Attention</div>
+                            <div class="bar-track">
+                                <div class="bar-fill attention" style="width: @GetPercentage(_attentionCount)%"></div>
+                            </div>
+                            <div class="bar-value">@_attentionCount (@GetPercentage(_attentionCount)%)</div>
+                        </div>
+                        <div class="bar-item">
+                            <div class="bar-label">At Risk</div>
+                            <div class="bar-track">
+                                <div class="bar-fill at-risk" style="width: @GetPercentage(_atRiskCount)%"></div>
+                            </div>
+                            <div class="bar-value">@_atRiskCount (@GetPercentage(_atRiskCount)%)</div>
+                        </div>
+                        <div class="bar-item">
+                            <div class="bar-label">Critical</div>
+                            <div class="bar-track">
+                                <div class="bar-fill critical" style="width: @GetPercentage(_criticalCount)%"></div>
+                            </div>
+                            <div class="bar-value">@_criticalCount (@GetPercentage(_criticalCount)%)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Score Distribution -->
+                <div class="chart-container">
+                    <h3>Score Distribution</h3>
+                    <div class="histogram">
+                        @foreach (var bucket in GetScoreBuckets())
+                        {
+                            <div class="histogram-bar" title="@bucket.Range: @bucket.Count apps">
+                                <div class="histogram-fill @bucket.Class" style="height: @GetHistogramHeight(bucket.Count)%"></div>
+                                <div class="histogram-label">@bucket.Range</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+        else if (_activeReport == ReportType.TaskAnalytics)
+        {
+            <!-- Task Analytics Report -->
+            <section class="report-section">
+                <h2>Task Analytics</h2>
+
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <div class="summary-value">@_tasks.Count</div>
+                        <div class="summary-label">Total Tasks</div>
+                    </div>
+                    <div class="summary-card healthy">
+                        <div class="summary-value">@_completedTaskCount</div>
+                        <div class="summary-label">Completed</div>
+                    </div>
+                    <div class="summary-card attention">
+                        <div class="summary-value">@_pendingTaskCount</div>
+                        <div class="summary-label">Pending</div>
+                    </div>
+                    <div class="summary-card critical">
+                        <div class="summary-value">@_overdueTaskCount</div>
+                        <div class="summary-label">Overdue</div>
+                    </div>
+                </div>
+
+                <!-- Tasks by Type -->
+                <div class="chart-container">
+                    <h3>Tasks by Type</h3>
+                    <div class="bar-chart horizontal">
+                        @foreach (var taskType in GetTasksByType())
+                        {
+                            <div class="bar-item">
+                                <div class="bar-label">@GetTaskTypeLabel(taskType.Key)</div>
+                                <div class="bar-track">
+                                    <div class="bar-fill primary" style="width: @GetTaskPercentage(taskType.Value)%"></div>
+                                </div>
+                                <div class="bar-value">@taskType.Value</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Task Status Breakdown -->
+                <div class="chart-container">
+                    <h3>Task Status Breakdown</h3>
+                    <div class="status-grid">
+                        <div class="status-item completed">
+                            <div class="status-percentage">@GetTaskStatusPercentage(Models.TaskStatus.Completed)%</div>
+                            <div class="status-label">Completed</div>
+                            <div class="status-count">@_completedTaskCount tasks</div>
+                        </div>
+                        <div class="status-item in-progress">
+                            <div class="status-percentage">@GetTaskStatusPercentage(Models.TaskStatus.InProgress)%</div>
+                            <div class="status-label">In Progress</div>
+                            <div class="status-count">@_inProgressTaskCount tasks</div>
+                        </div>
+                        <div class="status-item pending">
+                            <div class="status-percentage">@GetTaskStatusPercentage(Models.TaskStatus.Pending)%</div>
+                            <div class="status-label">Pending</div>
+                            <div class="status-count">@_pendingTaskCount tasks</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        }
+        else if (_activeReport == ReportType.SecurityTrends)
+        {
+            <!-- Security Trends Report -->
+            <section class="report-section">
+                <h2>Security Overview</h2>
+
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <div class="summary-value">@_totalSecurityFindings</div>
+                        <div class="summary-label">Total Findings</div>
+                    </div>
+                    <div class="summary-card critical">
+                        <div class="summary-value">@_criticalFindings</div>
+                        <div class="summary-label">Critical</div>
+                    </div>
+                    <div class="summary-card at-risk">
+                        <div class="summary-value">@_highFindings</div>
+                        <div class="summary-label">High</div>
+                    </div>
+                    <div class="summary-card healthy">
+                        <div class="summary-value">@_resolvedFindings</div>
+                        <div class="summary-label">Resolved</div>
+                    </div>
+                </div>
+
+                <!-- Findings by Severity -->
+                <div class="chart-container">
+                    <h3>Findings by Severity</h3>
+                    <div class="severity-chart">
+                        <div class="severity-item critical">
+                            <div class="severity-bar" style="height: @GetSeverityHeight(_criticalFindings)%"></div>
+                            <div class="severity-label">Critical</div>
+                            <div class="severity-count">@_criticalFindings</div>
+                        </div>
+                        <div class="severity-item high">
+                            <div class="severity-bar" style="height: @GetSeverityHeight(_highFindings)%"></div>
+                            <div class="severity-label">High</div>
+                            <div class="severity-count">@_highFindings</div>
+                        </div>
+                        <div class="severity-item medium">
+                            <div class="severity-bar" style="height: @GetSeverityHeight(_mediumFindings)%"></div>
+                            <div class="severity-label">Medium</div>
+                            <div class="severity-count">@_mediumFindings</div>
+                        </div>
+                        <div class="severity-item low">
+                            <div class="severity-bar" style="height: @GetSeverityHeight(_lowFindings)%"></div>
+                            <div class="severity-label">Low</div>
+                            <div class="severity-count">@_lowFindings</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top Vulnerable Applications -->
+                <div class="chart-container">
+                    <h3>Most Vulnerable Applications</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Application</th>
+                                <th>Critical</th>
+                                <th>High</th>
+                                <th>Medium</th>
+                                <th>Low</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var app in GetTopVulnerableApps())
+                            {
+                                <tr>
+                                    <td>@app.Name</td>
+                                    <td class="@(app.Critical > 0 ? "text-critical" : "")">@app.Critical</td>
+                                    <td class="@(app.High > 0 ? "text-high" : "")">@app.High</td>
+                                    <td>@app.Medium</td>
+                                    <td>@app.Low</td>
+                                    <td><strong>@app.Total</strong></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+        else if (_activeReport == ReportType.CapabilityBreakdown)
+        {
+            <!-- Capability Breakdown Report -->
+            <section class="report-section">
+                <h2>Capability Breakdown</h2>
+
+                <div class="capability-grid">
+                    @foreach (var capability in GetCapabilityStats())
+                    {
+                        <div class="capability-card">
+                            <h3 class="capability-name">@capability.Name</h3>
+                            <div class="capability-stats">
+                                <div class="capability-stat">
+                                    <span class="stat-value">@capability.AppCount</span>
+                                    <span class="stat-label">Apps</span>
+                                </div>
+                                <div class="capability-stat">
+                                    <span class="stat-value @GetHealthColorClass(capability.AvgHealth)">@capability.AvgHealth</span>
+                                    <span class="stat-label">Avg Health</span>
+                                </div>
+                                <div class="capability-stat">
+                                    <span class="stat-value @(capability.CriticalApps > 0 ? "text-critical" : "")">@capability.CriticalApps</span>
+                                    <span class="stat-label">Critical</span>
+                                </div>
+                            </div>
+                            <div class="capability-health-bar">
+                                <div class="health-segment healthy" style="width: @capability.HealthyPercent%"></div>
+                                <div class="health-segment attention" style="width: @capability.AttentionPercent%"></div>
+                                <div class="health-segment at-risk" style="width: @capability.AtRiskPercent%"></div>
+                                <div class="health-segment critical" style="width: @capability.CriticalPercent%"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private List<Application> _applications = [];
+    private List<LifecycleTask> _tasks = [];
+    private bool _isLoading = true;
+    private bool _showExportMenu = false;
+    private ReportType _activeReport = ReportType.PortfolioHealth;
+
+    // Health counts
+    private int _healthyCount;
+    private int _attentionCount;
+    private int _atRiskCount;
+    private int _criticalCount;
+
+    // Task counts
+    private int _completedTaskCount;
+    private int _pendingTaskCount;
+    private int _inProgressTaskCount;
+    private int _overdueTaskCount;
+
+    // Security counts
+    private int _totalSecurityFindings;
+    private int _criticalFindings;
+    private int _highFindings;
+    private int _mediumFindings;
+    private int _lowFindings;
+    private int _resolvedFindings;
+
+    private enum ReportType
+    {
+        PortfolioHealth,
+        TaskAnalytics,
+        SecurityTrends,
+        CapabilityBreakdown
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _applications = (await DataService.GetApplicationsAsync()).ToList();
+        var currentUser = await DataService.GetCurrentUserAsync();
+        _tasks = (await DataService.GetTasksForUserAsync(currentUser.Id)).ToList();
+
+        CalculateHealthCounts();
+        CalculateTaskCounts();
+        CalculateSecurityCounts();
+
+        _isLoading = false;
+    }
+
+    private void CalculateHealthCounts()
+    {
+        _healthyCount = _applications.Count(a => a.HealthCategory == HealthCategory.Healthy);
+        _attentionCount = _applications.Count(a => a.HealthCategory == HealthCategory.NeedsAttention);
+        _atRiskCount = _applications.Count(a => a.HealthCategory == HealthCategory.AtRisk);
+        _criticalCount = _applications.Count(a => a.HealthCategory == HealthCategory.Critical);
+    }
+
+    private void CalculateTaskCounts()
+    {
+        _completedTaskCount = _tasks.Count(t => t.Status == Models.TaskStatus.Completed);
+        _pendingTaskCount = _tasks.Count(t => t.Status == Models.TaskStatus.Pending);
+        _inProgressTaskCount = _tasks.Count(t => t.Status == Models.TaskStatus.InProgress);
+        _overdueTaskCount = _tasks.Count(t => t.IsOverdue);
+    }
+
+    private void CalculateSecurityCounts()
+    {
+        var allFindings = _applications.SelectMany(a => a.SecurityFindings).ToList();
+        _totalSecurityFindings = allFindings.Count;
+        _criticalFindings = allFindings.Count(f => f.Severity == SecuritySeverity.Critical && !f.IsResolved);
+        _highFindings = allFindings.Count(f => f.Severity == SecuritySeverity.High && !f.IsResolved);
+        _mediumFindings = allFindings.Count(f => f.Severity == SecuritySeverity.Medium && !f.IsResolved);
+        _lowFindings = allFindings.Count(f => f.Severity == SecuritySeverity.Low && !f.IsResolved);
+        _resolvedFindings = allFindings.Count(f => f.IsResolved);
+    }
+
+    private void SetActiveReport(ReportType report)
+    {
+        _activeReport = report;
+    }
+
+    private void ToggleExportMenu()
+    {
+        _showExportMenu = !_showExportMenu;
+    }
+
+    private int GetAverageHealthScore()
+    {
+        if (_applications.Count == 0) return 0;
+        return (int)_applications.Average(a => a.HealthScore);
+    }
+
+    private int GetPercentage(int count)
+    {
+        if (_applications.Count == 0) return 0;
+        return (int)Math.Round((double)count / _applications.Count * 100);
+    }
+
+    private int GetTaskPercentage(int count)
+    {
+        if (_tasks.Count == 0) return 0;
+        return (int)Math.Round((double)count / _tasks.Count * 100);
+    }
+
+    private int GetTaskStatusPercentage(Models.TaskStatus status)
+    {
+        if (_tasks.Count == 0) return 0;
+        var count = _tasks.Count(t => t.Status == status);
+        return (int)Math.Round((double)count / _tasks.Count * 100);
+    }
+
+    private List<(string Range, int Count, string Class)> GetScoreBuckets()
+    {
+        return new List<(string, int, string)>
+        {
+            ("0-19", _applications.Count(a => a.HealthScore < 20), "critical"),
+            ("20-39", _applications.Count(a => a.HealthScore >= 20 && a.HealthScore < 40), "critical"),
+            ("40-59", _applications.Count(a => a.HealthScore >= 40 && a.HealthScore < 60), "at-risk"),
+            ("60-79", _applications.Count(a => a.HealthScore >= 60 && a.HealthScore < 80), "attention"),
+            ("80-100", _applications.Count(a => a.HealthScore >= 80), "healthy")
+        };
+    }
+
+    private int GetHistogramHeight(int count)
+    {
+        var max = _applications.Count;
+        if (max == 0) return 0;
+        return (int)Math.Round((double)count / max * 100);
+    }
+
+    private Dictionary<TaskType, int> GetTasksByType()
+    {
+        return _tasks.GroupBy(t => t.Type)
+            .OrderByDescending(g => g.Count())
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    private static string GetTaskTypeLabel(TaskType type) => type switch
+    {
+        TaskType.RoleValidation => "Role Validation",
+        TaskType.SecurityRemediation => "Security Remediation",
+        TaskType.DocumentationReview => "Documentation Review",
+        TaskType.ArchitectureReview => "Architecture Review",
+        TaskType.RetirementReview => "Retirement Review",
+        TaskType.ComplianceCheck => "Compliance Check",
+        TaskType.DataConflictResolution => "Data Conflict",
+        TaskType.MaintenanceReview => "Maintenance Review",
+        TaskType.Custom => "Custom Task",
+        _ => type.ToString()
+    };
+
+    private int GetSeverityHeight(int count)
+    {
+        var max = Math.Max(_criticalFindings, Math.Max(_highFindings, Math.Max(_mediumFindings, _lowFindings)));
+        if (max == 0) return 0;
+        return (int)Math.Round((double)count / max * 100);
+    }
+
+    private List<VulnerableApp> GetTopVulnerableApps()
+    {
+        return _applications
+            .Select(a => new VulnerableApp
+            {
+                Name = a.Name,
+                Critical = a.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Critical && !f.IsResolved),
+                High = a.SecurityFindings.Count(f => f.Severity == SecuritySeverity.High && !f.IsResolved),
+                Medium = a.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Medium && !f.IsResolved),
+                Low = a.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Low && !f.IsResolved)
+            })
+            .Where(a => a.Total > 0)
+            .OrderByDescending(a => a.Critical)
+            .ThenByDescending(a => a.High)
+            .ThenByDescending(a => a.Total)
+            .Take(10)
+            .ToList();
+    }
+
+    private List<CapabilityStat> GetCapabilityStats()
+    {
+        return _applications
+            .GroupBy(a => a.Capability)
+            .Select(g =>
+            {
+                var apps = g.ToList();
+                var total = apps.Count;
+                var healthy = apps.Count(a => a.HealthCategory == HealthCategory.Healthy);
+                var attention = apps.Count(a => a.HealthCategory == HealthCategory.NeedsAttention);
+                var atRisk = apps.Count(a => a.HealthCategory == HealthCategory.AtRisk);
+                var critical = apps.Count(a => a.HealthCategory == HealthCategory.Critical);
+
+                return new CapabilityStat
+                {
+                    Name = g.Key,
+                    AppCount = total,
+                    AvgHealth = (int)apps.Average(a => a.HealthScore),
+                    CriticalApps = critical,
+                    HealthyPercent = total > 0 ? (int)Math.Round((double)healthy / total * 100) : 0,
+                    AttentionPercent = total > 0 ? (int)Math.Round((double)attention / total * 100) : 0,
+                    AtRiskPercent = total > 0 ? (int)Math.Round((double)atRisk / total * 100) : 0,
+                    CriticalPercent = total > 0 ? (int)Math.Round((double)critical / total * 100) : 0
+                };
+            })
+            .OrderBy(c => c.Name)
+            .ToList();
+    }
+
+    private static string GetHealthColorClass(int score)
+    {
+        if (score >= 80) return "text-healthy";
+        if (score >= 60) return "text-attention";
+        if (score >= 40) return "text-at-risk";
+        return "text-critical";
+    }
+
+    // Export functions
+    private async Task ExportApplicationsCsv()
+    {
+        var csv = "Id,Name,Capability,HealthScore,HealthCategory,SecurityIssues,LastActivity\n";
+        foreach (var app in _applications)
+        {
+            csv += $"\"{app.Id}\",\"{app.Name}\",\"{app.Capability}\",{app.HealthScore},\"{app.HealthCategory}\",{app.SecurityFindings.Count(f => !f.IsResolved)},\"{app.LastActivityDate:yyyy-MM-dd}\"\n";
+        }
+        await DownloadFile("applications.csv", csv, "text/csv");
+        _showExportMenu = false;
+    }
+
+    private async Task ExportApplicationsJson()
+    {
+        var json = JsonSerializer.Serialize(_applications, new JsonSerializerOptions { WriteIndented = true });
+        await DownloadFile("applications.json", json, "application/json");
+        _showExportMenu = false;
+    }
+
+    private async Task ExportTasksCsv()
+    {
+        var csv = "Id,Title,Type,Priority,Status,ApplicationName,DueDate,IsOverdue\n";
+        foreach (var task in _tasks)
+        {
+            csv += $"\"{task.Id}\",\"{task.Title}\",\"{task.Type}\",\"{task.Priority}\",\"{task.Status}\",\"{task.ApplicationName}\",\"{task.DueDate:yyyy-MM-dd}\",{task.IsOverdue}\n";
+        }
+        await DownloadFile("tasks.csv", csv, "text/csv");
+        _showExportMenu = false;
+    }
+
+    private async Task ExportTasksJson()
+    {
+        var json = JsonSerializer.Serialize(_tasks, new JsonSerializerOptions { WriteIndented = true });
+        await DownloadFile("tasks.json", json, "application/json");
+        _showExportMenu = false;
+    }
+
+    private async Task ExportFullReportJson()
+    {
+        var report = new
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Summary = new
+            {
+                TotalApplications = _applications.Count,
+                AverageHealthScore = GetAverageHealthScore(),
+                HealthDistribution = new
+                {
+                    Healthy = _healthyCount,
+                    NeedsAttention = _attentionCount,
+                    AtRisk = _atRiskCount,
+                    Critical = _criticalCount
+                },
+                SecurityFindings = new
+                {
+                    Total = _totalSecurityFindings,
+                    Critical = _criticalFindings,
+                    High = _highFindings,
+                    Medium = _mediumFindings,
+                    Low = _lowFindings,
+                    Resolved = _resolvedFindings
+                }
+            },
+            Applications = _applications,
+            Tasks = _tasks
+        };
+        var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+        await DownloadFile("full-report.json", json, "application/json");
+        _showExportMenu = false;
+    }
+
+    private async Task DownloadFile(string filename, string content, string contentType)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        var base64 = Convert.ToBase64String(bytes);
+        await JSRuntime.InvokeVoidAsync("downloadFile", filename, base64, contentType);
+    }
+
+    private class VulnerableApp
+    {
+        public string Name { get; set; } = "";
+        public int Critical { get; set; }
+        public int High { get; set; }
+        public int Medium { get; set; }
+        public int Low { get; set; }
+        public int Total => Critical + High + Medium + Low;
+    }
+
+    private class CapabilityStat
+    {
+        public string Name { get; set; } = "";
+        public int AppCount { get; set; }
+        public int AvgHealth { get; set; }
+        public int CriticalApps { get; set; }
+        public int HealthyPercent { get; set; }
+        public int AttentionPercent { get; set; }
+        public int AtRiskPercent { get; set; }
+        public int CriticalPercent { get; set; }
+    }
+}

@@ -1,0 +1,73 @@
+/* WIP Badge - Visual indicator for work-in-progress features */
+
+.wip-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: white;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: help;
+    animation: wip-pulse 2s ease-in-out infinite;
+}
+
+.wip-badge.inline {
+    margin-right: 6px;
+}
+
+/* Size variants */
+.wip-badge.wip-sm {
+    padding: 2px 4px;
+    font-size: 10px;
+}
+
+.wip-badge.wip-sm .wip-icon {
+    font-size: 10px;
+}
+
+.wip-badge.wip-md {
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+.wip-badge.wip-md .wip-icon {
+    font-size: 12px;
+}
+
+.wip-badge.wip-lg {
+    padding: 4px 8px;
+    font-size: 14px;
+}
+
+.wip-badge.wip-lg .wip-icon {
+    font-size: 14px;
+}
+
+.wip-icon {
+    line-height: 1;
+}
+
+.wip-text {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Subtle pulsing animation to draw attention */
+@keyframes wip-pulse {
+    0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+    }
+    50% {
+        opacity: 0.9;
+        box-shadow: 0 0 0 4px rgba(245, 158, 11, 0);
+    }
+}
+
+/* Hover state */
+.wip-badge:hover {
+    animation-play-state: paused;
+    transform: scale(1.05);
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+}

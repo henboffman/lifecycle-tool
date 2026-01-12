@@ -1,0 +1,1296 @@
+@page "/applications/{Id}"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@using TaskStatus = LifecycleDashboard.Models.TaskStatus
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+
+<PageTitle>@(_application?.Name ?? "Application") - Lifecycle Dashboard</PageTitle>
+
+@if (_isLoading)
+{
+    <div class="loading-state">
+        <div class="loading-spinner"></div>
+        <span>Loading application details...</span>
+    </div>
+}
+else if (_application == null)
+{
+    <div class="not-found-state">
+        <i class="bi bi-exclamation-circle"></i>
+        <h2>Application Not Found</h2>
+        <p>The requested application could not be found.</p>
+        <button class="btn btn-primary" @onclick="GoBack">
+            <i class="bi bi-arrow-left"></i> Back to Applications
+        </button>
+    </div>
+}
+else
+{
+    <div class="app-detail-page">
+        <!-- Header -->
+        <header class="detail-header">
+            <button class="btn-back" @onclick="GoBack" title="Back to Applications">
+                <i class="bi bi-arrow-left"></i>
+            </button>
+            <div class="header-content">
+                <div class="header-title-row">
+                    <h1>@_application.Name</h1>
+                    <span class="health-badge @_application.HealthCategory.ToString().ToLower()">
+                        @_application.HealthScore
+                    </span>
+                </div>
+                <p class="subtitle">@_application.Description</p>
+                <div class="header-meta">
+                    <span class="meta-item">
+                        <i class="bi bi-folder"></i> @_application.Capability
+                    </span>
+                    <span class="meta-item">
+                        <i class="bi bi-tag"></i> @_application.ServiceNowId
+                    </span>
+                    @if (_application.HasDataConflicts)
+                    {
+                        <span class="meta-item conflict">
+                            <i class="bi bi-exclamation-triangle"></i> Data Conflicts
+                        </span>
+                    }
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="@_application.RepositoryUrl" target="_blank" class="btn btn-outline" title="Open Repository">
+                    <i class="bi bi-git"></i> Repository
+                </a>
+                <a href="@_application.DocumentationUrl" target="_blank" class="btn btn-outline" title="Open Documentation">
+                    <i class="bi bi-file-text"></i> Docs
+                </a>
+            </div>
+        </header>
+
+        <!-- Tab Navigation -->
+        <nav class="detail-tabs" role="tablist">
+            <button class="tab-btn @(_activeTab == DetailTab.Overview ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Overview)">
+                <i class="bi bi-grid"></i> Overview
+            </button>
+            <button class="tab-btn @(_activeTab == DetailTab.Security ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Security)">
+                <i class="bi bi-shield-check"></i> Security
+                @if (_application.SecurityFindings.Count > 0)
+                {
+                    <span class="tab-badge">@_application.SecurityFindings.Count</span>
+                }
+            </button>
+            <button class="tab-btn @(_activeTab == DetailTab.Repository ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Repository)">
+                <i class="bi bi-code-square"></i> Repository
+            </button>
+            <button class="tab-btn @(_activeTab == DetailTab.Usage ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Usage)">
+                <i class="bi bi-graph-up"></i> Usage
+            </button>
+            <button class="tab-btn @(_activeTab == DetailTab.Operations ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Operations)">
+                <i class="bi bi-calendar-event"></i> Operations
+                @if (HasUpcomingKeyDates())
+                {
+                    <span class="tab-badge">@GetUpcomingKeyDateCount()</span>
+                }
+            </button>
+            <button class="tab-btn @(_activeTab == DetailTab.Documentation ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Documentation)">
+                <i class="bi bi-journal-text"></i> Documentation
+            </button>
+            <button class="tab-btn @(_activeTab == DetailTab.Tasks ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Tasks)">
+                <i class="bi bi-check-square"></i> Tasks
+                @if (_tasks.Count(t => t.Status != TaskStatus.Completed) > 0)
+                {
+                    <span class="tab-badge">@_tasks.Count(t => t.Status != TaskStatus.Completed)</span>
+                }
+            </button>
+            <button class="tab-btn @(_activeTab == DetailTab.DataSources ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.DataSources)">
+                <i class="bi bi-database"></i> Data Sources
+            </button>
+        </nav>
+
+        <!-- Tab Content -->
+        <div class="tab-content">
+            @if (_activeTab == DetailTab.Overview)
+            {
+                <section class="tab-panel">
+                    <!-- Health Score Breakdown -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-heart-pulse"></i> Health Score Breakdown</h2>
+                        <div class="health-breakdown">
+                            <div class="health-score-large @_application.HealthCategory.ToString().ToLower()">
+                                <span class="score-value">@_application.HealthScore</span>
+                                <span class="score-label">@GetHealthCategoryLabel(_application.HealthCategory)</span>
+                            </div>
+                            <div class="health-factors">
+                                <div class="factor-item">
+                                    <span class="factor-label">Security</span>
+                                    <span class="factor-value @GetSecurityClass()">
+                                        @(_application.SecurityFindings.Count == 0 ? "No issues" : $"{_application.SecurityFindings.Count} findings")
+                                    </span>
+                                </div>
+                                <div class="factor-item">
+                                    <span class="factor-label">Usage</span>
+                                    <span class="factor-value">@GetUsageLabel(_application.Usage)</span>
+                                </div>
+                                <div class="factor-item">
+                                    <span class="factor-label">Last Activity</span>
+                                    <span class="factor-value @GetActivityClass()">@GetActivityLabel()</span>
+                                </div>
+                                <div class="factor-item">
+                                    <span class="factor-label">Documentation</span>
+                                    <span class="factor-value @GetDocsClass()">@GetDocsCompleteness()% complete</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Stats -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-bar-chart"></i> Quick Stats</h2>
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-icon security"><i class="bi bi-shield-exclamation"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-value">@_application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Critical)</span>
+                                    <span class="stat-label">Critical Vulns</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon usage"><i class="bi bi-people"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-value">@_application.Usage.MonthlyUsers.ToString("N0")</span>
+                                    <span class="stat-label">Monthly Users</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon tasks"><i class="bi bi-list-task"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-value">@_tasks.Count(t => t.Status != TaskStatus.Completed)</span>
+                                    <span class="stat-label">Open Tasks</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon tech"><i class="bi bi-code-slash"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-value">@(_repositoryInfo?.Stack.DetectedPattern ?? "Unknown")</span>
+                                    <span class="stat-label">Tech Stack</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Role Assignments -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-people"></i> Role Assignments</h2>
+                        @if (_application.RoleAssignments.Count == 0)
+                        {
+                            <p class="empty-message">No role assignments found.</p>
+                        }
+                        else
+                        {
+                            <div class="role-list">
+                                @foreach (var role in _application.RoleAssignments)
+                                {
+                                    <div class="role-item @(role.NeedsRevalidation ? "needs-validation" : "")">
+                                        <div class="role-avatar">@GetInitials(role.UserName)</div>
+                                        <div class="role-info">
+                                            <span class="role-name">@role.UserName</span>
+                                            <span class="role-type">@role.Role</span>
+                                        </div>
+                                        <div class="role-status">
+                                            @if (role.NeedsRevalidation)
+                                            {
+                                                <span class="validation-badge needs">Needs Validation</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="validation-badge valid">Validated @role.LastValidatedDate?.ToString("MMM d")</span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Technology Stack -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-stack"></i> Technology Stack</h2>
+                        <div class="tech-tags">
+                            @foreach (var tech in _application.TechnologyStack)
+                            {
+                                <span class="tech-tag">@tech</span>
+                            }
+                        </div>
+                    </div>
+                </section>
+            }
+            else if (_activeTab == DetailTab.Security)
+            {
+                <section class="tab-panel">
+                    <div class="content-section">
+                        <h2><i class="bi bi-shield-exclamation"></i> Security Findings</h2>
+                        @if (_application.SecurityFindings.Count == 0)
+                        {
+                            <div class="empty-state success">
+                                <i class="bi bi-shield-check"></i>
+                                <h3>No Security Issues</h3>
+                                <p>No vulnerabilities detected in recent scans.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="findings-summary">
+                                <div class="severity-count critical">
+                                    <span class="count">@_application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Critical)</span>
+                                    <span class="label">Critical</span>
+                                </div>
+                                <div class="severity-count high">
+                                    <span class="count">@_application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.High)</span>
+                                    <span class="label">High</span>
+                                </div>
+                                <div class="severity-count medium">
+                                    <span class="count">@_application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Medium)</span>
+                                    <span class="label">Medium</span>
+                                </div>
+                                <div class="severity-count low">
+                                    <span class="count">@_application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Low)</span>
+                                    <span class="label">Low</span>
+                                </div>
+                            </div>
+
+                            <table class="findings-table">
+                                <thead>
+                                    <tr>
+                                        <th>Severity</th>
+                                        <th>Title</th>
+                                        <th>Location</th>
+                                        <th>Detected</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var finding in _application.SecurityFindings.OrderByDescending(f => f.Severity))
+                                    {
+                                        <tr>
+                                            <td>
+                                                <span class="severity-badge @finding.Severity.ToString().ToLower()">
+                                                    @finding.Severity
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div class="finding-title">@finding.Title</div>
+                                                <div class="finding-id">@finding.Id</div>
+                                            </td>
+                                            <td class="finding-location">
+                                                @finding.FilePath:@finding.LineNumber
+                                            </td>
+                                            <td class="finding-date">
+                                                @finding.DetectedDate.ToString("MMM d, yyyy")
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+            }
+            else if (_activeTab == DetailTab.Repository)
+            {
+                <section class="tab-panel">
+                    @if (_repositoryInfo == null)
+                    {
+                        <div class="empty-state">
+                            <i class="bi bi-git"></i>
+                            <h3>No Repository Data</h3>
+                            <p>Repository information is not available for this application.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <!-- Repository Info -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-git"></i> Repository Info</h2>
+                            <div class="repo-info-grid">
+                                <div class="info-item">
+                                    <span class="info-label">Name</span>
+                                    <span class="info-value">@_repositoryInfo.Name</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Default Branch</span>
+                                    <span class="info-value">@_repositoryInfo.DefaultBranch</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Stack</span>
+                                    <span class="info-value">@_repositoryInfo.Stack.DetectedPattern</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Target Framework</span>
+                                    <span class="info-value">@(_repositoryInfo.Stack.TargetFramework ?? "N/A")</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Last Build</span>
+                                    <span class="info-value @(_repositoryInfo.LastBuildStatus == "Succeeded" ? "success" : "error")">
+                                        @_repositoryInfo.LastBuildStatus - @_repositoryInfo.LastBuildDate?.ToString("MMM d")
+                                    </span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">App Insights</span>
+                                    <span class="info-value @(_repositoryInfo.HasApplicationInsights ? "success" : "warning")">
+                                        @(_repositoryInfo.HasApplicationInsights ? "Configured" : "Not configured")
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- README Status -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-file-earmark-text"></i> README Status</h2>
+                            <div class="readme-status">
+                                @if (!_repositoryInfo.Readme.Exists)
+                                {
+                                    <div class="status-indicator error">
+                                        <i class="bi bi-x-circle"></i> No README.md file
+                                    </div>
+                                }
+                                else if (_repositoryInfo.Readme.IsTemplate)
+                                {
+                                    <div class="status-indicator warning">
+                                        <i class="bi bi-exclamation-triangle"></i> README appears to be an unedited template
+                                    </div>
+                                }
+                                else if (_repositoryInfo.Readme.HasMeaningfulContent)
+                                {
+                                    <div class="status-indicator success">
+                                        <i class="bi bi-check-circle"></i> README has meaningful content (@_repositoryInfo.Readme.CharacterCount.ToString("N0") chars)
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="status-indicator warning">
+                                        <i class="bi bi-exclamation-triangle"></i> README may need more content (@_repositoryInfo.Readme.CharacterCount chars)
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Commit Activity -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-activity"></i> Commit Activity</h2>
+                            <div class="commit-stats">
+                                <div class="commit-stat">
+                                    <span class="stat-value">@_repositoryInfo.Commits.TotalCommitCount.ToString("N0")</span>
+                                    <span class="stat-label">Total Commits</span>
+                                </div>
+                                <div class="commit-stat">
+                                    <span class="stat-value">@_repositoryInfo.Commits.Last30DaysCommitCount</span>
+                                    <span class="stat-label">Last 30 Days</span>
+                                </div>
+                                <div class="commit-stat">
+                                    <span class="stat-value">@_repositoryInfo.Commits.Last90DaysCommitCount</span>
+                                    <span class="stat-label">Last 90 Days</span>
+                                </div>
+                                <div class="commit-stat @(_repositoryInfo.Commits.IsStale ? "stale" : "")">
+                                    <span class="stat-value">@_repositoryInfo.Commits.DaysSinceLastCommit</span>
+                                    <span class="stat-label">Days Since Last Commit</span>
+                                </div>
+                            </div>
+                            <div class="commit-details">
+                                <div class="commit-detail">
+                                    <span class="detail-label">First Commit:</span>
+                                    <span class="detail-value">@_repositoryInfo.Commits.FirstCommitDate?.ToString("MMM d, yyyy") by @_repositoryInfo.Commits.FirstCommitter</span>
+                                </div>
+                                <div class="commit-detail">
+                                    <span class="detail-label">Last Commit:</span>
+                                    <span class="detail-value">@_repositoryInfo.Commits.LastCommitDate?.ToString("MMM d, yyyy") by @_repositoryInfo.Commits.LastCommitter</span>
+                                </div>
+                                <div class="commit-detail">
+                                    <span class="detail-label">Top Contributor (365d):</span>
+                                    <span class="detail-value">@_repositoryInfo.Commits.TopCommitter</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Top Contributors -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-people"></i> Top Contributors</h2>
+                            <div class="contributors-list">
+                                @foreach (var contributor in _repositoryInfo.Commits.TopContributors.Take(5))
+                                {
+                                    <div class="contributor-item">
+                                        <div class="contributor-avatar">@GetInitials(contributor.Name)</div>
+                                        <div class="contributor-info">
+                                            <span class="contributor-name">@contributor.Name</span>
+                                            <span class="contributor-email">@contributor.Email</span>
+                                        </div>
+                                        <div class="contributor-stats">
+                                            <span class="commit-count">@contributor.CommitCount commits</span>
+                                            <span class="recent-count">@contributor.Last365DaysCommitCount in last year</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Packages -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-box"></i> Packages (@_repositoryInfo.Packages.Count)</h2>
+                            @if (_repositoryInfo.Packages.Count == 0)
+                            {
+                                <p class="empty-message">No packages detected.</p>
+                            }
+                            else
+                            {
+                                <table class="packages-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Package</th>
+                                            <th>Version</th>
+                                            <th>Latest</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var pkg in _repositoryInfo.Packages)
+                                        {
+                                            <tr class="@(pkg.HasKnownVulnerability ? "vulnerable" : "")">
+                                                <td class="pkg-name">@pkg.Name</td>
+                                                <td class="pkg-version">@pkg.Version</td>
+                                                <td class="pkg-latest">@pkg.LatestVersion</td>
+                                                <td>
+                                                    @if (pkg.HasKnownVulnerability)
+                                                    {
+                                                        <span class="pkg-status vulnerable">
+                                                            <i class="bi bi-exclamation-triangle"></i> Vulnerable
+                                                        </span>
+                                                    }
+                                                    else if (pkg.IsOutdated)
+                                                    {
+                                                        <span class="pkg-status outdated">
+                                                            <i class="bi bi-arrow-up-circle"></i> Update Available
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="pkg-status current">
+                                                            <i class="bi bi-check-circle"></i> Current
+                                                        </span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </div>
+
+                        <!-- System Dependencies -->
+                        @if (_repositoryInfo.SystemDependencies.Count > 0)
+                        {
+                            <div class="content-section">
+                                <h2><i class="bi bi-diagram-3"></i> System Dependencies</h2>
+                                <div class="dependencies-list">
+                                    @foreach (var dep in _repositoryInfo.SystemDependencies)
+                                    {
+                                        <div class="dependency-item">
+                                            <div class="dep-icon">
+                                                <i class="bi @GetDependencyIcon(dep.Type)"></i>
+                                            </div>
+                                            <div class="dep-info">
+                                                <span class="dep-name">@dep.Name</span>
+                                                <span class="dep-type">@dep.Type</span>
+                                            </div>
+                                            <div class="dep-connection">
+                                                <code>@dep.ConnectionInfo</code>
+                                                <span class="dep-source">from @dep.ConfigSource</span>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </section>
+            }
+            else if (_activeTab == DetailTab.Usage)
+            {
+                <section class="tab-panel">
+                    <!-- Usage Data Availability -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-info-circle"></i> Data Availability</h2>
+                        <div class="usage-availability @GetUsageAvailabilityClass()">
+                            <div class="availability-status">
+                                @if (_application.UsageAvailability.IsAvailable)
+                                {
+                                    <div class="availability-indicator available">
+                                        <i class="bi bi-check-circle"></i>
+                                        <span>Usage data is available</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="availability-indicator unavailable">
+                                        <i class="bi bi-exclamation-triangle"></i>
+                                        <span>Usage data not available</span>
+                                    </div>
+                                }
+                                <span class="availability-reason">@GetUsageReasonLabel(_application.UsageAvailability.Reason)</span>
+                            </div>
+                            @if (_application.UsageAvailability.IsSeasonal)
+                            {
+                                <div class="seasonal-info">
+                                    <i class="bi bi-calendar3"></i>
+                                    <div class="seasonal-details">
+                                        <span class="seasonal-label">Seasonal Application</span>
+                                        @if (!string.IsNullOrEmpty(_application.UsageAvailability.SeasonalPattern))
+                                        {
+                                            <span class="seasonal-pattern">@_application.UsageAvailability.SeasonalPattern</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(_application.UsageAvailability.Notes))
+                            {
+                                <div class="availability-notes">
+                                    <i class="bi bi-chat-left-text"></i>
+                                    <span>@_application.UsageAvailability.Notes</span>
+                                </div>
+                            }
+                            @if (_application.UsageAvailability.LastReviewedDate.HasValue)
+                            {
+                                <div class="availability-review">
+                                    <span>Last reviewed @_application.UsageAvailability.LastReviewedDate.Value.ToString("MMM d, yyyy")</span>
+                                    @if (!string.IsNullOrEmpty(_application.UsageAvailability.ReviewedBy))
+                                    {
+                                        <span>by @_application.UsageAvailability.ReviewedBy</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="content-section">
+                        <h2><i class="bi bi-graph-up"></i> Usage Metrics</h2>
+                        <div class="usage-cards">
+                            <div class="usage-card">
+                                <div class="usage-value">@_application.Usage.MonthlyRequests.ToString("N0")</div>
+                                <div class="usage-label">Monthly Requests</div>
+                                <div class="usage-trend @_application.Usage.Trend.ToString().ToLower()">
+                                    <i class="bi @GetTrendIcon(_application.Usage.Trend)"></i>
+                                    @_application.Usage.Trend
+                                </div>
+                            </div>
+                            <div class="usage-card">
+                                <div class="usage-value">@_application.Usage.MonthlyUsers.ToString("N0")</div>
+                                <div class="usage-label">Monthly Users</div>
+                            </div>
+                            <div class="usage-card">
+                                <div class="usage-value">@_application.Usage.MonthlySessions.ToString("N0")</div>
+                                <div class="usage-label">Monthly Sessions</div>
+                            </div>
+                            <div class="usage-card">
+                                <div class="usage-value">@GetUsageLevel()</div>
+                                <div class="usage-label">Usage Level</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="content-section">
+                        <h2><i class="bi bi-info-circle"></i> Usage Analysis</h2>
+                        <div class="usage-analysis">
+                            @if (_application.Usage.MonthlyUsers == 0)
+                            {
+                                <div class="analysis-item warning">
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                    <p>This application has no recorded usage. Consider evaluating for potential retirement.</p>
+                                </div>
+                            }
+                            else if (_application.Usage.MonthlyUsers < 20)
+                            {
+                                <div class="analysis-item info">
+                                    <i class="bi bi-info-circle"></i>
+                                    <p>Low usage application. May be a candidate for consolidation or specialized tool.</p>
+                                </div>
+                            }
+                            else if (_application.Usage.MonthlyUsers > 500)
+                            {
+                                <div class="analysis-item success">
+                                    <i class="bi bi-check-circle"></i>
+                                    <p>High usage application. Prioritize stability and performance monitoring.</p>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="analysis-item success">
+                                    <i class="bi bi-check-circle"></i>
+                                    <p>Normal usage patterns detected.</p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </section>
+            }
+            else if (_activeTab == DetailTab.Operations)
+            {
+                <section class="tab-panel">
+                    <!-- Critical Periods -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-calendar-range"></i> Critical Periods</h2>
+                        <p class="section-description">Define time periods with special maintenance considerations for this application.</p>
+                        @if (_application.CriticalPeriods.Count == 0)
+                        {
+                            <div class="empty-state">
+                                <i class="bi bi-calendar-plus"></i>
+                                <h3>No Critical Periods Defined</h3>
+                                <p>Data owners can define periods when maintenance should be avoided or encouraged.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="periods-grid">
+                                @foreach (var period in _application.CriticalPeriods.OrderBy(p => p.StartMonth))
+                                {
+                                    <div class="period-card @period.Criticality.ToString().ToLower()">
+                                        <div class="period-header">
+                                            <span class="period-name">@period.Name</span>
+                                            <span class="criticality-badge @period.Criticality.ToString().ToLower()">
+                                                @GetCriticalityLabel(period.Criticality)
+                                            </span>
+                                        </div>
+                                        <div class="period-timing">
+                                            <i class="bi bi-calendar3"></i>
+                                            <span>@GetMonthName(period.StartMonth)@(period.StartDay.HasValue ? $" {period.StartDay}" : "") - @GetMonthName(period.EndMonth)@(period.EndDay.HasValue ? $" {period.EndDay}" : "")</span>
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(period.Description))
+                                        {
+                                            <div class="period-description">@period.Description</div>
+                                        }
+                                        <div class="period-flags">
+                                            @if (PeriodBlocksMaintenance(period))
+                                            {
+                                                <span class="period-flag danger" title="No maintenance during this period">
+                                                    <i class="bi bi-ban"></i> No Maintenance
+                                                </span>
+                                            }
+                                            @if (PeriodPrefersMaintenance(period))
+                                            {
+                                                <span class="period-flag success" title="Good time for maintenance">
+                                                    <i class="bi bi-check-circle"></i> Preferred for Maintenance
+                                                </span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            <!-- Monthly Overview -->
+                            <div class="periods-calendar">
+                                <h3>Monthly Overview</h3>
+                                <div class="month-grid">
+                                    @for (int month = 1; month <= 12; month++)
+                                    {
+                                        var monthPeriods = GetPeriodsForMonth(month);
+                                        var monthClass = GetMonthCriticalityClass(monthPeriods);
+                                        <div class="month-cell @monthClass" title="@GetMonthTooltip(month, monthPeriods)">
+                                            <span class="month-abbr">@GetMonthAbbr(month)</span>
+                                            @if (monthPeriods.Any())
+                                            {
+                                                <span class="month-indicator">
+                                                    @if (monthPeriods.Any(p => PeriodBlocksMaintenance(p)))
+                                                    {
+                                                        <i class="bi bi-ban"></i>
+                                                    }
+                                                    else if (monthPeriods.Any(p => PeriodPrefersMaintenance(p)))
+                                                    {
+                                                        <i class="bi bi-check"></i>
+                                                    }
+                                                </span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                <div class="calendar-legend">
+                                    <span class="legend-item blackout"><span class="legend-dot"></span> Blackout</span>
+                                    <span class="legend-item critical"><span class="legend-dot"></span> Critical</span>
+                                    <span class="legend-item elevated"><span class="legend-dot"></span> Elevated</span>
+                                    <span class="legend-item maintenance"><span class="legend-dot"></span> Maintenance OK</span>
+                                    <span class="legend-item normal"><span class="legend-dot"></span> Normal</span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Key Dates -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-calendar-event"></i> Key Dates</h2>
+                        <p class="section-description">Important upcoming dates and deadlines for this application.</p>
+                        @if (_application.KeyDates.Count == 0)
+                        {
+                            <div class="empty-state">
+                                <i class="bi bi-calendar-plus"></i>
+                                <h3>No Key Dates Defined</h3>
+                                <p>Data owners can add important dates like releases, audits, or deadlines.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            var upcomingDates = _application.KeyDates.Where(d => d.Date >= DateTimeOffset.UtcNow.AddDays(-7)).OrderBy(d => d.Date).ToList();
+                            var pastDates = _application.KeyDates.Where(d => d.Date < DateTimeOffset.UtcNow.AddDays(-7)).OrderByDescending(d => d.Date).ToList();
+
+                            @if (upcomingDates.Any())
+                            {
+                                <div class="key-dates-list">
+                                    @foreach (var keyDate in upcomingDates)
+                                    {
+                                        var isUrgent = keyDate.Date <= DateTimeOffset.UtcNow.AddDays(keyDate.WarningDaysBefore);
+                                        var isPast = keyDate.Date < DateTimeOffset.UtcNow;
+                                        <div class="key-date-item @(isUrgent ? "urgent" : "") @(isPast ? "past" : "")">
+                                            <div class="date-visual">
+                                                <span class="date-month">@keyDate.Date.ToString("MMM")</span>
+                                                <span class="date-day">@keyDate.Date.ToString("dd")</span>
+                                            </div>
+                                            <div class="date-info">
+                                                <span class="date-title">@keyDate.Title</span>
+                                                <div class="date-meta">
+                                                    <span class="date-type @keyDate.Type.ToString().ToLower()">
+                                                        <i class="bi @GetKeyDateIcon(keyDate.Type)"></i> @GetKeyDateTypeLabel(keyDate.Type)
+                                                    </span>
+                                                    @if (keyDate.BlocksMaintenance)
+                                                    {
+                                                        <span class="date-blocks-maintenance" title="Maintenance blocked @keyDate.WarningDaysBefore days before and @keyDate.WarningDaysAfter days after">
+                                                            <i class="bi bi-ban"></i> Blocks maintenance ±@(keyDate.WarningDaysBefore)/@(keyDate.WarningDaysAfter)d
+                                                        </span>
+                                                    }
+                                                </div>
+                                                @if (!string.IsNullOrEmpty(keyDate.Description))
+                                                {
+                                                    <span class="date-description">@keyDate.Description</span>
+                                                }
+                                            </div>
+                                            <div class="date-countdown @(isPast ? "past" : isUrgent ? "urgent" : "")">
+                                                @if (isPast)
+                                                {
+                                                    <span class="countdown-value">@((int)(DateTimeOffset.UtcNow - keyDate.Date).TotalDays)d ago</span>
+                                                }
+                                                else
+                                                {
+                                                    var daysUntil = (int)(keyDate.Date - DateTimeOffset.UtcNow).TotalDays;
+                                                    <span class="countdown-value">@(daysUntil)d</span>
+                                                    <span class="countdown-label">remaining</span>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+
+                            @if (pastDates.Any())
+                            {
+                                <details class="past-dates-section">
+                                    <summary>Past Dates (@pastDates.Count)</summary>
+                                    <div class="key-dates-list past">
+                                        @foreach (var keyDate in pastDates.Take(5))
+                                        {
+                                            <div class="key-date-item past">
+                                                <div class="date-visual">
+                                                    <span class="date-month">@keyDate.Date.ToString("MMM")</span>
+                                                    <span class="date-day">@keyDate.Date.ToString("dd")</span>
+                                                </div>
+                                                <div class="date-info">
+                                                    <span class="date-title">@keyDate.Title</span>
+                                                    <span class="date-type @keyDate.Type.ToString().ToLower()">
+                                                        <i class="bi @GetKeyDateIcon(keyDate.Type)"></i> @GetKeyDateTypeLabel(keyDate.Type)
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </details>
+                            }
+                        }
+                    </div>
+                </section>
+            }
+            else if (_activeTab == DetailTab.Documentation)
+            {
+                <section class="tab-panel">
+                    <div class="content-section">
+                        <h2><i class="bi bi-journal-check"></i> Documentation Status</h2>
+                        <div class="docs-checklist">
+                            <div class="checklist-item @(_application.Documentation.HasArchitectureDiagram ? "complete" : "incomplete")">
+                                <i class="bi @(_application.Documentation.HasArchitectureDiagram ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                <span>Architecture Diagram</span>
+                            </div>
+                            <div class="checklist-item @(_application.Documentation.HasSystemDocumentation ? "complete" : "incomplete")">
+                                <i class="bi @(_application.Documentation.HasSystemDocumentation ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                <span>System Documentation</span>
+                            </div>
+                            <div class="checklist-item @(_application.Documentation.HasUserDocumentation ? "complete" : "incomplete")">
+                                <i class="bi @(_application.Documentation.HasUserDocumentation ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                <span>User Documentation</span>
+                            </div>
+                            <div class="checklist-item @(_application.Documentation.HasSupportDocumentation ? "complete" : "incomplete")">
+                                <i class="bi @(_application.Documentation.HasSupportDocumentation ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                <span>Support Runbook</span>
+                            </div>
+                        </div>
+                        <div class="docs-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: @GetDocsCompleteness()%"></div>
+                            </div>
+                            <span class="progress-label">@GetDocsCompleteness()% Complete</span>
+                        </div>
+                    </div>
+
+                    <div class="content-section">
+                        <h2><i class="bi bi-link-45deg"></i> Documentation Links</h2>
+                        <div class="doc-links">
+                            <a href="@_application.DocumentationUrl" target="_blank" class="doc-link">
+                                <i class="bi bi-folder"></i>
+                                <span>SharePoint Documentation</span>
+                                <i class="bi bi-box-arrow-up-right"></i>
+                            </a>
+                            <a href="@_application.RepositoryUrl" target="_blank" class="doc-link">
+                                <i class="bi bi-git"></i>
+                                <span>Repository README</span>
+                                <i class="bi bi-box-arrow-up-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                </section>
+            }
+            else if (_activeTab == DetailTab.Tasks)
+            {
+                <section class="tab-panel">
+                    <div class="content-section">
+                        <h2><i class="bi bi-list-task"></i> Active Tasks (@_tasks.Count(t => t.Status != TaskStatus.Completed))</h2>
+                        @if (_tasks.Count(t => t.Status != TaskStatus.Completed) == 0)
+                        {
+                            <div class="empty-state success">
+                                <i class="bi bi-check-circle"></i>
+                                <h3>No Active Tasks</h3>
+                                <p>All tasks for this application are complete.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="task-list">
+                                @foreach (var task in _tasks.Where(t => t.Status != TaskStatus.Completed).OrderBy(t => t.DueDate))
+                                {
+                                    <div class="task-item @(task.IsOverdue ? "overdue" : "")">
+                                        <div class="task-priority @task.Priority.ToString().ToLower()"></div>
+                                        <div class="task-info">
+                                            <span class="task-title">@task.Title</span>
+                                            <span class="task-meta">
+                                                <span class="task-type">@task.Type</span>
+                                                <span class="task-assignee">@task.AssigneeName</span>
+                                            </span>
+                                        </div>
+                                        <div class="task-due @(task.IsOverdue ? "overdue" : "")">
+                                            @if (task.IsOverdue)
+                                            {
+                                                <span>@task.DaysOverdue days overdue</span>
+                                            }
+                                            else
+                                            {
+                                                <span>Due @task.DueDate.ToString("MMM d")</span>
+                                            }
+                                        </div>
+                                        <button class="btn btn-sm btn-outline" @onclick="() => ViewTask(task.Id)">
+                                            <i class="bi bi-eye"></i> View
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    @if (_tasks.Any(t => t.Status == TaskStatus.Completed))
+                    {
+                        <div class="content-section">
+                            <h2><i class="bi bi-check-square"></i> Completed Tasks (@_tasks.Count(t => t.Status == TaskStatus.Completed))</h2>
+                            <div class="task-list completed">
+                                @foreach (var task in _tasks.Where(t => t.Status == TaskStatus.Completed).OrderByDescending(t => t.CompletedDate).Take(5))
+                                {
+                                    <div class="task-item completed">
+                                        <div class="task-info">
+                                            <span class="task-title">@task.Title</span>
+                                            <span class="task-meta">Completed @task.CompletedDate?.ToString("MMM d, yyyy")</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </section>
+            }
+            else if (_activeTab == DetailTab.DataSources)
+            {
+                <section class="tab-panel">
+                    <div class="content-section">
+                        <h2><i class="bi bi-database"></i> Data Source Status</h2>
+                        <div class="data-sources">
+                            <div class="source-card">
+                                <div class="source-icon servicenow"><i class="bi bi-ticket"></i></div>
+                                <div class="source-info">
+                                    <span class="source-name">ServiceNow</span>
+                                    <span class="source-id">@_application.ServiceNowId</span>
+                                </div>
+                                <div class="source-status connected">
+                                    <i class="bi bi-check-circle"></i> Connected
+                                </div>
+                            </div>
+                            <div class="source-card">
+                                <div class="source-icon sharepoint"><i class="bi bi-file-earmark-text"></i></div>
+                                <div class="source-info">
+                                    <span class="source-name">SharePoint</span>
+                                    <span class="source-id">Documentation Site</span>
+                                </div>
+                                <div class="source-status connected">
+                                    <i class="bi bi-check-circle"></i> Connected
+                                </div>
+                            </div>
+                            <div class="source-card">
+                                <div class="source-icon devops"><i class="bi bi-git"></i></div>
+                                <div class="source-info">
+                                    <span class="source-name">Azure DevOps</span>
+                                    <span class="source-id">@(_repositoryInfo?.Name ?? "Not linked")</span>
+                                </div>
+                                <div class="source-status @(_repositoryInfo != null ? "connected" : "disconnected")">
+                                    <i class="bi @(_repositoryInfo != null ? "bi-check-circle" : "bi-x-circle")"></i>
+                                    @(_repositoryInfo != null ? "Connected" : "Not Linked")
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="content-section">
+                        <h2><i class="bi bi-clock-history"></i> Sync Information</h2>
+                        <div class="sync-info">
+                            <div class="sync-item">
+                                <span class="sync-label">Last Data Sync</span>
+                                <span class="sync-value">@_application.LastSyncDate.ToString("MMM d, yyyy h:mm tt")</span>
+                            </div>
+                            <div class="sync-item">
+                                <span class="sync-label">Last Activity</span>
+                                <span class="sync-value">@(_application.LastActivityDate?.ToString("MMM d, yyyy") ?? "N/A")</span>
+                            </div>
+                            @if (_repositoryInfo != null)
+                            {
+                                <div class="sync-item">
+                                    <span class="sync-label">Repository Sync</span>
+                                    <span class="sync-value">@_repositoryInfo.LastSyncDate.ToString("MMM d, yyyy h:mm tt")</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    @if (_application.HasDataConflicts)
+                    {
+                        <div class="content-section">
+                            <h2><i class="bi bi-exclamation-triangle"></i> Data Conflicts</h2>
+                            <div class="conflicts-list">
+                                @foreach (var conflict in _application.DataConflicts)
+                                {
+                                    <div class="conflict-item">
+                                        <i class="bi bi-exclamation-circle"></i>
+                                        <span>@conflict</span>
+                                    </div>
+                                }
+                            </div>
+                            <p class="conflict-help">
+                                Resolve conflicts by updating the source systems. ServiceNow is the system of record.
+                            </p>
+                        </div>
+                    }
+                </section>
+            }
+        </div>
+
+        <!-- Footer -->
+        <footer class="detail-footer">
+            <span class="last-sync">Last synced: @_application.LastSyncDate.ToString("MMM d, yyyy h:mm tt")</span>
+        </footer>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string Id { get; set; } = string.Empty;
+
+    private Application? _application;
+    private RepositoryInfo? _repositoryInfo;
+    private List<LifecycleTask> _tasks = [];
+    private bool _isLoading = true;
+    private DetailTab _activeTab = DetailTab.Overview;
+
+    private enum DetailTab
+    {
+        Overview,
+        Security,
+        Repository,
+        Usage,
+        Operations,
+        Documentation,
+        Tasks,
+        DataSources
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _application = await DataService.GetApplicationAsync(Id);
+        if (_application != null)
+        {
+            _repositoryInfo = await DataService.GetRepositoryInfoAsync(Id);
+            _tasks = (await DataService.GetTasksForApplicationAsync(Id)).ToList();
+        }
+        _isLoading = false;
+    }
+
+    private void SetTab(DetailTab tab) => _activeTab = tab;
+
+    private void GoBack() => Navigation.NavigateTo("/applications");
+
+    private void ViewTask(string taskId) => Navigation.NavigateTo($"/tasks/{taskId}");
+
+    private string GetHealthCategoryLabel(HealthCategory category) => category switch
+    {
+        HealthCategory.Healthy => "Healthy",
+        HealthCategory.NeedsAttention => "Needs Attention",
+        HealthCategory.AtRisk => "At Risk",
+        HealthCategory.Critical => "Critical",
+        _ => "Unknown"
+    };
+
+    private string GetSecurityClass()
+    {
+        var count = _application?.SecurityFindings.Count ?? 0;
+        if (count == 0) return "success";
+        if (count < 3) return "warning";
+        return "error";
+    }
+
+    private string GetUsageLabel(UsageMetrics usage)
+    {
+        if (usage.MonthlyUsers == 0) return "No usage";
+        if (usage.MonthlyUsers < 20) return "Low";
+        if (usage.MonthlyUsers < 100) return "Moderate";
+        if (usage.MonthlyUsers < 500) return "High";
+        return "Very High";
+    }
+
+    private string GetUsageLevel()
+    {
+        if (_application == null) return "Unknown";
+        return GetUsageLabel(_application.Usage);
+    }
+
+    private string GetActivityClass()
+    {
+        if (_application?.LastActivityDate == null) return "";
+        var days = (DateTimeOffset.UtcNow - _application.LastActivityDate.Value).TotalDays;
+        if (days < 30) return "success";
+        if (days < 180) return "warning";
+        return "error";
+    }
+
+    private string GetActivityLabel()
+    {
+        if (_application?.LastActivityDate == null) return "Unknown";
+        var days = (int)(DateTimeOffset.UtcNow - _application.LastActivityDate.Value).TotalDays;
+        if (days == 0) return "Today";
+        if (days == 1) return "Yesterday";
+        if (days < 7) return $"{days} days ago";
+        if (days < 30) return $"{days / 7} weeks ago";
+        if (days < 365) return $"{days / 30} months ago";
+        return $"{days / 365} years ago";
+    }
+
+    private string GetDocsClass()
+    {
+        var pct = GetDocsCompleteness();
+        if (pct == 100) return "success";
+        if (pct >= 75) return "warning";
+        return "error";
+    }
+
+    private int GetDocsCompleteness()
+    {
+        if (_application == null) return 0;
+        var doc = _application.Documentation;
+        var count = 0;
+        if (doc.HasArchitectureDiagram) count++;
+        if (doc.HasSystemDocumentation) count++;
+        if (doc.HasUserDocumentation) count++;
+        if (doc.HasSupportDocumentation) count++;
+        return count * 25;
+    }
+
+    private string GetInitials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+            return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+        return parts.Length > 0 ? parts[0][..Math.Min(2, parts[0].Length)].ToUpper() : "??";
+    }
+
+    private string GetTrendIcon(UsageTrend trend) => trend switch
+    {
+        UsageTrend.Increasing => "bi-arrow-up",
+        UsageTrend.Decreasing => "bi-arrow-down",
+        _ => "bi-dash"
+    };
+
+    private string GetDependencyIcon(DependencyType type) => type switch
+    {
+        DependencyType.SqlServer or DependencyType.PostgreSql or DependencyType.MySql or DependencyType.Oracle => "bi-database",
+        DependencyType.Redis => "bi-speedometer2",
+        DependencyType.ServiceBus or DependencyType.EventHub => "bi-envelope",
+        DependencyType.BlobStorage => "bi-cloud",
+        DependencyType.KeyVault => "bi-key",
+        DependencyType.RestApi => "bi-globe",
+        _ => "bi-box"
+    };
+
+    // Usage Availability helpers
+    private string GetUsageAvailabilityClass()
+    {
+        if (_application == null) return "";
+        if (!_application.UsageAvailability.IsAvailable) return "unavailable";
+        if (_application.UsageAvailability.IsSeasonal) return "seasonal";
+        return "available";
+    }
+
+    private string GetUsageReasonLabel(UsageDataReason reason) => reason switch
+    {
+        UsageDataReason.Available => "Standard usage tracking enabled",
+        UsageDataReason.DataSourceUnsupported => "Data source does not support usage tracking",
+        UsageDataReason.BackendService => "Backend/API service - no direct users",
+        UsageDataReason.SeasonalUsage => "Usage varies by season",
+        UsageDataReason.BatchProcess => "Batch processing - no interactive users",
+        UsageDataReason.NewApplication => "New application - baseline being established",
+        UsageDataReason.BeingRetired => "Application being retired",
+        UsageDataReason.TrackingNotConfigured => "Usage tracking not yet configured",
+        UsageDataReason.Other => "See notes for details",
+        _ => "Unknown"
+    };
+
+    // Operations tab helpers
+    private bool HasUpcomingKeyDates()
+    {
+        if (_application == null) return false;
+        var thirtyDaysOut = DateTimeOffset.UtcNow.AddDays(30);
+        return _application.KeyDates.Any(d => d.Date >= DateTimeOffset.UtcNow && d.Date <= thirtyDaysOut);
+    }
+
+    private int GetUpcomingKeyDateCount()
+    {
+        if (_application == null) return 0;
+        var thirtyDaysOut = DateTimeOffset.UtcNow.AddDays(30);
+        return _application.KeyDates.Count(d => d.Date >= DateTimeOffset.UtcNow && d.Date <= thirtyDaysOut);
+    }
+
+    private string GetCriticalityLabel(PeriodCriticality criticality) => criticality switch
+    {
+        PeriodCriticality.Blackout => "Blackout",
+        PeriodCriticality.Critical => "Critical",
+        PeriodCriticality.Elevated => "Elevated",
+        PeriodCriticality.Normal => "Normal",
+        PeriodCriticality.LowActivity => "Low Activity",
+        PeriodCriticality.MaintenanceWindow => "Maintenance Window",
+        _ => "Unknown"
+    };
+
+    private string GetMonthName(int month) => month switch
+    {
+        1 => "January", 2 => "February", 3 => "March", 4 => "April",
+        5 => "May", 6 => "June", 7 => "July", 8 => "August",
+        9 => "September", 10 => "October", 11 => "November", 12 => "December",
+        _ => "?"
+    };
+
+    private string GetMonthAbbr(int month) => month switch
+    {
+        1 => "Jan", 2 => "Feb", 3 => "Mar", 4 => "Apr",
+        5 => "May", 6 => "Jun", 7 => "Jul", 8 => "Aug",
+        9 => "Sep", 10 => "Oct", 11 => "Nov", 12 => "Dec",
+        _ => "?"
+    };
+
+    private List<CriticalPeriod> GetPeriodsForMonth(int month)
+    {
+        if (_application == null) return [];
+        return _application.CriticalPeriods
+            .Where(p => IsMonthInPeriod(month, p.StartMonth, p.EndMonth))
+            .ToList();
+    }
+
+    private bool IsMonthInPeriod(int month, int startMonth, int endMonth)
+    {
+        if (startMonth <= endMonth)
+            return month >= startMonth && month <= endMonth;
+        // Wraps around year (e.g., Nov-Feb)
+        return month >= startMonth || month <= endMonth;
+    }
+
+    private string GetMonthCriticalityClass(List<CriticalPeriod> periods)
+    {
+        if (!periods.Any()) return "normal";
+        if (periods.Any(p => p.Criticality == PeriodCriticality.Blackout)) return "blackout";
+        if (periods.Any(p => p.Criticality == PeriodCriticality.Critical)) return "critical";
+        if (periods.Any(p => p.Criticality == PeriodCriticality.Elevated)) return "elevated";
+        if (periods.Any(p => p.Criticality == PeriodCriticality.MaintenanceWindow)) return "maintenance";
+        if (periods.Any(p => p.Criticality == PeriodCriticality.LowActivity)) return "low-activity";
+        return "normal";
+    }
+
+    private string GetMonthTooltip(int month, List<CriticalPeriod> periods)
+    {
+        if (!periods.Any()) return $"{GetMonthName(month)}: Normal operations";
+        var names = string.Join(", ", periods.Select(p => p.Name));
+        return $"{GetMonthName(month)}: {names}";
+    }
+
+    private string GetKeyDateIcon(KeyDateType type) => type switch
+    {
+        KeyDateType.Release => "bi-rocket-takeoff",
+        KeyDateType.Deadline => "bi-alarm",
+        KeyDateType.Audit => "bi-clipboard-check",
+        KeyDateType.ScheduledMaintenance => "bi-tools",
+        KeyDateType.BusinessEvent => "bi-briefcase",
+        KeyDateType.GoLive => "bi-lightning",
+        KeyDateType.Expiration => "bi-hourglass",
+        KeyDateType.ExternalDependency => "bi-diagram-2",
+        KeyDateType.Other => "bi-calendar-event",
+        _ => "bi-calendar"
+    };
+
+    private string GetKeyDateTypeLabel(KeyDateType type) => type switch
+    {
+        KeyDateType.Release => "Release",
+        KeyDateType.Deadline => "Deadline",
+        KeyDateType.Audit => "Audit",
+        KeyDateType.ScheduledMaintenance => "Maintenance",
+        KeyDateType.BusinessEvent => "Business Event",
+        KeyDateType.GoLive => "Go Live",
+        KeyDateType.Expiration => "Expiration",
+        KeyDateType.ExternalDependency => "External Dependency",
+        KeyDateType.Other => "Other",
+        _ => "Event"
+    };
+
+    // Period maintenance helpers - derive from criticality
+    private bool PeriodBlocksMaintenance(CriticalPeriod period) =>
+        period.Criticality == PeriodCriticality.Blackout ||
+        period.Criticality == PeriodCriticality.Critical;
+
+    private bool PeriodPrefersMaintenance(CriticalPeriod period) =>
+        period.Criticality == PeriodCriticality.MaintenanceWindow ||
+        period.Criticality == PeriodCriticality.LowActivity;
+}

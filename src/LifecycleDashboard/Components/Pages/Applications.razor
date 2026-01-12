@@ -1,0 +1,483 @@
+@page "/applications"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Applications - Lifecycle Dashboard</PageTitle>
+
+<div class="applications-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Applications</h1>
+            <p class="subtitle">@_filteredApplications.Count of @_allApplications.Count applications</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline" @onclick="ExportCsv">
+                <i class="bi bi-download"></i>
+                Export CSV
+            </button>
+            <button class="btn btn-primary" disabled>
+                <WipBadge Size="sm" Inline="true" />
+                Add Application
+            </button>
+        </div>
+    </header>
+
+    <!-- Filters -->
+    <section class="filters-section">
+        <div class="search-box">
+            <i class="bi bi-search search-icon"></i>
+            <input type="text"
+                   class="search-input"
+                   placeholder="Search applications..."
+                   @bind="_searchTerm"
+                   @bind:event="oninput"
+                   @onkeyup="HandleSearch" />
+            @if (!string.IsNullOrEmpty(_searchTerm))
+            {
+                <button class="clear-search" @onclick="ClearSearch"><i class="bi bi-x-lg"></i></button>
+            }
+        </div>
+
+        <div class="filter-chips">
+            <button class="filter-chip @(_selectedHealth == null ? "active" : "")"
+                    @onclick="() => FilterByHealth(null)">
+                All
+            </button>
+            <button class="filter-chip healthy @(_selectedHealth == HealthCategory.Healthy ? "active" : "")"
+                    @onclick="() => FilterByHealth(HealthCategory.Healthy)">
+                <span class="chip-dot"></span> Healthy (@_healthCounts.Healthy)
+            </button>
+            <button class="filter-chip attention @(_selectedHealth == HealthCategory.NeedsAttention ? "active" : "")"
+                    @onclick="() => FilterByHealth(HealthCategory.NeedsAttention)">
+                <span class="chip-dot"></span> Needs Attention (@_healthCounts.NeedsAttention)
+            </button>
+            <button class="filter-chip at-risk @(_selectedHealth == HealthCategory.AtRisk ? "active" : "")"
+                    @onclick="() => FilterByHealth(HealthCategory.AtRisk)">
+                <span class="chip-dot"></span> At Risk (@_healthCounts.AtRisk)
+            </button>
+            <button class="filter-chip critical @(_selectedHealth == HealthCategory.Critical ? "active" : "")"
+                    @onclick="() => FilterByHealth(HealthCategory.Critical)">
+                <span class="chip-dot"></span> Critical (@_healthCounts.Critical)
+            </button>
+        </div>
+
+        <div class="sort-options">
+            <label>Sort by:</label>
+            <select class="sort-select" @bind="_sortBy" @bind:after="ApplyFilters">
+                <option value="name">Name</option>
+                <option value="health-asc">Health (Low to High)</option>
+                <option value="health-desc">Health (High to Low)</option>
+                <option value="activity">Last Activity</option>
+                <option value="capability">Capability</option>
+            </select>
+        </div>
+
+        <div class="view-toggle">
+            <button class="view-btn @(_viewMode == "cards" ? "active" : "")" @onclick="SetCardView" title="Card View">
+                <i class="bi bi-grid-3x2-gap"></i>
+            </button>
+            <button class="view-btn @(_viewMode == "table" ? "active" : "")" @onclick="SetTableView" title="Table View">
+                <i class="bi bi-table"></i>
+            </button>
+        </div>
+    </section>
+
+    @if (_isLoading)
+    {
+        <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <span>Loading applications...</span>
+        </div>
+    }
+    else if (_filteredApplications.Count == 0)
+    {
+        <div class="empty-state">
+            <i class="bi bi-search empty-icon"></i>
+            <h3>No applications found</h3>
+            <p>Try adjusting your search or filter criteria</p>
+            <button class="btn btn-outline" @onclick="ClearAllFilters">Clear Filters</button>
+        </div>
+    }
+    else if (_viewMode == "table")
+    {
+        <!-- Applications Table View -->
+        <section class="applications-table-container">
+            <table class="applications-table">
+                <thead>
+                    <tr>
+                        <th class="col-health">Health</th>
+                        <th class="col-name">Application</th>
+                        <th class="col-capability">Capability</th>
+                        <th class="col-owner">Owner</th>
+                        <th class="col-security">Security</th>
+                        <th class="col-usage">Usage</th>
+                        <th class="col-activity">Last Activity</th>
+                        <th class="col-tech">Tech Stack</th>
+                        <th class="col-actions"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var app in _filteredApplications)
+                    {
+                        var owner = app.RoleAssignments.FirstOrDefault(r => r.Role == ApplicationRole.Owner);
+                        <tr class="@app.HealthCategory.ToString().ToLower()" @onclick="() => ViewApplication(app.Id)">
+                            <td class="col-health">
+                                <span class="health-badge @app.HealthCategory.ToString().ToLower()">
+                                    @app.HealthScore
+                                </span>
+                            </td>
+                            <td class="col-name">
+                                <div class="app-name-cell">
+                                    <strong>@app.Name</strong>
+                                    @if (app.HasDataConflicts)
+                                    {
+                                        <i class="bi bi-exclamation-triangle conflict-icon" title="Data conflicts detected"></i>
+                                    }
+                                </div>
+                            </td>
+                            <td class="col-capability">@app.Capability</td>
+                            <td class="col-owner">
+                                @if (owner != null)
+                                {
+                                    <span class="owner-cell">
+                                        <span class="owner-avatar small">@GetInitials(owner.UserName)</span>
+                                        @owner.UserName
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="no-owner">Unassigned</span>
+                                }
+                            </td>
+                            <td class="col-security">
+                                <span class="security-badge @(GetSecurityClass(app))">
+                                    @GetSecurityCount(app)
+                                </span>
+                            </td>
+                            <td class="col-usage">
+                                <span class="usage-badge @GetUsageClass(app.Usage)">
+                                    @GetUsageLabel(app.Usage)
+                                </span>
+                            </td>
+                            <td class="col-activity">@GetActivityLabel(app.LastActivityDate)</td>
+                            <td class="col-tech">
+                                <div class="tech-stack-cell">
+                                    @foreach (var tech in app.TechnologyStack.Take(2))
+                                    {
+                                        <span class="tech-badge small">@tech</span>
+                                    }
+                                    @if (app.TechnologyStack.Count > 2)
+                                    {
+                                        <span class="tech-badge small more" title="@string.Join(", ", app.TechnologyStack.Skip(2))">+@(app.TechnologyStack.Count - 2)</span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="col-actions">
+                                <button class="btn-icon" @onclick="() => ViewApplication(app.Id)" @onclick:stopPropagation="true">
+                                    <i class="bi bi-arrow-right"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+    else
+    {
+        <!-- Applications Grid (Card View) -->
+        <section class="applications-grid">
+            @foreach (var app in _filteredApplications)
+            {
+                <article class="app-card @app.HealthCategory.ToString().ToLower()">
+                    <div class="app-card-header">
+                        <div class="health-indicator">
+                            <div class="health-score">@app.HealthScore</div>
+                            <div class="health-label">@GetHealthLabel(app.HealthCategory)</div>
+                        </div>
+                        <div class="app-info">
+                            <h3 class="app-name">@app.Name</h3>
+                            <div class="app-capability">@app.Capability</div>
+                        </div>
+                        @if (app.HasDataConflicts)
+                        {
+                            <span class="conflict-badge" title="Data conflicts detected"><i class="bi bi-exclamation-triangle"></i></span>
+                        }
+                    </div>
+
+                    <div class="app-card-body">
+                        <div class="app-stats">
+                            <div class="stat">
+                                <i class="bi bi-shield-lock stat-icon"></i>
+                                <span class="stat-value @(GetSecurityClass(app))">
+                                    @GetSecurityCount(app) issues
+                                </span>
+                            </div>
+                            <div class="stat">
+                                <i class="bi bi-graph-up stat-icon"></i>
+                                <span class="stat-value">@GetUsageLabel(app.Usage)</span>
+                            </div>
+                            <div class="stat">
+                                <i class="bi bi-calendar3 stat-icon"></i>
+                                <span class="stat-value">@GetActivityLabel(app.LastActivityDate)</span>
+                            </div>
+                        </div>
+
+                        <div class="app-tech-stack">
+                            @foreach (var tech in app.TechnologyStack.Take(3))
+                            {
+                                <span class="tech-badge">@tech</span>
+                            }
+                            @if (app.TechnologyStack.Count > 3)
+                            {
+                                <span class="tech-badge more">+@(app.TechnologyStack.Count - 3)</span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="app-card-footer">
+                        <div class="app-owner">
+                            @{
+                                var owner = app.RoleAssignments.FirstOrDefault(r => r.Role == ApplicationRole.Owner);
+                            }
+                            @if (owner != null)
+                            {
+                                <span class="owner-avatar">@GetInitials(owner.UserName)</span>
+                                <span class="owner-name">@owner.UserName</span>
+                            }
+                            else
+                            {
+                                <span class="no-owner">No owner assigned</span>
+                            }
+                        </div>
+                        <button class="btn-view" @onclick="() => ViewApplication(app.Id)">
+                            View Details <i class="bi bi-arrow-right"></i>
+                        </button>
+                    </div>
+                </article>
+            }
+        </section>
+    }
+
+    <!-- Load More / Pagination -->
+    @if (_filteredApplications.Count > 0 && _filteredApplications.Count < _totalFilteredCount)
+    {
+        <div class="load-more">
+            <button class="btn btn-outline" @onclick="LoadMore">
+                Load More (@(_totalFilteredCount - _filteredApplications.Count) remaining)
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    private List<Application> _allApplications = [];
+    private List<Application> _filteredApplications = [];
+    private string _searchTerm = "";
+    private HealthCategory? _selectedHealth = null;
+    private string _sortBy = "name";
+    private string _viewMode = "table"; // Default to table view
+    private bool _isLoading = true;
+    private int _pageSize = 50; // Show more in table view
+    private int _currentPage = 1;
+    private int _totalFilteredCount = 0;
+
+    private (int Healthy, int NeedsAttention, int AtRisk, int Critical) _healthCounts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allApplications = (await DataService.GetApplicationsAsync()).ToList();
+        CalculateHealthCounts();
+        ApplyFilters();
+        _isLoading = false;
+    }
+
+    private void CalculateHealthCounts()
+    {
+        _healthCounts = (
+            _allApplications.Count(a => a.HealthCategory == HealthCategory.Healthy),
+            _allApplications.Count(a => a.HealthCategory == HealthCategory.NeedsAttention),
+            _allApplications.Count(a => a.HealthCategory == HealthCategory.AtRisk),
+            _allApplications.Count(a => a.HealthCategory == HealthCategory.Critical)
+        );
+    }
+
+    private void HandleSearch()
+    {
+        _currentPage = 1;
+        ApplyFilters();
+    }
+
+    private void ClearSearch()
+    {
+        _searchTerm = "";
+        _currentPage = 1;
+        ApplyFilters();
+    }
+
+    private void FilterByHealth(HealthCategory? category)
+    {
+        _selectedHealth = category;
+        _currentPage = 1;
+        ApplyFilters();
+    }
+
+    private void ClearAllFilters()
+    {
+        _searchTerm = "";
+        _selectedHealth = null;
+        _sortBy = "name";
+        _currentPage = 1;
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        var filtered = _allApplications.AsEnumerable();
+
+        // Apply search
+        if (!string.IsNullOrWhiteSpace(_searchTerm))
+        {
+            var term = _searchTerm.ToLower();
+            filtered = filtered.Where(a =>
+                a.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                a.Capability.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                a.TechnologyStack.Any(t => t.Contains(term, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        // Apply health filter
+        if (_selectedHealth.HasValue)
+        {
+            filtered = filtered.Where(a => a.HealthCategory == _selectedHealth.Value);
+        }
+
+        // Apply sorting
+        filtered = _sortBy switch
+        {
+            "health-asc" => filtered.OrderBy(a => a.HealthScore),
+            "health-desc" => filtered.OrderByDescending(a => a.HealthScore),
+            "activity" => filtered.OrderByDescending(a => a.LastActivityDate),
+            "capability" => filtered.OrderBy(a => a.Capability).ThenBy(a => a.Name),
+            _ => filtered.OrderBy(a => a.Name)
+        };
+
+        var allFiltered = filtered.ToList();
+        _totalFilteredCount = allFiltered.Count;
+
+        // Apply pagination
+        _filteredApplications = allFiltered.Take(_currentPage * _pageSize).ToList();
+    }
+
+    private void LoadMore()
+    {
+        _currentPage++;
+        ApplyFilters();
+    }
+
+    private void ViewApplication(string appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+
+    private void SetCardView() => _viewMode = "cards";
+    private void SetTableView() => _viewMode = "table";
+
+    private async Task ExportCsv()
+    {
+        var csv = new System.Text.StringBuilder();
+        csv.AppendLine("Name,Capability,Health Score,Health Category,Owner,Security Issues,Usage,Last Activity,Technology Stack");
+
+        foreach (var app in _filteredApplications)
+        {
+            var owner = app.RoleAssignments.FirstOrDefault(r => r.Role == ApplicationRole.Owner)?.UserName ?? "";
+            var securityIssues = app.SecurityFindings.Count(f => !f.IsResolved);
+            var usage = app.Usage?.Level.ToString() ?? "Unknown";
+            var lastActivity = app.LastActivityDate?.ToString("yyyy-MM-dd") ?? "Never";
+            var techStack = string.Join("; ", app.TechnologyStack);
+
+            csv.AppendLine($"\"{EscapeCsv(app.Name)}\",\"{EscapeCsv(app.Capability)}\",{app.HealthScore},\"{app.HealthCategory}\",\"{EscapeCsv(owner)}\",{securityIssues},\"{usage}\",\"{lastActivity}\",\"{EscapeCsv(techStack)}\"");
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
+        var base64 = Convert.ToBase64String(bytes);
+        var filename = $"applications-export-{DateTime.Now:yyyy-MM-dd}.csv";
+
+        await JS.InvokeVoidAsync("downloadFile", filename, base64, "text/csv");
+    }
+
+    private static string EscapeCsv(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        return value.Replace("\"", "\"\"");
+    }
+
+    private static string GetHealthLabel(HealthCategory category) => category switch
+    {
+        HealthCategory.Healthy => "Healthy",
+        HealthCategory.NeedsAttention => "Needs Attention",
+        HealthCategory.AtRisk => "At Risk",
+        HealthCategory.Critical => "Critical",
+        _ => "Unknown"
+    };
+
+    private static int GetSecurityCount(Application app) =>
+        app.SecurityFindings.Count(f => !f.IsResolved);
+
+    private static string GetSecurityClass(Application app)
+    {
+        var criticalOrHigh = app.SecurityFindings.Count(f =>
+            !f.IsResolved && (f.Severity == SecuritySeverity.Critical || f.Severity == SecuritySeverity.High));
+        return criticalOrHigh > 0 ? "critical" : "";
+    }
+
+    private static string GetUsageLabel(UsageMetrics? usage)
+    {
+        if (usage == null) return "No data";
+        return usage.Level switch
+        {
+            UsageLevel.None => "No usage",
+            UsageLevel.VeryLow => "Very low",
+            UsageLevel.Low => "Low",
+            UsageLevel.Moderate => "Moderate",
+            UsageLevel.High => "High",
+            _ => "Unknown"
+        };
+    }
+
+    private static string GetUsageClass(UsageMetrics? usage)
+    {
+        if (usage == null) return "none";
+        return usage.Level switch
+        {
+            UsageLevel.None => "none",
+            UsageLevel.VeryLow => "verylow",
+            UsageLevel.Low => "low",
+            UsageLevel.Moderate => "moderate",
+            UsageLevel.High => "high",
+            _ => ""
+        };
+    }
+
+    private static string GetActivityLabel(DateTimeOffset? date)
+    {
+        if (!date.HasValue) return "Never";
+        var days = (DateTimeOffset.UtcNow - date.Value).TotalDays;
+        if (days < 1) return "Today";
+        if (days < 2) return "Yesterday";
+        if (days < 7) return $"{(int)days} days ago";
+        if (days < 30) return $"{(int)(days / 7)} weeks ago";
+        if (days < 365) return $"{(int)(days / 30)} months ago";
+        return $"{(int)(days / 365)} years ago";
+    }
+
+    private static string GetInitials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+            return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+        return parts.Length > 0 ? parts[0][0].ToString().ToUpper() : "?";
+    }
+}

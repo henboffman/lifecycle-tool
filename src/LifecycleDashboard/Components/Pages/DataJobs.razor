@@ -1,0 +1,571 @@
+@page "/data-jobs"
+@inject NavigationManager Navigation
+
+<PageTitle>Data Jobs - Lifecycle Dashboard</PageTitle>
+
+<div class="data-jobs-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Data Jobs</h1>
+            <p class="subtitle">Monitor and manage data synchronization</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline" @onclick="RefreshStatus">
+                <i class="bi bi-arrow-repeat"></i> Refresh Status
+            </button>
+            <button class="btn btn-primary" @onclick="RunAllJobs" disabled="@_isRunningAll">
+                @if (_isRunningAll)
+                {
+                    <span class="spinner-sm"></span>
+                    <span>Running...</span>
+                }
+                else
+                {
+                    <i class="bi bi-play-fill"></i>
+                    <span>Run All Jobs</span>
+                }
+            </button>
+        </div>
+    </header>
+
+    <!-- Data Sources Overview -->
+    <section class="data-sources-section">
+        <h2>Data Sources</h2>
+        <div class="sources-grid">
+            @foreach (var source in _dataSources)
+            {
+                <div class="source-card @source.Status.ToLower()">
+                    <div class="source-header">
+                        <div class="source-icon">@((MarkupString)source.Icon)</div>
+                        <div class="source-info">
+                            <h3>@source.Name</h3>
+                            <span class="source-type">@source.Type</span>
+                        </div>
+                        <span class="status-badge @source.Status.ToLower()">@GetStatusLabel(source.Status)</span>
+                    </div>
+                    <div class="source-body">
+                        <div class="source-stats">
+                            <div class="stat">
+                                <span class="stat-label">Last Sync</span>
+                                <span class="stat-value">@FormatDate(source.LastSync)</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Records</span>
+                                <span class="stat-value">@source.RecordCount.ToString("N0")</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Next Run</span>
+                                <span class="stat-value">@FormatNextRun(source.NextRun)</span>
+                            </div>
+                        </div>
+                        <div class="source-schedule">
+                            <i class="bi bi-calendar3 schedule-icon"></i>
+                            <span>@source.Schedule</span>
+                        </div>
+                    </div>
+                    <div class="source-footer">
+                        <button class="btn btn-sm btn-outline" @onclick='() => NavigateToConfig()'>Configure</button>
+                        <button class="btn btn-sm btn-primary" @onclick="() => RunJob(source)" disabled="@(_runningSource == source.Name)">
+                            @if (_runningSource == source.Name)
+                            {
+                                <span class="spinner-sm"></span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-play-fill"></i>
+                            }
+                            Run Now
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+
+    <!-- Job Statistics -->
+    <section class="stats-section">
+        <div class="stats-cards">
+            <div class="stat-card">
+                <div class="stat-value">@_totalJobs</div>
+                <div class="stat-label">Total Runs (30d)</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-value">@_successfulJobs</div>
+                <div class="stat-label">Successful</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-value">@_warningJobs</div>
+                <div class="stat-label">With Warnings</div>
+            </div>
+            <div class="stat-card error">
+                <div class="stat-value">@_failedJobs</div>
+                <div class="stat-label">Failed</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Job Execution History -->
+    <section class="history-section">
+        <div class="section-header">
+            <h2>Execution History</h2>
+            <div class="filter-controls">
+                <select class="filter-select" @bind="_sourceFilter" @bind:after="ApplyFilter">
+                    <option value="">All Sources</option>
+                    @foreach (var source in _dataSources)
+                    {
+                        <option value="@source.Name">@source.Name</option>
+                    }
+                </select>
+                <select class="filter-select" @bind="_statusFilter" @bind:after="ApplyFilter">
+                    <option value="">All Statuses</option>
+                    <option value="Success">Success</option>
+                    <option value="Warning">Warning</option>
+                    <option value="Failed">Failed</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="history-table-container">
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Source</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Records</th>
+                        <th>Status</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var job in _filteredJobs)
+                    {
+                        <tr class="@job.Status.ToLower()">
+                            <td>
+                                <span class="job-source">@job.Source</span>
+                            </td>
+                            <td>@job.StartTime.ToString("MMM d, h:mm tt")</td>
+                            <td>@FormatDuration(job.Duration)</td>
+                            <td>
+                                @if (job.RecordsProcessed > 0)
+                                {
+                                    <span>@job.RecordsProcessed.ToString("N0")</span>
+                                    @if (job.RecordsUpdated > 0)
+                                    {
+                                        <span class="records-updated">(+@job.RecordsUpdated)</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="no-data">-</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="status-pill @job.Status.ToLower()">
+                                    @GetStatusIcon(job.Status) @job.Status
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn-details" @onclick="() => ShowJobDetails(job)">
+                                    View
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Job Details Modal -->
+    @if (_selectedJob != null)
+    {
+        <div class="modal-overlay" @onclick="CloseModal">
+            <div class="modal-content" @onclick:stopPropagation="true">
+                <button class="modal-close" @onclick="CloseModal"><i class="bi bi-x-lg"></i></button>
+                <div class="modal-header @_selectedJob.Status.ToLower()">
+                    <h3>@_selectedJob.Source Sync</h3>
+                    <span class="status-pill @_selectedJob.Status.ToLower()">
+                        @GetStatusIcon(_selectedJob.Status) @_selectedJob.Status
+                    </span>
+                </div>
+                <div class="modal-body">
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">Started</span>
+                            <span class="detail-value">@_selectedJob.StartTime.ToString("MMM d, yyyy h:mm:ss tt")</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Duration</span>
+                            <span class="detail-value">@FormatDuration(_selectedJob.Duration)</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Records Processed</span>
+                            <span class="detail-value">@_selectedJob.RecordsProcessed.ToString("N0")</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Records Updated</span>
+                            <span class="detail-value">@_selectedJob.RecordsUpdated.ToString("N0")</span>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_selectedJob.Message))
+                    {
+                        <div class="job-message @_selectedJob.Status.ToLower()">
+                            <span class="message-icon">@GetStatusIcon(_selectedJob.Status)</span>
+                            <span>@_selectedJob.Message</span>
+                        </div>
+                    }
+
+                    @if (_selectedJob.Logs.Count > 0)
+                    {
+                        <div class="job-logs">
+                            <h4>Execution Log</h4>
+                            <div class="log-entries">
+                                @foreach (var log in _selectedJob.Logs)
+                                {
+                                    <div class="log-entry @log.Level.ToLower()">
+                                        <span class="log-time">@log.Timestamp.ToString("HH:mm:ss")</span>
+                                        <span class="log-level">@log.Level</span>
+                                        <span class="log-message">@log.Message</span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<DataSource> _dataSources = [];
+    private List<JobExecution> _allJobs = [];
+    private List<JobExecution> _filteredJobs = [];
+    private JobExecution? _selectedJob;
+
+    private string _sourceFilter = "";
+    private string _statusFilter = "";
+
+    private int _totalJobs;
+    private int _successfulJobs;
+    private int _warningJobs;
+    private int _failedJobs;
+
+    private bool _isRunningAll;
+    private string? _runningSource;
+
+    protected override void OnInitialized()
+    {
+        InitializeMockData();
+        CalculateStatistics();
+        ApplyFilter();
+    }
+
+    private void InitializeMockData()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        _dataSources = new List<DataSource>
+        {
+            new()
+            {
+                Name = "Azure DevOps",
+                Type = "REST API",
+                Icon = "<i class=\"bi bi-globe\"></i>",
+                Status = "Disconnected",
+                Schedule = "Weekly (Sundays @ 2:00 AM)",
+                LastSync = null,
+                NextRun = now.AddDays(1),
+                RecordCount = 0
+            },
+            new()
+            {
+                Name = "SharePoint",
+                Type = "Graph API",
+                Icon = "<i class=\"bi bi-file-earmark-text\"></i>",
+                Status = "Disconnected",
+                Schedule = "Weekly (Sundays @ 3:00 AM)",
+                LastSync = null,
+                NextRun = now.AddDays(1),
+                RecordCount = 0
+            },
+            new()
+            {
+                Name = "ServiceNow",
+                Type = "CSV Import",
+                Icon = "<i class=\"bi bi-database\"></i>",
+                Status = "Disconnected",
+                Schedule = "Weekly (Manual trigger)",
+                LastSync = null,
+                NextRun = null,
+                RecordCount = 0
+            },
+            new()
+            {
+                Name = "IIS Database",
+                Type = "SQL Query",
+                Icon = "<i class=\"bi bi-server\"></i>",
+                Status = "Disconnected",
+                Schedule = "Weekly (Sundays @ 4:00 AM)",
+                LastSync = null,
+                NextRun = now.AddDays(1),
+                RecordCount = 0
+            }
+        };
+
+        // Generate mock job history
+        _allJobs = new List<JobExecution>();
+        var random = new Random(42);
+
+        for (int i = 0; i < 30; i++)
+        {
+            var daysAgo = random.Next(0, 30);
+            var source = _dataSources[random.Next(_dataSources.Count)].Name;
+            var status = GetRandomStatus(random);
+            var recordsProcessed = status != "Failed" ? random.Next(30, 300) : 0;
+            var recordsUpdated = status == "Success" ? random.Next(0, recordsProcessed / 3) : 0;
+
+            _allJobs.Add(new JobExecution
+            {
+                Id = Guid.NewGuid().ToString(),
+                Source = source,
+                StartTime = now.AddDays(-daysAgo).AddHours(-random.Next(0, 24)),
+                Duration = TimeSpan.FromSeconds(random.Next(30, 600)),
+                RecordsProcessed = recordsProcessed,
+                RecordsUpdated = recordsUpdated,
+                Status = status,
+                Message = GetStatusMessage(status, source),
+                Logs = GenerateLogs(status, now.AddDays(-daysAgo))
+            });
+        }
+
+        _allJobs = _allJobs.OrderByDescending(j => j.StartTime).ToList();
+    }
+
+    private static string GetRandomStatus(Random random)
+    {
+        var roll = random.Next(100);
+        if (roll < 70) return "Success";
+        if (roll < 90) return "Warning";
+        return "Failed";
+    }
+
+    private static string GetStatusMessage(string status, string source) => status switch
+    {
+        "Success" => $"Successfully synchronized data from {source}",
+        "Warning" => $"Completed with warnings - some records could not be processed",
+        "Failed" => $"Connection to {source} failed - check credentials and network",
+        _ => ""
+    };
+
+    private List<LogEntry> GenerateLogs(string status, DateTimeOffset startTime)
+    {
+        var logs = new List<LogEntry>
+        {
+            new() { Timestamp = startTime, Level = "INFO", Message = "Job started" },
+            new() { Timestamp = startTime.AddSeconds(2), Level = "INFO", Message = "Connecting to data source..." },
+        };
+
+        if (status == "Failed")
+        {
+            logs.Add(new() { Timestamp = startTime.AddSeconds(5), Level = "ERROR", Message = "Connection failed: Unable to reach endpoint" });
+            logs.Add(new() { Timestamp = startTime.AddSeconds(6), Level = "ERROR", Message = "Job aborted" });
+        }
+        else
+        {
+            logs.Add(new() { Timestamp = startTime.AddSeconds(5), Level = "INFO", Message = "Connection established" });
+            logs.Add(new() { Timestamp = startTime.AddSeconds(10), Level = "INFO", Message = "Fetching records..." });
+
+            if (status == "Warning")
+            {
+                logs.Add(new() { Timestamp = startTime.AddSeconds(30), Level = "WARN", Message = "3 records skipped due to validation errors" });
+            }
+
+            logs.Add(new() { Timestamp = startTime.AddMinutes(2), Level = "INFO", Message = "Processing complete" });
+            logs.Add(new() { Timestamp = startTime.AddMinutes(2).AddSeconds(5), Level = "INFO", Message = "Job completed successfully" });
+        }
+
+        return logs;
+    }
+
+    private void CalculateStatistics()
+    {
+        _totalJobs = _allJobs.Count;
+        _successfulJobs = _allJobs.Count(j => j.Status == "Success");
+        _warningJobs = _allJobs.Count(j => j.Status == "Warning");
+        _failedJobs = _allJobs.Count(j => j.Status == "Failed");
+    }
+
+    private void ApplyFilter()
+    {
+        var filtered = _allJobs.AsEnumerable();
+
+        if (!string.IsNullOrEmpty(_sourceFilter))
+        {
+            filtered = filtered.Where(j => j.Source == _sourceFilter);
+        }
+
+        if (!string.IsNullOrEmpty(_statusFilter))
+        {
+            filtered = filtered.Where(j => j.Status == _statusFilter);
+        }
+
+        _filteredJobs = filtered.ToList();
+    }
+
+    private void RefreshStatus()
+    {
+        // In real implementation, this would check connection status
+        StateHasChanged();
+    }
+
+    private async Task RunAllJobs()
+    {
+        _isRunningAll = true;
+        StateHasChanged();
+
+        foreach (var source in _dataSources)
+        {
+            await RunJobInternal(source);
+        }
+
+        _isRunningAll = false;
+        StateHasChanged();
+    }
+
+    private async Task RunJob(DataSource source)
+    {
+        _runningSource = source.Name;
+        StateHasChanged();
+
+        await RunJobInternal(source);
+
+        _runningSource = null;
+        StateHasChanged();
+    }
+
+    private async Task RunJobInternal(DataSource source)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var random = new Random();
+
+        // Simulate job running
+        await Task.Delay(1500);
+
+        // Since sources are disconnected, simulate a failed job with connection error
+        var status = source.Status == "Connected" ? "Success" : "Failed";
+        var recordsProcessed = status == "Success" ? random.Next(30, 300) : 0;
+        var recordsUpdated = status == "Success" ? random.Next(0, recordsProcessed / 3) : 0;
+
+        var job = new JobExecution
+        {
+            Id = Guid.NewGuid().ToString(),
+            Source = source.Name,
+            StartTime = now,
+            Duration = TimeSpan.FromSeconds(random.Next(1, 5)),
+            RecordsProcessed = recordsProcessed,
+            RecordsUpdated = recordsUpdated,
+            Status = status,
+            Message = status == "Failed"
+                ? $"Connection to {source.Name} failed - data source not configured"
+                : $"Successfully synchronized data from {source.Name}",
+            Logs = GenerateLogs(status, now)
+        };
+
+        _allJobs.Insert(0, job);
+        CalculateStatistics();
+        ApplyFilter();
+    }
+
+    private void NavigateToConfig()
+    {
+        Navigation.NavigateTo("/admin");
+    }
+
+    private void ShowJobDetails(JobExecution job)
+    {
+        _selectedJob = job;
+    }
+
+    private void CloseModal()
+    {
+        _selectedJob = null;
+    }
+
+    private static string GetStatusLabel(string status) => status switch
+    {
+        "Connected" => "Connected",
+        "Disconnected" => "Not Connected",
+        "Syncing" => "Syncing...",
+        "Error" => "Error",
+        _ => status
+    };
+
+    private static MarkupString GetStatusIcon(string status) => status switch
+    {
+        "Success" => new MarkupString("<i class=\"bi bi-check-lg\"></i>"),
+        "Warning" => new MarkupString("<i class=\"bi bi-exclamation-triangle\"></i>"),
+        "Failed" => new MarkupString("<i class=\"bi bi-x-lg\"></i>"),
+        _ => new MarkupString("")
+    };
+
+    private static string FormatDate(DateTimeOffset? date)
+    {
+        if (!date.HasValue) return "Never";
+        var days = (DateTimeOffset.UtcNow - date.Value).TotalDays;
+        if (days < 1) return "Today";
+        if (days < 2) return "Yesterday";
+        if (days < 7) return $"{(int)days} days ago";
+        return date.Value.ToString("MMM d");
+    }
+
+    private static string FormatNextRun(DateTimeOffset? date)
+    {
+        if (!date.HasValue) return "Manual";
+        var hours = (date.Value - DateTimeOffset.UtcNow).TotalHours;
+        if (hours < 1) return "Soon";
+        if (hours < 24) return $"In {(int)hours}h";
+        return date.Value.ToString("MMM d");
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes < 1) return $"{(int)duration.TotalSeconds}s";
+        if (duration.TotalHours < 1) return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+        return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+    }
+
+    private class DataSource
+    {
+        public string Name { get; set; } = "";
+        public string Type { get; set; } = "";
+        public string Icon { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string Schedule { get; set; } = "";
+        public DateTimeOffset? LastSync { get; set; }
+        public DateTimeOffset? NextRun { get; set; }
+        public int RecordCount { get; set; }
+    }
+
+    private class JobExecution
+    {
+        public string Id { get; set; } = "";
+        public string Source { get; set; } = "";
+        public DateTimeOffset StartTime { get; set; }
+        public TimeSpan Duration { get; set; }
+        public int RecordsProcessed { get; set; }
+        public int RecordsUpdated { get; set; }
+        public string Status { get; set; } = "";
+        public string Message { get; set; } = "";
+        public List<LogEntry> Logs { get; set; } = [];
+    }
+
+    private class LogEntry
+    {
+        public DateTimeOffset Timestamp { get; set; }
+        public string Level { get; set; } = "";
+        public string Message { get; set; } = "";
+    }
+}

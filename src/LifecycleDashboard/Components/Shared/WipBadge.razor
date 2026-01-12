@@ -1,0 +1,63 @@
+@*
+    WIP (Work In Progress) Badge Component
+
+    Use this component to mark buttons, links, or features that are not yet fully implemented.
+    This provides visual feedback to testers about which functionality is still in development.
+
+    Usage:
+        <WipBadge /> - Default warning icon
+        <WipBadge Text="Coming Soon" /> - Custom text
+        <WipBadge ShowTooltip="true" TooltipText="Feature under development" />
+        <button><WipBadge Inline="true" /> My Button</button>
+*@
+
+<span class="wip-badge @(Inline ? "inline" : "") @SizeClass"
+      title="@(ShowTooltip ? TooltipText : null)">
+    @if (!string.IsNullOrEmpty(Text))
+    {
+        <span class="wip-text">@Text</span>
+    }
+    else
+    {
+        <span class="wip-icon"><i class="bi bi-exclamation-triangle"></i></span>
+    }
+</span>
+
+@code {
+    /// <summary>
+    /// Custom text to display instead of the warning icon.
+    /// </summary>
+    [Parameter]
+    public string? Text { get; set; }
+
+    /// <summary>
+    /// Whether to show as inline element (for use inside buttons/links).
+    /// </summary>
+    [Parameter]
+    public bool Inline { get; set; }
+
+    /// <summary>
+    /// Size of the badge: "sm", "md", or "lg".
+    /// </summary>
+    [Parameter]
+    public string Size { get; set; } = "md";
+
+    /// <summary>
+    /// Whether to show a tooltip on hover.
+    /// </summary>
+    [Parameter]
+    public bool ShowTooltip { get; set; } = true;
+
+    /// <summary>
+    /// Custom tooltip text.
+    /// </summary>
+    [Parameter]
+    public string TooltipText { get; set; } = "This feature is under development";
+
+    private string SizeClass => Size switch
+    {
+        "sm" => "wip-sm",
+        "lg" => "wip-lg",
+        _ => "wip-md"
+    };
+}

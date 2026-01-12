@@ -1,0 +1,432 @@
+@page "/frameworks"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+
+<PageTitle>Framework Versions - Lifecycle Dashboard</PageTitle>
+
+<div class="frameworks-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Framework Versions</h1>
+            <p class="subtitle">Track framework end-of-life dates and plan upgrades</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline" @onclick='() => Navigation.NavigateTo("/admin")'>
+                <i class="bi bi-gear"></i> Manage Versions
+            </button>
+        </div>
+    </header>
+
+    <!-- EOL Summary Cards -->
+    @if (_eolSummary != null)
+    {
+        <section class="eol-summary-cards">
+            <div class="summary-card total">
+                <div class="summary-value">@_allVersions.Count</div>
+                <div class="summary-label">Total Tracked</div>
+            </div>
+            <div class="summary-card past-eol" @onclick="() => FilterByUrgency(EolUrgency.PastEol)">
+                <div class="summary-value">@_allVersions.Count(v => v.IsPastEol)</div>
+                <div class="summary-label">Past EOL</div>
+                @if (_eolSummary.ApplicationsWithEolFrameworks > 0)
+                {
+                    <div class="summary-detail">@_eolSummary.ApplicationsWithEolFrameworks apps affected</div>
+                }
+            </div>
+            <div class="summary-card critical" @onclick="() => FilterByUrgency(EolUrgency.Critical)">
+                <div class="summary-value">@_allVersions.Count(v => v.EolUrgency == EolUrgency.Critical)</div>
+                <div class="summary-label">Critical (&lt;90 days)</div>
+            </div>
+            <div class="summary-card approaching" @onclick="() => FilterByUrgency(EolUrgency.Medium)">
+                <div class="summary-value">@_allVersions.Count(v => v.IsApproachingEol)</div>
+                <div class="summary-label">Approaching EOL</div>
+            </div>
+            <div class="summary-card supported">
+                <div class="summary-value">@_allVersions.Count(v => v.Status == SupportStatus.Active)</div>
+                <div class="summary-label">Actively Supported</div>
+            </div>
+        </section>
+    }
+
+    <!-- Filters -->
+    <section class="filters-section">
+        <div class="filter-group">
+            <label>Framework:</label>
+            <select class="filter-select" @bind="_selectedFramework" @bind:after="ApplyFilters">
+                <option value="">All Frameworks</option>
+                <option value="DotNet">.NET / .NET Core</option>
+                <option value="DotNetFramework">.NET Framework</option>
+                <option value="Python">Python</option>
+                <option value="R">R</option>
+                <option value="NodeJs">Node.js</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Status:</label>
+            <select class="filter-select" @bind="_selectedStatus" @bind:after="ApplyFilters">
+                <option value="">All Status</option>
+                <option value="Active">Active</option>
+                <option value="Maintenance">Maintenance</option>
+                <option value="EndOfLife">End of Life</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>EOL Urgency:</label>
+            <select class="filter-select" @bind="_selectedUrgency" @bind:after="ApplyFilters">
+                <option value="">All</option>
+                <option value="PastEol">Past EOL</option>
+                <option value="Critical">Critical (&lt;90 days)</option>
+                <option value="High">High (90-180 days)</option>
+                <option value="Medium">Medium (6-12 months)</option>
+                <option value="Low">Low (&gt;12 months)</option>
+                <option value="None">No EOL Date</option>
+            </select>
+        </div>
+
+        <div class="filter-actions">
+            <button class="btn btn-sm btn-outline" @onclick="ClearFilters">Clear Filters</button>
+        </div>
+    </section>
+
+    <!-- Framework Version Table -->
+    <section class="frameworks-table-container">
+        @if (_isLoading)
+        {
+            <div class="loading-state">
+                <div class="loading-spinner"></div>
+                <span>Loading framework versions...</span>
+            </div>
+        }
+        else
+        {
+            <table class="frameworks-table">
+                <colgroup>
+                    <col style="width: 140px;" />
+                    <col style="width: 160px;" />
+                    <col style="width: 100px;" />
+                    <col style="width: 100px;" />
+                    <col style="width: 120px;" />
+                    <col style="width: 120px;" />
+                    <col style="width: 140px;" />
+                    <col style="width: 70px;" />
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th class="sortable" @onclick="() => SortBy(SortColumn.Framework)">
+                            Framework @GetSortIndicator(SortColumn.Framework)
+                        </th>
+                        <th class="sortable" @onclick="() => SortBy(SortColumn.Version)">
+                            Version @GetSortIndicator(SortColumn.Version)
+                        </th>
+                        <th class="sortable" @onclick="() => SortBy(SortColumn.Status)">
+                            Status @GetSortIndicator(SortColumn.Status)
+                        </th>
+                        <th class="sortable" @onclick="() => SortBy(SortColumn.ReleaseDate)">
+                            Released @GetSortIndicator(SortColumn.ReleaseDate)
+                        </th>
+                        <th class="sortable" @onclick="() => SortBy(SortColumn.EolDate)">
+                            EOL Date @GetSortIndicator(SortColumn.EolDate)
+                        </th>
+                        <th>Time to EOL</th>
+                        <th>Upgrade Path</th>
+                        <th class="text-center">Apps</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var version in _filteredVersions)
+                    {
+                        <tr class="@GetRowClass(version)">
+                            <td>
+                                <div class="framework-cell">
+                                    <i class="bi @GetFrameworkIcon(version.Framework)"></i>
+                                    <span>@GetFrameworkLabel(version.Framework)</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="version-cell">
+                                    <span class="version-name">@version.DisplayName</span>
+                                    @if (version.IsLts)
+                                    {
+                                        <span class="lts-badge">LTS</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrEmpty(version.Notes))
+                                {
+                                    <div class="version-notes" title="@version.Notes">
+                                        <i class="bi bi-info-circle"></i>
+                                    </div>
+                                }
+                            </td>
+                            <td>
+                                <span class="status-badge @version.Status.ToString().ToLower()">
+                                    @GetStatusLabel(version.Status)
+                                </span>
+                            </td>
+                            <td class="date-cell">
+                                @(version.ReleaseDate?.ToString("MMM yyyy") ?? "N/A")
+                            </td>
+                            <td class="date-cell">
+                                @if (version.EndOfLifeDate.HasValue)
+                                {
+                                    <span class="@(version.IsPastEol ? "past-eol" : "")">
+                                        @version.EndOfLifeDate.Value.ToString("MMM d, yyyy")
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="indefinite">Indefinite</span>
+                                }
+                            </td>
+                            <td class="urgency-cell">
+                                @if (version.DaysUntilEol.HasValue)
+                                {
+                                    <span class="urgency-badge @version.EolUrgency.ToString().ToLower()">
+                                        @if (version.IsPastEol)
+                                        {
+                                            @($"{Math.Abs(version.DaysUntilEol.Value)}d ago")
+                                        }
+                                        else
+                                        {
+                                            @($"{version.DaysUntilEol.Value}d")
+                                        }
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="no-eol">-</span>
+                                }
+                            </td>
+                            <td class="upgrade-cell">
+                                @if (!string.IsNullOrEmpty(version.RecommendedUpgradePath))
+                                {
+                                    <span class="upgrade-path">@version.RecommendedUpgradePath</span>
+                                }
+                                else
+                                {
+                                    <span class="current">Current</span>
+                                }
+                            </td>
+                            <td class="apps-cell">
+                                @{
+                                    var appCount = GetAppCountForVersion(version);
+                                }
+                                @if (appCount > 0)
+                                {
+                                    <button class="app-count-btn @(version.IsPastEol || version.EolUrgency == EolUrgency.Critical ? "urgent" : "")"
+                                            @onclick="() => ShowAppsForVersion(version)">
+                                        @appCount
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span class="no-apps">0</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <!-- Applications Using Framework Modal -->
+    @if (_selectedVersion != null && _appsForVersion.Count > 0)
+    {
+        <div class="modal-overlay" @onclick="CloseModal">
+            <div class="modal-content" @onclick:stopPropagation="true">
+                <button class="modal-close" @onclick="CloseModal"><i class="bi bi-x-lg"></i></button>
+                <h2>Applications Using @_selectedVersion.DisplayName</h2>
+                <p class="modal-subtitle">
+                    @if (_selectedVersion.IsPastEol)
+                    {
+                        <span class="warning-text"><i class="bi bi-exclamation-triangle"></i> This framework version is past end of life. Upgrade recommended.</span>
+                    }
+                    else if (_selectedVersion.IsApproachingEol)
+                    {
+                        <span class="caution-text"><i class="bi bi-clock"></i> EOL in @_selectedVersion.DaysUntilEol days. Plan upgrades.</span>
+                    }
+                </p>
+                <div class="apps-list">
+                    @foreach (var app in _appsForVersion)
+                    {
+                        <div class="app-item" @onclick="() => ViewApplication(app.Id)">
+                            <span class="health-indicator @app.HealthCategory.ToString().ToLower()"></span>
+                            <span class="app-name">@app.Name</span>
+                            <span class="app-capability">@app.Capability</span>
+                            <i class="bi bi-chevron-right"></i>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<FrameworkVersion> _allVersions = [];
+    private List<FrameworkVersion> _filteredVersions = [];
+    private FrameworkEolSummary? _eolSummary;
+    private Dictionary<string, int> _appCounts = [];
+    private FrameworkVersion? _selectedVersion;
+    private List<Application> _appsForVersion = [];
+
+    private string _selectedFramework = "";
+    private string _selectedStatus = "";
+    private string _selectedUrgency = "";
+    private bool _isLoading = true;
+    private SortColumn _sortColumn = SortColumn.EolDate;
+    private bool _sortAscending = true;
+
+    private enum SortColumn { Framework, Version, Status, ReleaseDate, EolDate }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allVersions = (await DataService.GetAllFrameworkVersionsAsync()).ToList();
+        _eolSummary = await DataService.GetFrameworkEolSummaryAsync();
+
+        // Pre-calculate app counts
+        foreach (var version in _allVersions)
+        {
+            var apps = await DataService.GetApplicationsByFrameworkAsync(version.Id);
+            _appCounts[version.Id] = apps.Count;
+        }
+
+        ApplyFilters();
+        _isLoading = false;
+    }
+
+    private void ApplyFilters()
+    {
+        var filtered = _allVersions.AsEnumerable();
+
+        if (!string.IsNullOrEmpty(_selectedFramework) && Enum.TryParse<FrameworkType>(_selectedFramework, out var framework))
+        {
+            filtered = filtered.Where(v => v.Framework == framework);
+        }
+
+        if (!string.IsNullOrEmpty(_selectedStatus) && Enum.TryParse<SupportStatus>(_selectedStatus, out var status))
+        {
+            filtered = filtered.Where(v => v.Status == status);
+        }
+
+        if (!string.IsNullOrEmpty(_selectedUrgency) && Enum.TryParse<EolUrgency>(_selectedUrgency, out var urgency))
+        {
+            filtered = filtered.Where(v => v.EolUrgency == urgency);
+        }
+
+        // Apply sorting
+        filtered = (_sortColumn, _sortAscending) switch
+        {
+            (SortColumn.Framework, true) => filtered.OrderBy(v => v.Framework).ThenBy(v => v.Version),
+            (SortColumn.Framework, false) => filtered.OrderByDescending(v => v.Framework).ThenBy(v => v.Version),
+            (SortColumn.Version, true) => filtered.OrderBy(v => v.Version),
+            (SortColumn.Version, false) => filtered.OrderByDescending(v => v.Version),
+            (SortColumn.Status, true) => filtered.OrderBy(v => v.Status),
+            (SortColumn.Status, false) => filtered.OrderByDescending(v => v.Status),
+            (SortColumn.ReleaseDate, true) => filtered.OrderBy(v => v.ReleaseDate),
+            (SortColumn.ReleaseDate, false) => filtered.OrderByDescending(v => v.ReleaseDate),
+            (SortColumn.EolDate, true) => filtered.OrderBy(v => v.EndOfLifeDate ?? DateTimeOffset.MaxValue),
+            (SortColumn.EolDate, false) => filtered.OrderByDescending(v => v.EndOfLifeDate ?? DateTimeOffset.MinValue),
+            _ => filtered
+        };
+
+        _filteredVersions = filtered.ToList();
+    }
+
+    private void FilterByUrgency(EolUrgency urgency)
+    {
+        _selectedUrgency = urgency.ToString();
+        ApplyFilters();
+    }
+
+    private void ClearFilters()
+    {
+        _selectedFramework = "";
+        _selectedStatus = "";
+        _selectedUrgency = "";
+        ApplyFilters();
+    }
+
+    private void SortBy(SortColumn column)
+    {
+        if (_sortColumn == column)
+        {
+            _sortAscending = !_sortAscending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = true;
+        }
+        ApplyFilters();
+    }
+
+    private string GetSortIndicator(SortColumn column)
+    {
+        if (_sortColumn != column) return "";
+        return _sortAscending ? "▲" : "▼";
+    }
+
+    private async Task ShowAppsForVersion(FrameworkVersion version)
+    {
+        _selectedVersion = version;
+        _appsForVersion = (await DataService.GetApplicationsByFrameworkAsync(version.Id)).ToList();
+    }
+
+    private void CloseModal()
+    {
+        _selectedVersion = null;
+        _appsForVersion = [];
+    }
+
+    private void ViewApplication(string appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+
+    private int GetAppCountForVersion(FrameworkVersion version)
+    {
+        return _appCounts.TryGetValue(version.Id, out var count) ? count : 0;
+    }
+
+    private static string GetRowClass(FrameworkVersion version) => version.EolUrgency switch
+    {
+        EolUrgency.PastEol => "row-past-eol",
+        EolUrgency.Critical => "row-critical",
+        EolUrgency.High => "row-high",
+        _ => ""
+    };
+
+    private static string GetFrameworkIcon(FrameworkType type) => type switch
+    {
+        FrameworkType.DotNet => "bi-microsoft",
+        FrameworkType.DotNetFramework => "bi-microsoft",
+        FrameworkType.Python => "bi-filetype-py",
+        FrameworkType.R => "bi-bar-chart",
+        FrameworkType.NodeJs => "bi-nodejs",
+        FrameworkType.Java => "bi-cup-hot",
+        _ => "bi-code-slash"
+    };
+
+    private static string GetFrameworkLabel(FrameworkType type) => type switch
+    {
+        FrameworkType.DotNet => ".NET",
+        FrameworkType.DotNetFramework => ".NET Framework",
+        FrameworkType.Python => "Python",
+        FrameworkType.R => "R",
+        FrameworkType.NodeJs => "Node.js",
+        FrameworkType.Java => "Java",
+        _ => "Other"
+    };
+
+    private static string GetStatusLabel(SupportStatus status) => status switch
+    {
+        SupportStatus.Active => "Active",
+        SupportStatus.Maintenance => "Maintenance",
+        SupportStatus.EndOfLife => "End of Life",
+        SupportStatus.Preview => "Preview",
+        _ => "Unknown"
+    };
+}

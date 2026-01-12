@@ -1,0 +1,559 @@
+@page "/recommendations"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject IAiRecommendationService AiService
+@inject NavigationManager Navigation
+
+<PageTitle>Recommendations - Lifecycle Dashboard</PageTitle>
+
+<div class="recommendations-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Recommendations</h1>
+            <p class="subtitle">AI-powered insights and prioritized actions</p>
+        </div>
+        <div class="header-actions">
+            @if (_aiStatus?.IsAvailable == true)
+            {
+                <span class="ai-badge connected">
+                    <i class="bi bi-robot"></i>
+                    @_aiStatus.Provider (@_aiStatus.Model)
+                </span>
+            }
+            else
+            {
+                <span class="ai-badge disconnected" title="@_aiStatus?.Error">
+                    <i class="bi bi-robot"></i>
+                    AI Offline
+                </span>
+            }
+        </div>
+    </header>
+
+    @if (_isLoading)
+    {
+        <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <span>Analyzing portfolio...</span>
+        </div>
+    }
+    else
+    {
+        <!-- Priority Actions -->
+        <section class="recommendation-section priority-section">
+            <div class="section-header">
+                <h2><i class="bi bi-fire"></i> Priority Actions</h2>
+                <span class="section-count">@_priorityActions.Count items</span>
+            </div>
+            @if (_priorityActions.Count == 0)
+            {
+                <div class="empty-section">
+                    <i class="bi bi-check-circle"></i>
+                    <span>No critical issues requiring immediate attention</span>
+                </div>
+            }
+            else
+            {
+                <div class="recommendation-cards">
+                    @foreach (var action in _priorityActions.Take(5))
+                    {
+                        <div class="recommendation-card @action.Severity.ToLower()">
+                            <div class="card-icon">
+                                @((MarkupString)GetActionIcon(action.Type))
+                            </div>
+                            <div class="card-content">
+                                <h3>@action.Title</h3>
+                                <p>@action.Description</p>
+                                <div class="card-meta">
+                                    <span class="severity-badge @action.Severity.ToLower()">@action.Severity</span>
+                                    <span class="app-link" @onclick="() => NavigateToApp(action.ApplicationId)">@action.ApplicationName</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-primary" @onclick="() => NavigateToApp(action.ApplicationId)">View</button>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <!-- Retirement Candidates -->
+        <section class="recommendation-section retirement-section">
+            <div class="section-header">
+                <h2><i class="bi bi-arrow-repeat"></i> Retirement Candidates</h2>
+                <span class="section-count">@_retirementCandidates.Count applications</span>
+            </div>
+            @if (_retirementCandidates.Count == 0)
+            {
+                <div class="empty-section">
+                    <i class="bi bi-check-circle"></i>
+                    <span>All applications have active usage</span>
+                </div>
+            }
+            else
+            {
+                <div class="candidate-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Application</th>
+                                <th>Usage Level</th>
+                                <th>Last Activity</th>
+                                <th>Health Score</th>
+                                <th>Reason</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var app in _retirementCandidates.Take(5))
+                            {
+                                <tr>
+                                    <td><strong>@app.Name</strong></td>
+                                    <td><span class="usage-badge @GetUsageClass(app.Usage)">@GetUsageLabel(app.Usage)</span></td>
+                                    <td>@GetActivityLabel(app.LastActivityDate)</td>
+                                    <td><span class="health-score @app.HealthCategory.ToString().ToLower()">@app.HealthScore</span></td>
+                                    <td class="reason">@GetRetirementReason(app)</td>
+                                    <td><button class="btn btn-sm btn-outline" @onclick="() => NavigateToApp(app.Id)">Review</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <!-- Documentation Gaps -->
+        <section class="recommendation-section documentation-section">
+            <div class="section-header">
+                <h2><i class="bi bi-clipboard"></i> Documentation Gaps</h2>
+                <span class="section-count">@_documentationGaps.Count applications</span>
+            </div>
+            @if (_documentationGaps.Count == 0)
+            {
+                <div class="empty-section">
+                    <i class="bi bi-check-circle"></i>
+                    <span>All applications have complete documentation</span>
+                </div>
+            }
+            else
+            {
+                <div class="doc-gaps-grid">
+                    @foreach (var app in _documentationGaps.Take(6))
+                    {
+                        <div class="doc-gap-card">
+                            <h3>@app.Name</h3>
+                            <div class="missing-docs">
+                                @if (!app.Documentation.HasArchitectureDiagram)
+                                {
+                                    <span class="missing-item"><i class="bi bi-x-circle"></i> Architecture Diagram</span>
+                                }
+                                @if (!app.Documentation.HasSystemDocumentation)
+                                {
+                                    <span class="missing-item"><i class="bi bi-x-circle"></i> System Documentation</span>
+                                }
+                            </div>
+                            <button class="btn btn-sm btn-outline" @onclick="() => NavigateToApp(app.Id)">
+                                Add Documentation
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <!-- AI Insights (Live) -->
+        <section class="recommendation-section ai-section">
+            <div class="section-header">
+                <h2><i class="bi bi-robot"></i> AI Portfolio Analysis</h2>
+                <div class="section-actions">
+                    @if (_aiStatus?.IsAvailable == true)
+                    {
+                        <button class="btn btn-sm btn-outline" @onclick="RefreshAiInsights" disabled="@_aiLoading">
+                            <i class="bi @(_aiLoading ? "bi-hourglass-split" : "bi-arrow-clockwise")"></i>
+                            @(_aiLoading ? "Analyzing..." : "Refresh")
+                        </button>
+                    }
+                </div>
+            </div>
+            @if (_aiStatus?.IsAvailable != true)
+            {
+                <div class="ai-disabled-notice">
+                    <i class="bi bi-exclamation-circle"></i>
+                    <div>
+                        <strong>AI Service Unavailable</strong>
+                        <p>@(_aiStatus?.Error ?? "Configure Ollama or Azure OpenAI in Admin > System settings to enable AI-powered portfolio analysis.")</p>
+                    </div>
+                </div>
+            }
+            else if (_aiLoading)
+            {
+                <div class="ai-loading">
+                    <div class="loading-spinner"></div>
+                    <span>Analyzing portfolio with @_aiStatus.Model...</span>
+                </div>
+            }
+            else if (_portfolioInsights != null)
+            {
+                <!-- Portfolio Summary -->
+                <div class="portfolio-summary-card">
+                    <h3>Portfolio Summary</h3>
+                    <p>@_portfolioInsights.Summary</p>
+                    <div class="confidence-indicator">
+                        <span>Confidence: @_portfolioInsights.ConfidenceScore%</span>
+                        <span class="generated-at">Generated @_portfolioInsights.GeneratedAt.LocalDateTime.ToString("MMM d, h:mm tt")</span>
+                    </div>
+                </div>
+
+                <!-- Key Insights -->
+                @if (_portfolioInsights.KeyInsights.Count > 0)
+                {
+                    <div class="key-insights">
+                        <h4>Key Insights</h4>
+                        <div class="insights-grid">
+                            @foreach (var insight in _portfolioInsights.KeyInsights)
+                            {
+                                <div class="insight-card @insight.Severity.ToLower()">
+                                    <div class="insight-header">
+                                        <span class="insight-category">@insight.Category</span>
+                                        <span class="insight-severity @insight.Severity.ToLower()">@insight.Severity</span>
+                                    </div>
+                                    <h5>@insight.Title</h5>
+                                    <p>@insight.Description</p>
+                                    @if (insight.AffectedApplications.Count > 0)
+                                    {
+                                        <div class="affected-apps" title="@string.Join(", ", insight.AffectedApplications)">
+                                            <i class="bi bi-layers"></i>
+                                            <span class="app-list">@string.Join(", ", insight.AffectedApplications.Take(3))</span>
+                                            @if (insight.AffectedApplications.Count > 3)
+                                            {
+                                                <span class="more-apps">+@(insight.AffectedApplications.Count - 3) more</span>
+                                            }
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(insight.RecommendedAction))
+                                    {
+                                        <div class="recommended-action">
+                                            <i class="bi bi-arrow-right-circle"></i>
+                                            @insight.RecommendedAction
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <!-- Trend Predictions -->
+                @if (_portfolioInsights.Trends.Count > 0)
+                {
+                    <div class="trend-predictions">
+                        <h4>Trend Predictions</h4>
+                        <div class="trends-grid">
+                            @foreach (var trend in _portfolioInsights.Trends)
+                            {
+                                <div class="trend-card">
+                                    <div class="trend-direction @trend.Direction.ToLower()">
+                                        <i class="bi @(trend.Direction == "Up" ? "bi-arrow-up-circle" : trend.Direction == "Down" ? "bi-arrow-down-circle" : "bi-dash-circle")"></i>
+                                    </div>
+                                    <div class="trend-content">
+                                        <span class="trend-metric">@trend.Metric</span>
+                                        <span class="trend-timeframe">@trend.Timeframe</span>
+                                        <p>@trend.Reasoning</p>
+                                        <span class="trend-confidence">@trend.Confidence% confidence</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+
+            <!-- Risk Predictions -->
+            @if (_riskPrediction?.AtRiskApplications.Count > 0)
+            {
+                <div class="risk-predictions">
+                    <h4><i class="bi bi-exclamation-diamond"></i> At-Risk Applications</h4>
+                    <p class="risk-summary">@_riskPrediction.OverallAssessment</p>
+                    <div class="risk-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Application</th>
+                                    <th>Current</th>
+                                    <th>Predicted</th>
+                                    <th>Risk Reason</th>
+                                    <th>Preventive Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var app in _riskPrediction.AtRiskApplications.Take(5))
+                                {
+                                    <tr>
+                                        <td>
+                                            <button class="link-button" @onclick="() => NavigateToApp(app.ApplicationId)">@app.ApplicationName</button>
+                                        </td>
+                                        <td><span class="score current">@app.CurrentScore</span></td>
+                                        <td><span class="score predicted @(app.PredictedScore < 60 ? "warning" : "")">@app.PredictedScore</span></td>
+                                        <td>@app.RiskReason</td>
+                                        <td>@string.Join("; ", app.PreventiveActions.Take(2))</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+
+            <!-- Action Plan -->
+            @if (_actionPlan?.Actions.Count > 0)
+            {
+                <div class="action-plan">
+                    <div class="action-plan-header">
+                        <h4><i class="bi bi-list-check"></i> Recommended Action Plan</h4>
+                        @if (!string.IsNullOrEmpty(_actionPlan.EstimatedImpact))
+                        {
+                            <span class="estimated-impact">
+                                <i class="bi bi-graph-up-arrow"></i>
+                                @_actionPlan.EstimatedImpact
+                            </span>
+                        }
+                    </div>
+                    <p class="action-summary">@_actionPlan.Summary</p>
+                    <div class="action-list">
+                        @foreach (var action in _actionPlan.Actions.OrderBy(a => a.Priority))
+                        {
+                            <div class="action-item">
+                                <div class="action-priority">
+                                    <span class="priority-badge">P@(action.Priority)</span>
+                                </div>
+                                <div class="action-content">
+                                    <h5 class="action-title">@action.Action</h5>
+                                    <p class="action-rationale">@action.Rationale</p>
+                                    @if (action.TargetApplications.Count > 0)
+                                    {
+                                        <div class="action-targets">
+                                            <i class="bi bi-bullseye"></i>
+                                            <span>@string.Join(", ", action.TargetApplications)</span>
+                                        </div>
+                                    }
+                                </div>
+                                <div class="action-outcome">
+                                    <i class="bi bi-check2-circle"></i>
+                                    <span>@action.ExpectedOutcome</span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private bool _isLoading = true;
+    private bool _aiLoading;
+    private List<PriorityAction> _priorityActions = [];
+    private List<Application> _retirementCandidates = [];
+    private List<Application> _documentationGaps = [];
+    private AiServiceStatus? _aiStatus;
+    private PortfolioInsights? _portfolioInsights;
+    private RiskPrediction? _riskPrediction;
+    private ActionPlan? _actionPlan;
+    private IReadOnlyList<Application> _allApplications = [];
+    private IReadOnlyList<LifecycleTask> _allTasks = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Check AI service status
+        try
+        {
+            _aiStatus = await AiService.GetServiceStatusAsync();
+        }
+        catch
+        {
+            _aiStatus = new AiServiceStatus { IsAvailable = false, Error = "Failed to connect to AI service" };
+        }
+
+        var applications = await DataService.GetApplicationsAsync();
+        _allApplications = applications;
+        var currentUser = await DataService.GetCurrentUserAsync();
+        var tasks = await DataService.GetTasksForUserAsync(currentUser.Id);
+        _allTasks = tasks;
+
+        // Build priority actions
+        foreach (var app in applications)
+        {
+            // Critical security vulnerabilities
+            var criticalVulns = app.SecurityFindings.Where(f => !f.IsResolved && f.Severity == SecuritySeverity.Critical).ToList();
+            foreach (var vuln in criticalVulns)
+            {
+                _priorityActions.Add(new PriorityAction
+                {
+                    Type = "security",
+                    Severity = "Critical",
+                    Title = $"Critical vulnerability in {app.Name}",
+                    Description = vuln.Title,
+                    ApplicationId = app.Id,
+                    ApplicationName = app.Name
+                });
+            }
+
+            // Critical health applications
+            if (app.HealthCategory == HealthCategory.Critical)
+            {
+                _priorityActions.Add(new PriorityAction
+                {
+                    Type = "health",
+                    Severity = "High",
+                    Title = $"{app.Name} is in critical health",
+                    Description = $"Health score: {app.HealthScore}. Immediate attention required.",
+                    ApplicationId = app.Id,
+                    ApplicationName = app.Name
+                });
+            }
+        }
+
+        // Add overdue tasks
+        foreach (var task in tasks.Where(t => t.IsOverdue))
+        {
+            _priorityActions.Add(new PriorityAction
+            {
+                Type = "task",
+                Severity = task.DaysOverdue > 14 ? "High" : "Medium",
+                Title = task.Title,
+                Description = $"Overdue by {task.DaysOverdue} days",
+                ApplicationId = task.ApplicationId,
+                ApplicationName = task.ApplicationName
+            });
+        }
+
+        _priorityActions = _priorityActions.OrderByDescending(a => a.Severity == "Critical")
+            .ThenByDescending(a => a.Severity == "High")
+            .ThenByDescending(a => a.Severity == "Medium")
+            .ToList();
+
+        // Retirement candidates (low/no usage, stale)
+        _retirementCandidates = applications
+            .Where(a => a.Usage?.Level == UsageLevel.None || a.Usage?.Level == UsageLevel.VeryLow ||
+                       (a.LastActivityDate.HasValue && (DateTimeOffset.UtcNow - a.LastActivityDate.Value).TotalDays > 365))
+            .OrderBy(a => a.Usage?.Level ?? UsageLevel.None)
+            .ThenBy(a => a.LastActivityDate)
+            .ToList();
+
+        // Documentation gaps
+        _documentationGaps = applications
+            .Where(a => !a.Documentation.HasArchitectureDiagram || !a.Documentation.HasSystemDocumentation)
+            .OrderByDescending(a => !a.Documentation.HasArchitectureDiagram && !a.Documentation.HasSystemDocumentation)
+            .ToList();
+
+        _isLoading = false;
+
+        // Load AI insights if service is available
+        if (_aiStatus?.IsAvailable == true)
+        {
+            _ = RefreshAiInsights();
+        }
+    }
+
+    private async Task RefreshAiInsights()
+    {
+        if (_aiStatus?.IsAvailable != true) return;
+
+        _aiLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            // Get critical apps and overdue tasks for action plan
+            var criticalApps = _allApplications.Where(a => a.HealthCategory == HealthCategory.Critical).ToList();
+            var overdueTasks = _allTasks.Where(t => t.IsOverdue).ToList();
+
+            // Run AI analysis tasks in parallel for better performance
+            var insightsTask = AiService.GeneratePortfolioInsightsAsync(_allApplications, _allTasks);
+            var riskTask = AiService.PredictHealthRisksAsync(_allApplications);
+            var actionTask = AiService.GenerateActionPlanAsync(criticalApps, overdueTasks);
+
+            await Task.WhenAll(insightsTask, riskTask, actionTask);
+
+            _portfolioInsights = await insightsTask;
+            _riskPrediction = await riskTask;
+            _actionPlan = await actionTask;
+        }
+        catch (Exception ex)
+        {
+            // Log error but don't crash the page
+            Console.WriteLine($"AI analysis error: {ex.Message}");
+            _portfolioInsights = new PortfolioInsights
+            {
+                Summary = "Unable to generate AI insights at this time.",
+                ConfidenceScore = 0
+            };
+        }
+        finally
+        {
+            _aiLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void NavigateToApp(string appId) => Navigation.NavigateTo($"/applications/{appId}");
+
+    private static string GetActionIcon(string type) => type switch
+    {
+        "security" => "<i class=\"bi bi-shield-exclamation\"></i>",
+        "health" => "<i class=\"bi bi-heart-pulse\"></i>",
+        "task" => "<i class=\"bi bi-clock-history\"></i>",
+        _ => "<i class=\"bi bi-exclamation-triangle\"></i>"
+    };
+
+    private static string GetUsageClass(UsageMetrics? usage)
+    {
+        if (usage == null) return "none";
+        return usage.Level.ToString().ToLower();
+    }
+
+    private static string GetUsageLabel(UsageMetrics? usage)
+    {
+        if (usage == null) return "No Data";
+        return usage.Level switch
+        {
+            UsageLevel.None => "No Usage",
+            UsageLevel.VeryLow => "Very Low",
+            UsageLevel.Low => "Low",
+            UsageLevel.Moderate => "Moderate",
+            UsageLevel.High => "High",
+            _ => "Unknown"
+        };
+    }
+
+    private static string GetActivityLabel(DateTimeOffset? date)
+    {
+        if (!date.HasValue) return "Never";
+        var days = (DateTimeOffset.UtcNow - date.Value).TotalDays;
+        if (days < 30) return "Recent";
+        if (days < 90) return $"{(int)(days / 30)} months ago";
+        if (days < 365) return $"{(int)(days / 30)} months ago";
+        return $"{(int)(days / 365)} years ago";
+    }
+
+    private static string GetRetirementReason(Application app)
+    {
+        var reasons = new List<string>();
+        if (app.Usage?.Level == UsageLevel.None) reasons.Add("No usage detected");
+        else if (app.Usage?.Level == UsageLevel.VeryLow) reasons.Add("Very low usage");
+        if (app.LastActivityDate.HasValue && (DateTimeOffset.UtcNow - app.LastActivityDate.Value).TotalDays > 365)
+            reasons.Add("No activity >1 year");
+        return string.Join(", ", reasons);
+    }
+
+    private class PriorityAction
+    {
+        public string Type { get; set; } = "";
+        public string Severity { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string ApplicationId { get; set; } = "";
+        public string ApplicationName { get; set; } = "";
+    }
+}

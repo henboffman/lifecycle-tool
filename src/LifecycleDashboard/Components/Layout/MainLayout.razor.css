@@ -1,0 +1,157 @@
+/* Main Layout Styling - Dark Nebula Theme */
+
+.page {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+main {
+    flex: 1;
+}
+
+.sidebar {
+    background: var(--color-sidebar-bg, #16161a);
+}
+
+.top-row {
+    background-color: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    justify-content: space-between;
+    display: flex;
+    align-items: center;
+    height: 3.5rem;
+}
+
+.app-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.environment-badge {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: rgba(167, 139, 250, 0.1);
+    color: var(--color-primary);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    border: 1px solid rgba(167, 139, 250, 0.2);
+}
+
+.mock-data-indicator {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.mock-data-indicator::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    background: var(--color-healthy);
+    border-radius: 50%;
+    animation: pulse-dot 2s ease-in-out infinite;
+    box-shadow: 0 0 6px var(--color-healthy);
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.devmode-toggle {
+    background: var(--color-sidebar-bg, #16161a);
+    border: 1px solid rgba(167, 139, 250, 0.2);
+    color: var(--color-primary);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s ease;
+}
+
+.devmode-toggle:hover {
+    background: rgba(167, 139, 250, 0.1);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 12px rgba(167, 139, 250, 0.2);
+}
+
+.content {
+    padding-top: 1.5rem;
+}
+
+@media (max-width: 640.98px) {
+    .top-row {
+        padding: 0 1rem;
+    }
+
+    .app-info {
+        gap: 0.5rem;
+    }
+
+    .environment-badge {
+        font-size: 0.55rem;
+        padding: 0.2rem 0.5rem;
+    }
+
+    .mock-data-indicator {
+        display: none;
+    }
+}
+
+@media (min-width: 641px) {
+    .page {
+        flex-direction: row;
+    }
+
+    .sidebar {
+        width: 250px;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+        border-right: 1px solid var(--color-sidebar-border, rgba(167, 139, 250, 0.1));
+    }
+
+    .top-row {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .top-row, article {
+        padding-left: 2rem !important;
+        padding-right: 1.5rem !important;
+    }
+}
+
+#blazor-error-ui {
+    color-scheme: light only;
+    background: #fef3c7;
+    bottom: 0;
+    box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.15);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+    border-top: 2px solid #f59e0b;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}

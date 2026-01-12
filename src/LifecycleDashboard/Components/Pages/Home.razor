@@ -1,0 +1,342 @@
+@page "/"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Dashboard - Lifecycle Dashboard</PageTitle>
+
+<div class="dashboard-page">
+    <header class="dashboard-header">
+        <div class="header-content">
+            <h1>Application Portfolio Health</h1>
+            <p class="subtitle">Monitor and manage your organization's application lifecycle</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline" @onclick="ExportReport">
+                <i class="bi bi-download"></i>
+                Export Report
+            </button>
+            <button class="btn btn-primary" disabled title="Configure in Admin > System">
+                <i class="bi bi-plus-lg"></i>
+                Add Application
+            </button>
+        </div>
+    </header>
+
+    <!-- Summary Stats -->
+    <section class="stats-grid">
+        <div class="stat-card healthy" @onclick='() => Navigation.NavigateTo("/applications")'>
+            <div class="stat-icon"><i class="bi bi-check-circle"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">@_healthySummary.HealthyCount</div>
+                <div class="stat-label">Healthy</div>
+            </div>
+            <div class="stat-trend positive">80-100 score</div>
+        </div>
+
+        <div class="stat-card attention" @onclick='() => Navigation.NavigateTo("/applications")'>
+            <div class="stat-icon"><i class="bi bi-exclamation-triangle"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">@_healthySummary.NeedsAttentionCount</div>
+                <div class="stat-label">Needs Attention</div>
+            </div>
+            <div class="stat-trend neutral">60-79 score</div>
+        </div>
+
+        <div class="stat-card at-risk" @onclick='() => Navigation.NavigateTo("/applications")'>
+            <div class="stat-icon"><i class="bi bi-exclamation-triangle"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">@_healthySummary.AtRiskCount</div>
+                <div class="stat-label">At Risk</div>
+            </div>
+            <div class="stat-trend negative">40-59 score</div>
+        </div>
+
+        <div class="stat-card critical" @onclick='() => Navigation.NavigateTo("/applications")'>
+            <div class="stat-icon"><i class="bi bi-x-circle"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">@_healthySummary.CriticalCount</div>
+                <div class="stat-label">Critical</div>
+            </div>
+            <div class="stat-trend negative">0-39 score</div>
+        </div>
+    </section>
+
+    <!-- Main Dashboard Grid -->
+    <div class="dashboard-grid">
+        <!-- My Tasks Section -->
+        <section class="dashboard-card tasks-card">
+            <div class="card-header">
+                <h2><i class="bi bi-check-square card-icon"></i> My Tasks</h2>
+                <a href="/tasks" class="card-link">
+                    View All <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+            <div class="card-content">
+                <div class="tasks-summary">
+                    <div class="task-count overdue">
+                        <span class="count">@_overdueTasks.Count</span>
+                        <span class="label">Overdue</span>
+                    </div>
+                    <div class="task-count due-soon">
+                        <span class="count">@_dueSoonTasks.Count</span>
+                        <span class="label">Due This Week</span>
+                    </div>
+                    <div class="task-count upcoming">
+                        <span class="count">@_upcomingTasks.Count</span>
+                        <span class="label">Upcoming</span>
+                    </div>
+                </div>
+
+                <div class="task-list">
+                    @foreach (var task in _displayTasks.Take(3))
+                    {
+                        <div class="task-item @(task.IsOverdue ? "overdue" : task.DaysUntilDue <= 7 ? "due-soon" : "")">
+                            <div class="task-priority @task.Priority.ToString().ToLower()"></div>
+                            <div class="task-details">
+                                <div class="task-title">@task.Title</div>
+                                <div class="task-meta">
+                                    @if (task.IsOverdue)
+                                    {
+                                        <span>Due: @task.DueDate.ToString("MMM d, yyyy") &bull; @task.DaysOverdue days overdue</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Due: @task.DueDate.ToString("MMM d, yyyy")</span>
+                                    }
+                                </div>
+                            </div>
+                            <button class="task-action" @onclick="() => NavigateToTask(task.Id)" title="View task">
+                                <i class="bi bi-arrow-right"></i>
+                            </button>
+                        </div>
+                    }
+                    @if (_displayTasks.Count == 0)
+                    {
+                        <div class="empty-tasks">
+                            <i class="bi bi-check-circle"></i>
+                            <span>No pending tasks</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+
+        <!-- Recent Activity -->
+        <section class="dashboard-card activity-card">
+            <div class="card-header">
+                <h2><i class="bi bi-clock-history card-icon"></i> Recent Activity</h2>
+            </div>
+            <div class="card-content">
+                <div class="activity-list">
+                    @foreach (var entry in _recentActivity.Take(4))
+                    {
+                        <div class="activity-item">
+                            <div class="activity-icon @entry.IconClass"><i class="bi @entry.Icon"></i></div>
+                            <div class="activity-details">
+                                <div class="activity-text">@((MarkupString)entry.Text)</div>
+                                <div class="activity-time">@entry.TimeAgo</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Heatmap -->
+        <section class="dashboard-card heatmap-card">
+            <div class="card-header">
+                <h2><i class="bi bi-fire card-icon"></i> Portfolio Heatmap</h2>
+                <a href="/heatmap" class="card-link">
+                    Full View <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+            <div class="card-content">
+                <div class="mini-heatmap">
+                    @foreach (var app in _applications.Take(50))
+                    {
+                        <div class="heatmap-cell @app.HealthCategory.ToString().ToLower()" title="@app.Name: @app.HealthScore"></div>
+                    }
+                </div>
+                <div class="heatmap-legend">
+                    <div class="legend-item"><span class="legend-color healthy"></span> Healthy</div>
+                    <div class="legend-item"><span class="legend-color attention"></span> Needs Attention</div>
+                    <div class="legend-item"><span class="legend-color at-risk"></span> At Risk</div>
+                    <div class="legend-item"><span class="legend-color critical"></span> Critical</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recommendations -->
+        <section class="dashboard-card recommendations-card">
+            <div class="card-header">
+                <h2><i class="bi bi-lightbulb card-icon"></i> Recommendations</h2>
+                <a href="/recommendations" class="card-link">
+                    View All <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+            <div class="card-content">
+                <div class="recommendation-list">
+                    @if (_criticalApps.Count > 0)
+                    {
+                        <div class="recommendation-item priority-high">
+                            <div class="recommendation-icon"><i class="bi bi-fire"></i></div>
+                            <div class="recommendation-content">
+                                <div class="recommendation-title">Critical health applications</div>
+                                <div class="recommendation-text">@_criticalApps.Count applications are in critical health. Immediate attention recommended.</div>
+                            </div>
+                        </div>
+                    }
+                    @if (_lowUsageApps.Count > 0)
+                    {
+                        <div class="recommendation-item priority-medium">
+                            <div class="recommendation-icon"><i class="bi bi-arrow-repeat"></i></div>
+                            <div class="recommendation-content">
+                                <div class="recommendation-title">Review low-usage applications</div>
+                                <div class="recommendation-text">@_lowUsageApps.Count applications have very low or no usage. Consider retirement review.</div>
+                            </div>
+                        </div>
+                    }
+                    @if (_missingDocs.Count > 0)
+                    {
+                        <div class="recommendation-item priority-low">
+                            <div class="recommendation-icon"><i class="bi bi-file-text"></i></div>
+                            <div class="recommendation-content">
+                                <div class="recommendation-title">Update documentation</div>
+                                <div class="recommendation-text">@_missingDocs.Count applications are missing required documentation.</div>
+                            </div>
+                        </div>
+                    }
+                    @if (_criticalApps.Count == 0 && _lowUsageApps.Count == 0 && _missingDocs.Count == 0)
+                    {
+                        <div class="empty-recommendations">
+                            <i class="bi bi-check-circle"></i>
+                            <span>No recommendations at this time</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+@code {
+    private List<Application> _applications = [];
+    private List<LifecycleTask> _overdueTasks = [];
+    private List<LifecycleTask> _dueSoonTasks = [];
+    private List<LifecycleTask> _upcomingTasks = [];
+    private List<LifecycleTask> _displayTasks = [];
+    private List<ActivityItem> _recentActivity = [];
+    private List<Application> _criticalApps = [];
+    private List<Application> _lowUsageApps = [];
+    private List<Application> _missingDocs = [];
+    private PortfolioHealthSummary _healthySummary = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _applications = (await DataService.GetApplicationsAsync()).ToList();
+        _healthySummary = await DataService.GetPortfolioHealthSummaryAsync();
+
+        var currentUser = await DataService.GetCurrentUserAsync();
+        var tasks = await DataService.GetTasksForUserAsync(currentUser.Id);
+        var now = DateTimeOffset.UtcNow;
+        var weekFromNow = now.AddDays(7);
+
+        _overdueTasks = tasks.Where(t => t.IsOverdue && t.Status != Models.TaskStatus.Completed).ToList();
+        _dueSoonTasks = tasks.Where(t => !t.IsOverdue && t.DueDate <= weekFromNow && t.Status != Models.TaskStatus.Completed).ToList();
+        _upcomingTasks = tasks.Where(t => t.DueDate > weekFromNow && t.Status != Models.TaskStatus.Completed).ToList();
+
+        _displayTasks = _overdueTasks.Concat(_dueSoonTasks).Concat(_upcomingTasks)
+            .OrderByDescending(t => t.IsOverdue)
+            .ThenBy(t => t.DueDate)
+            .Take(3)
+            .ToList();
+
+        // Build recent activity from audit log
+        var auditLog = await DataService.GetAuditLogAsync(new AuditLogFilter { Limit = 10 });
+        _recentActivity = auditLog.Select(e => new ActivityItem
+        {
+            Icon = GetActivityIcon(e.Category),
+            IconClass = GetActivityIconClass(e.Category),
+            Text = e.Message,
+            TimeAgo = GetTimeAgo(e.Timestamp)
+        }).ToList();
+
+        // Build recommendations summary
+        _criticalApps = _applications.Where(a => a.HealthCategory == HealthCategory.Critical).ToList();
+        _lowUsageApps = _applications.Where(a => a.Usage?.Level == UsageLevel.None || a.Usage?.Level == UsageLevel.VeryLow).ToList();
+        _missingDocs = _applications.Where(a => !a.Documentation.HasArchitectureDiagram || !a.Documentation.HasSystemDocumentation).ToList();
+    }
+
+    private async Task ExportReport()
+    {
+        var csv = new System.Text.StringBuilder();
+        csv.AppendLine("Application Portfolio Health Report");
+        csv.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm}");
+        csv.AppendLine();
+        csv.AppendLine("Summary");
+        csv.AppendLine($"Total Applications,{_applications.Count}");
+        csv.AppendLine($"Healthy,{_healthySummary.HealthyCount}");
+        csv.AppendLine($"Needs Attention,{_healthySummary.NeedsAttentionCount}");
+        csv.AppendLine($"At Risk,{_healthySummary.AtRiskCount}");
+        csv.AppendLine($"Critical,{_healthySummary.CriticalCount}");
+        csv.AppendLine();
+        csv.AppendLine("Applications");
+        csv.AppendLine("Name,Capability,Health Score,Category,Owner");
+
+        foreach (var app in _applications.OrderByDescending(a => a.HealthScore))
+        {
+            var owner = app.RoleAssignments.FirstOrDefault(r => r.Role == ApplicationRole.Owner)?.UserName ?? "";
+            csv.AppendLine($"\"{app.Name}\",\"{app.Capability}\",{app.HealthScore},\"{app.HealthCategory}\",\"{owner}\"");
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
+        var base64 = Convert.ToBase64String(bytes);
+        var filename = $"portfolio-health-report-{DateTime.Now:yyyy-MM-dd}.csv";
+
+        await JS.InvokeVoidAsync("downloadFile", filename, base64, "text/csv");
+    }
+
+    private void NavigateToTask(string taskId) => Navigation.NavigateTo($"/tasks/{taskId}");
+
+    private static string GetActivityIcon(string category) => category switch
+    {
+        "Task" => "bi-check-lg",
+        "Security" => "bi-shield-exclamation",
+        "Health" => "bi-heart-pulse",
+        "System" => "bi-gear",
+        "User" => "bi-person",
+        _ => "bi-info-circle"
+    };
+
+    private static string GetActivityIconClass(string category) => category switch
+    {
+        "Task" => "completed",
+        "Security" => "alert",
+        "Health" => "alert",
+        "System" => "sync",
+        "User" => "new",
+        _ => "sync"
+    };
+
+    private static string GetTimeAgo(DateTimeOffset timestamp)
+    {
+        var diff = DateTimeOffset.UtcNow - timestamp;
+        if (diff.TotalMinutes < 1) return "Just now";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes} minutes ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours} hours ago";
+        if (diff.TotalDays < 2) return "Yesterday";
+        if (diff.TotalDays < 7) return $"{(int)diff.TotalDays} days ago";
+        return timestamp.ToString("MMM d");
+    }
+
+    private class ActivityItem
+    {
+        public string Icon { get; set; } = "";
+        public string IconClass { get; set; } = "";
+        public string Text { get; set; } = "";
+        public string TimeAgo { get; set; } = "";
+    }
+}

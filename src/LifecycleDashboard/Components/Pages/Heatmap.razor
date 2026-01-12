@@ -1,0 +1,419 @@
+@page "/heatmap"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+
+<PageTitle>Heatmap - Lifecycle Dashboard</PageTitle>
+
+<div class="heatmap-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Portfolio Heatmap</h1>
+            <p class="subtitle">@_filteredApplications.Count applications across @GetUniqueCapabilities() capabilities</p>
+        </div>
+        <div class="header-actions">
+            <div class="view-toggle" role="tablist" aria-label="Visualization type">
+                <button class="view-btn @(_viewMode == ViewMode.Grid ? "active" : "")"
+                        role="tab"
+                        aria-selected="@(_viewMode == ViewMode.Grid)"
+                        @onclick="() => SetViewMode(ViewMode.Grid)">
+                    <i class="bi bi-grid-3x3" aria-hidden="true"></i> Grid
+                </button>
+                <button class="view-btn @(_viewMode == ViewMode.Treemap ? "active" : "")"
+                        role="tab"
+                        aria-selected="@(_viewMode == ViewMode.Treemap)"
+                        @onclick="() => SetViewMode(ViewMode.Treemap)">
+                    <i class="bi bi-grid-fill" aria-hidden="true"></i> Treemap
+                </button>
+            </div>
+            <label class="accessibility-toggle">
+                <input type="checkbox" @bind="_highContrastMode" @bind:after="StateHasChanged" />
+                <span>High Contrast</span>
+            </label>
+        </div>
+    </header>
+
+    <!-- Filters -->
+    <section class="filters-section">
+        <div class="filter-group">
+            <label>Capability:</label>
+            <select class="filter-select" @bind="_selectedCapability" @bind:after="ApplyFilters">
+                <option value="">All Capabilities</option>
+                @foreach (var cap in _capabilities)
+                {
+                    <option value="@cap">@cap</option>
+                }
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Health Status:</label>
+            <select class="filter-select" @bind="_selectedHealth" @bind:after="ApplyFilters">
+                <option value="">All Status</option>
+                <option value="Critical">Critical</option>
+                <option value="AtRisk">At Risk</option>
+                <option value="NeedsAttention">Needs Attention</option>
+                <option value="Healthy">Healthy</option>
+            </select>
+        </div>
+
+        <!-- Legend -->
+        <div class="heatmap-legend" role="list" aria-label="Health score legend">
+            <div class="legend-item" role="listitem">
+                <span class="legend-color critical @(_highContrastMode ? "high-contrast" : "")" aria-hidden="true"></span>
+                <span>Critical (0-39)</span>
+            </div>
+            <div class="legend-item" role="listitem">
+                <span class="legend-color at-risk @(_highContrastMode ? "high-contrast" : "")" aria-hidden="true"></span>
+                <span>At Risk (40-59)</span>
+            </div>
+            <div class="legend-item" role="listitem">
+                <span class="legend-color attention @(_highContrastMode ? "high-contrast" : "")" aria-hidden="true"></span>
+                <span>Needs Attention (60-79)</span>
+            </div>
+            <div class="legend-item" role="listitem">
+                <span class="legend-color healthy @(_highContrastMode ? "high-contrast" : "")" aria-hidden="true"></span>
+                <span>Healthy (80-100)</span>
+            </div>
+        </div>
+    </section>
+
+    @if (_isLoading)
+    {
+        <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <span>Loading applications...</span>
+        </div>
+    }
+    else if (_viewMode == ViewMode.Grid)
+    {
+        <!-- Grid View -->
+        <section class="heatmap-grid-container" aria-label="Application health grid">
+            <table class="heatmap-table" role="grid">
+                <thead>
+                    <tr>
+                        <th scope="col" class="sortable" @onclick="() => SortBy(SortColumn.Name)">
+                            Application @GetSortIndicator(SortColumn.Name)
+                        </th>
+                        <th scope="col" class="sortable" @onclick="() => SortBy(SortColumn.Capability)">
+                            Capability @GetSortIndicator(SortColumn.Capability)
+                        </th>
+                        <th scope="col" class="sortable" @onclick="() => SortBy(SortColumn.Health)">
+                            Health @GetSortIndicator(SortColumn.Health)
+                        </th>
+                        <th scope="col">Security</th>
+                        <th scope="col">Usage</th>
+                        <th scope="col">Maintenance</th>
+                        <th scope="col">Docs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var app in _filteredApplications)
+                    {
+                        <tr class="@GetRowClass(app)" @onclick="() => SelectApplication(app)">
+                            <td class="app-name-cell">
+                                <span class="health-indicator @GetHealthClass(app) @(_highContrastMode ? "high-contrast" : "")"
+                                      aria-label="@GetHealthLabel(app.HealthCategory)">
+                                    @if (_highContrastMode)
+                                    {
+                                        <span class="pattern-indicator">@GetHealthPattern(app.HealthCategory)</span>
+                                    }
+                                </span>
+                                @app.Name
+                            </td>
+                            <td>@app.Capability</td>
+                            <td class="score-cell">
+                                <div class="score-bar-container">
+                                    <div class="score-bar @GetHealthClass(app) @(_highContrastMode ? "high-contrast" : "")"
+                                         style="width: @(app.HealthScore)%"
+                                         role="progressbar"
+                                         aria-valuenow="@app.HealthScore"
+                                         aria-valuemin="0"
+                                         aria-valuemax="100"
+                                         aria-label="Health score: @app.HealthScore"></div>
+                                    <span class="score-value">@app.HealthScore</span>
+                                </div>
+                            </td>
+                            <td class="metric-cell @GetSecurityClass(app)">
+                                @GetSecurityCount(app) issues
+                            </td>
+                            <td class="metric-cell">@GetUsageLabel(app.Usage)</td>
+                            <td class="metric-cell">@GetMaintenanceLabel(app.LastActivityDate)</td>
+                            <td class="metric-cell">@GetDocsStatus(app)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+    else
+    {
+        <!-- Treemap View -->
+        <section class="treemap-container" aria-label="Application health treemap">
+            @foreach (var group in _groupedApplications)
+            {
+                <div class="treemap-group">
+                    <h3 class="treemap-group-title">@group.Key (@group.Value.Count apps)</h3>
+                    <div class="treemap-cells">
+                        @foreach (var app in group.Value)
+                        {
+                            <button class="treemap-cell @GetHealthClass(app) @(_highContrastMode ? "high-contrast" : "")"
+                                    style="@GetTreemapCellStyle(app)"
+                                    @onclick="() => SelectApplication(app)"
+                                    aria-label="@app.Name, health score @app.HealthScore, @GetHealthLabel(app.HealthCategory)">
+                                <div class="treemap-cell-content">
+                                    @if (_highContrastMode)
+                                    {
+                                        <span class="pattern-overlay" aria-hidden="true">@GetHealthPattern(app.HealthCategory)</span>
+                                    }
+                                    <span class="treemap-name">@app.Name</span>
+                                    <span class="treemap-score">@app.HealthScore</span>
+                                </div>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </section>
+    }
+
+    <!-- Application Detail Modal -->
+    @if (_selectedApp != null)
+    {
+        <div class="modal-overlay" @onclick="CloseModal">
+            <div class="modal-content" @onclick:stopPropagation="true" role="dialog" aria-labelledby="modal-title">
+                <button class="modal-close" @onclick="CloseModal" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+                <div class="modal-header @GetHealthClass(_selectedApp)">
+                    <div class="modal-health-score">@_selectedApp.HealthScore</div>
+                    <div class="modal-health-label">@GetHealthLabel(_selectedApp.HealthCategory)</div>
+                </div>
+                <div class="modal-body">
+                    <h2 id="modal-title">@_selectedApp.Name</h2>
+                    <p class="modal-capability">@_selectedApp.Capability</p>
+
+                    <div class="modal-metrics">
+                        <div class="modal-metric">
+                            <span class="metric-label">Security Issues</span>
+                            <span class="metric-value @GetSecurityClass(_selectedApp)">@GetSecurityCount(_selectedApp)</span>
+                        </div>
+                        <div class="modal-metric">
+                            <span class="metric-label">Usage Level</span>
+                            <span class="metric-value">@GetUsageLabel(_selectedApp.Usage)</span>
+                        </div>
+                        <div class="modal-metric">
+                            <span class="metric-label">Last Activity</span>
+                            <span class="metric-value">@GetMaintenanceLabel(_selectedApp.LastActivityDate)</span>
+                        </div>
+                        <div class="modal-metric">
+                            <span class="metric-label">Documentation</span>
+                            <span class="metric-value">@GetDocsStatus(_selectedApp)</span>
+                        </div>
+                    </div>
+
+                    <div class="modal-tech-stack">
+                        <span class="tech-label">Tech Stack:</span>
+                        @foreach (var tech in _selectedApp.TechnologyStack)
+                        {
+                            <span class="tech-badge">@tech</span>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" @onclick="() => ViewFullDetails(_selectedApp!.Id)">
+                        View Full Details <i class="bi bi-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<Application> _allApplications = [];
+    private List<Application> _filteredApplications = [];
+    private Dictionary<string, List<Application>> _groupedApplications = [];
+    private List<string> _capabilities = [];
+    private Application? _selectedApp;
+
+    private ViewMode _viewMode = ViewMode.Grid;
+    private string _selectedCapability = "";
+    private string _selectedHealth = "";
+    private bool _highContrastMode = false;
+    private bool _isLoading = true;
+    private SortColumn _sortColumn = SortColumn.Health;
+    private bool _sortAscending = true;
+
+    private enum ViewMode { Grid, Treemap }
+    private enum SortColumn { Name, Capability, Health }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allApplications = (await DataService.GetApplicationsAsync()).ToList();
+        _capabilities = _allApplications.Select(a => a.Capability).Distinct().OrderBy(c => c).ToList();
+        ApplyFilters();
+        _isLoading = false;
+    }
+
+    private void SetViewMode(ViewMode mode)
+    {
+        _viewMode = mode;
+    }
+
+    private void ApplyFilters()
+    {
+        var filtered = _allApplications.AsEnumerable();
+
+        if (!string.IsNullOrEmpty(_selectedCapability))
+        {
+            filtered = filtered.Where(a => a.Capability == _selectedCapability);
+        }
+
+        if (!string.IsNullOrEmpty(_selectedHealth) && Enum.TryParse<HealthCategory>(_selectedHealth, out var health))
+        {
+            filtered = filtered.Where(a => a.HealthCategory == health);
+        }
+
+        // Apply sorting
+        filtered = (_sortColumn, _sortAscending) switch
+        {
+            (SortColumn.Name, true) => filtered.OrderBy(a => a.Name),
+            (SortColumn.Name, false) => filtered.OrderByDescending(a => a.Name),
+            (SortColumn.Capability, true) => filtered.OrderBy(a => a.Capability).ThenBy(a => a.Name),
+            (SortColumn.Capability, false) => filtered.OrderByDescending(a => a.Capability).ThenBy(a => a.Name),
+            (SortColumn.Health, true) => filtered.OrderBy(a => a.HealthScore),
+            (SortColumn.Health, false) => filtered.OrderByDescending(a => a.HealthScore),
+            _ => filtered
+        };
+
+        _filteredApplications = filtered.ToList();
+
+        // Group for treemap
+        _groupedApplications = _filteredApplications
+            .GroupBy(a => a.Capability)
+            .OrderBy(g => g.Key)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.HealthScore).ToList());
+    }
+
+    private void SortBy(SortColumn column)
+    {
+        if (_sortColumn == column)
+        {
+            _sortAscending = !_sortAscending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = true;
+        }
+        ApplyFilters();
+    }
+
+    private string GetSortIndicator(SortColumn column)
+    {
+        if (_sortColumn != column) return "";
+        return _sortAscending ? "▲" : "▼";
+    }
+
+    private void SelectApplication(Application app)
+    {
+        _selectedApp = app;
+    }
+
+    private void CloseModal()
+    {
+        _selectedApp = null;
+    }
+
+    private void ViewFullDetails(string appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+
+    private int GetUniqueCapabilities() => _filteredApplications.Select(a => a.Capability).Distinct().Count();
+
+    private static string GetHealthClass(Application app) => app.HealthCategory switch
+    {
+        HealthCategory.Critical => "critical",
+        HealthCategory.AtRisk => "at-risk",
+        HealthCategory.NeedsAttention => "attention",
+        HealthCategory.Healthy => "healthy",
+        _ => ""
+    };
+
+    private static string GetRowClass(Application app) => app.HealthCategory switch
+    {
+        HealthCategory.Critical => "row-critical",
+        HealthCategory.AtRisk => "row-at-risk",
+        _ => ""
+    };
+
+    private static string GetHealthLabel(HealthCategory category) => category switch
+    {
+        HealthCategory.Critical => "Critical",
+        HealthCategory.AtRisk => "At Risk",
+        HealthCategory.NeedsAttention => "Needs Attention",
+        HealthCategory.Healthy => "Healthy",
+        _ => "Unknown"
+    };
+
+    private static string GetHealthPattern(HealthCategory category) => category switch
+    {
+        HealthCategory.Critical => "╳╳",
+        HealthCategory.AtRisk => "//",
+        HealthCategory.NeedsAttention => "○",
+        HealthCategory.Healthy => "✓",
+        _ => ""
+    };
+
+    private static int GetSecurityCount(Application app) =>
+        app.SecurityFindings.Count(f => !f.IsResolved);
+
+    private static string GetSecurityClass(Application app)
+    {
+        var criticalOrHigh = app.SecurityFindings.Count(f =>
+            !f.IsResolved && (f.Severity == SecuritySeverity.Critical || f.Severity == SecuritySeverity.High));
+        return criticalOrHigh > 0 ? "critical" : "";
+    }
+
+    private static string GetUsageLabel(UsageMetrics? usage)
+    {
+        if (usage == null) return "N/A";
+        return usage.Level switch
+        {
+            UsageLevel.None => "None",
+            UsageLevel.VeryLow => "Very Low",
+            UsageLevel.Low => "Low",
+            UsageLevel.Moderate => "Moderate",
+            UsageLevel.High => "High",
+            _ => "N/A"
+        };
+    }
+
+    private static string GetMaintenanceLabel(DateTimeOffset? date)
+    {
+        if (!date.HasValue) return "Never";
+        var days = (DateTimeOffset.UtcNow - date.Value).TotalDays;
+        if (days < 30) return "Active";
+        if (days < 90) return "Recent";
+        if (days < 180) return "Moderate";
+        if (days < 365) return "Inactive";
+        return "Stale";
+    }
+
+    private static string GetDocsStatus(Application app)
+    {
+        if (app.Documentation.IsComplete) return "Complete";
+        if (app.Documentation.CompletenessScore > 0) return "Partial";
+        return "Missing";
+    }
+
+    private string GetTreemapCellStyle(Application app)
+    {
+        // Size based on relative importance (could be usage, could be health impact)
+        // For now, using a base size with slight variation
+        var baseSize = 100;
+        var sizeVariation = (app.HealthScore % 20) - 10;
+        var size = baseSize + sizeVariation;
+        return $"flex: {size};";
+    }
+}

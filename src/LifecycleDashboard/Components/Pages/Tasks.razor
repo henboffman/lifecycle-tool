@@ -1,0 +1,564 @@
+@page "/tasks"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IMockDataService DataService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+
+<PageTitle>My Tasks - Lifecycle Dashboard</PageTitle>
+
+<div class="tasks-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>My Tasks</h1>
+            <p class="subtitle">@GetTaskSummaryText()</p>
+        </div>
+        <div class="header-actions">
+            <div class="view-toggle" role="tablist" aria-label="View type">
+                <button class="view-btn @(_viewMode == ViewMode.List ? "active" : "")"
+                        role="tab"
+                        aria-selected="@(_viewMode == ViewMode.List)"
+                        @onclick="() => SetViewMode(ViewMode.List)">
+                    <i class="bi bi-list-ul" aria-hidden="true"></i> List
+                </button>
+                <button class="view-btn @(_viewMode == ViewMode.Calendar ? "active" : "")"
+                        role="tab"
+                        aria-selected="@(_viewMode == ViewMode.Calendar)"
+                        @onclick="() => SetViewMode(ViewMode.Calendar)">
+                    <i class="bi bi-calendar3" aria-hidden="true"></i> Calendar
+                </button>
+            </div>
+            <button class="btn btn-outline" @onclick="ExportToOutlook">
+                <i class="bi bi-calendar-plus"></i> Export to Outlook
+            </button>
+        </div>
+    </header>
+
+    <!-- Task Summary Cards -->
+    <section class="task-summary-cards">
+        <div class="summary-card overdue" @onclick="() => FilterByStatus(TaskFilterType.Overdue)">
+            <div class="summary-value">@_overdueTasks.Count</div>
+            <div class="summary-label">Overdue</div>
+            @if (_overdueTasks.Count > 0)
+            {
+                <div class="summary-alert">Needs attention!</div>
+            }
+        </div>
+        <div class="summary-card due-soon" @onclick="() => FilterByStatus(TaskFilterType.DueThisWeek)">
+            <div class="summary-value">@_dueSoonTasks.Count</div>
+            <div class="summary-label">Due This Week</div>
+        </div>
+        <div class="summary-card upcoming" @onclick="() => FilterByStatus(TaskFilterType.Upcoming)">
+            <div class="summary-value">@_upcomingTasks.Count</div>
+            <div class="summary-label">Upcoming</div>
+        </div>
+        <div class="summary-card completed" @onclick="() => FilterByStatus(TaskFilterType.Completed)">
+            <div class="summary-value">@_completedTasks.Count</div>
+            <div class="summary-label">Completed</div>
+        </div>
+    </section>
+
+    <!-- Filters -->
+    <section class="filters-section">
+        <div class="filter-tabs">
+            <button class="filter-tab @(_currentFilter == TaskFilterType.All ? "active" : "")"
+                    @onclick="() => FilterByStatus(TaskFilterType.All)">
+                All Tasks
+            </button>
+            <button class="filter-tab overdue @(_currentFilter == TaskFilterType.Overdue ? "active" : "")"
+                    @onclick="() => FilterByStatus(TaskFilterType.Overdue)">
+                Overdue (@_overdueTasks.Count)
+            </button>
+            <button class="filter-tab @(_currentFilter == TaskFilterType.DueThisWeek ? "active" : "")"
+                    @onclick="() => FilterByStatus(TaskFilterType.DueThisWeek)">
+                Due This Week (@_dueSoonTasks.Count)
+            </button>
+            <button class="filter-tab @(_currentFilter == TaskFilterType.Upcoming ? "active" : "")"
+                    @onclick="() => FilterByStatus(TaskFilterType.Upcoming)">
+                Upcoming
+            </button>
+            <button class="filter-tab @(_currentFilter == TaskFilterType.Completed ? "active" : "")"
+                    @onclick="() => FilterByStatus(TaskFilterType.Completed)">
+                Completed
+            </button>
+        </div>
+
+        <div class="filter-options">
+            <select class="filter-select" @bind="_taskTypeFilter" @bind:after="ApplyFilters">
+                <option value="">All Types</option>
+                @foreach (var taskType in Enum.GetValues<TaskType>())
+                {
+                    <option value="@taskType">@GetTaskTypeLabel(taskType)</option>
+                }
+            </select>
+        </div>
+    </section>
+
+    <!-- Task List View -->
+    @if (_viewMode == ViewMode.List)
+    {
+        <section class="task-list">
+            @if (_isLoading)
+            {
+                <div class="loading-state">
+                    <div class="loading-spinner"></div>
+                    <span>Loading tasks...</span>
+                </div>
+            }
+            else if (_filteredTasks.Count == 0)
+            {
+                <div class="empty-state">
+                    <i class="bi bi-check-square empty-icon"></i>
+                    <h3>No tasks found</h3>
+                    <p>@GetEmptyStateMessage()</p>
+                </div>
+            }
+            else
+            {
+                @foreach (var task in _filteredTasks)
+                {
+                    <article class="task-card @GetTaskStatusClass(task)">
+                        <div class="task-priority @task.Priority.ToString().ToLower()"></div>
+
+                        <div class="task-content">
+                            <div class="task-header">
+                                <h3 class="task-title">@task.Title</h3>
+                                <span class="task-type-badge @task.Type.ToString().ToLower()">@GetTaskTypeLabel(task.Type)</span>
+                            </div>
+
+                            <div class="task-composite-key">@task.CompositeKey</div>
+
+                            <div class="task-meta">
+                                <span class="task-app" @onclick="() => ViewApplication(task.ApplicationId)" @onclick:stopPropagation="true">
+                                    <i class="bi bi-pc-display meta-icon"></i>
+                                    @task.ApplicationName
+                                </span>
+                                <span class="task-assignee">
+                                    <i class="bi bi-person meta-icon"></i>
+                                    @task.AssigneeName
+                                </span>
+                                <span class="task-created">
+                                    <i class="bi bi-clock-history meta-icon"></i>
+                                    Created @task.CreatedDate.ToString("MMM d")
+                                </span>
+                                <span class="task-due @(task.IsOverdue ? "overdue" : "")">
+                                    <i class="bi bi-calendar3 meta-icon"></i>
+                                    @GetDueDateLabel(task)
+                                </span>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(task.Description))
+                            {
+                                <p class="task-description">@task.Description</p>
+                            }
+
+                            <div class="task-badges">
+                                <span class="priority-badge @task.Priority.ToString().ToLower()">@task.Priority</span>
+                                @if (task.IsEscalated)
+                                {
+                                    <span class="escalation-badge">
+                                        <i class="bi bi-exclamation-triangle"></i> Escalated
+                                    </span>
+                                }
+                                @if (task.Status == Models.TaskStatus.Blocked)
+                                {
+                                    <span class="blocked-badge">
+                                        <i class="bi bi-hand-thumbs-down"></i> Blocked
+                                    </span>
+                                }
+                                @if (task.Status == Models.TaskStatus.InProgress)
+                                {
+                                    <span class="in-progress-badge">
+                                        <i class="bi bi-play-circle"></i> In Progress
+                                    </span>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="task-actions">
+                            <button class="btn-action view" @onclick="() => ViewTaskDetails(task.Id)" title="View details">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            @if (task.Status != Models.TaskStatus.Completed)
+                            {
+                                <button class="btn-action complete" @onclick="() => CompleteTask(task)" title="Mark as complete">
+                                    <i class="bi bi-check-lg"></i>
+                                </button>
+                                <button class="btn-action delegate" @onclick="() => OpenDelegateModal(task)" title="Delegate task">
+                                    <i class="bi bi-person-plus"></i>
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="completed-badge">
+                                    <i class="bi bi-check-lg"></i> Completed
+                                </span>
+                            }
+                        </div>
+                    </article>
+                }
+            }
+        </section>
+    }
+    else
+    {
+        <!-- Calendar View -->
+        <section class="task-calendar">
+            <div class="calendar-header">
+                <button class="btn btn-sm btn-outline" @onclick="PreviousMonth">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <h2 class="calendar-month">@_calendarDate.ToString("MMMM yyyy")</h2>
+                <button class="btn btn-sm btn-outline" @onclick="NextMonth">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+                <button class="btn btn-sm btn-outline" @onclick="GoToToday">Today</button>
+            </div>
+
+            <div class="calendar-grid">
+                <div class="calendar-weekdays">
+                    <span>Sun</span>
+                    <span>Mon</span>
+                    <span>Tue</span>
+                    <span>Wed</span>
+                    <span>Thu</span>
+                    <span>Fri</span>
+                    <span>Sat</span>
+                </div>
+                <div class="calendar-days">
+                    @foreach (var day in GetCalendarDays())
+                    {
+                        var tasksForDay = GetTasksForDay(day);
+                        var isToday = day.Date == DateTime.Today;
+                        var isCurrentMonth = day.Month == _calendarDate.Month;
+                        <div class="calendar-day @(isCurrentMonth ? "" : "other-month") @(isToday ? "today" : "") @(tasksForDay.Any() ? "has-tasks" : "")">
+                            <span class="day-number">@day.Day</span>
+                            @if (tasksForDay.Any())
+                            {
+                                <div class="day-tasks">
+                                    @foreach (var task in tasksForDay.Take(3))
+                                    {
+                                        <div class="day-task @GetTaskStatusClass(task)" title="@task.Title">
+                                            <span class="task-dot @task.Priority.ToString().ToLower()"></span>
+                                            <span class="task-name">@TruncateTitle(task.Title)</span>
+                                        </div>
+                                    }
+                                    @if (tasksForDay.Count > 3)
+                                    {
+                                        <div class="more-tasks">+@(tasksForDay.Count - 3) more</div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="calendar-legend">
+                <div class="legend-item">
+                    <span class="task-dot high"></span> High Priority
+                </div>
+                <div class="legend-item">
+                    <span class="task-dot medium"></span> Medium Priority
+                </div>
+                <div class="legend-item">
+                    <span class="task-dot low"></span> Low Priority
+                </div>
+            </div>
+        </section>
+    }
+</div>
+
+<!-- Delegate Modal -->
+@if (_showDelegateModal && _selectedTask != null)
+{
+    <div class="modal-overlay" @onclick="CloseDelegateModal">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h3>Delegate Task</h3>
+                <button class="modal-close" @onclick="CloseDelegateModal"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div class="modal-body">
+                <p class="delegate-task-title">@_selectedTask.Title</p>
+                <div class="form-group">
+                    <label>Delegate to:</label>
+                    <select class="form-select" @bind="_delegateToUserId">
+                        <option value="">Select a user...</option>
+                        @foreach (var user in _availableUsers.Where(u => u.Id != _selectedTask.AssigneeId))
+                        {
+                            <option value="@user.Id">@user.Name (@user.Email)</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Note (optional):</label>
+                    <textarea class="form-control" @bind="_delegateNote" placeholder="Add a note for the new assignee..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" @onclick="CloseDelegateModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="DelegateTask" disabled="@string.IsNullOrEmpty(_delegateToUserId)">
+                    Delegate Task
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<LifecycleTask> _allTasks = [];
+    private List<LifecycleTask> _filteredTasks = [];
+    private List<LifecycleTask> _overdueTasks = [];
+    private List<LifecycleTask> _dueSoonTasks = [];
+    private List<LifecycleTask> _upcomingTasks = [];
+    private List<LifecycleTask> _completedTasks = [];
+
+    private TaskFilterType _currentFilter = TaskFilterType.All;
+    private string _taskTypeFilter = "";
+    private bool _isLoading = true;
+    private ViewMode _viewMode = ViewMode.List;
+    private DateTime _calendarDate = DateTime.Today;
+
+    // Delegate modal state
+    private bool _showDelegateModal;
+    private LifecycleTask? _selectedTask;
+    private string _delegateToUserId = "";
+    private string _delegateNote = "";
+    private List<User> _availableUsers = [];
+
+    private enum TaskFilterType
+    {
+        All,
+        Overdue,
+        DueThisWeek,
+        Upcoming,
+        Completed
+    }
+
+    private enum ViewMode
+    {
+        List,
+        Calendar
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var currentUser = await DataService.GetCurrentUserAsync();
+        _allTasks = (await DataService.GetTasksForUserAsync(currentUser.Id)).ToList();
+        _availableUsers = (await DataService.GetUsersAsync()).ToList();
+        CategorizeTasks();
+        ApplyFilters();
+        _isLoading = false;
+    }
+
+    private void CategorizeTasks()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var weekFromNow = now.AddDays(7);
+
+        _overdueTasks = _allTasks.Where(t => t.IsOverdue && t.Status != Models.TaskStatus.Completed).ToList();
+        _dueSoonTasks = _allTasks.Where(t => !t.IsOverdue && t.DueDate <= weekFromNow && t.Status != Models.TaskStatus.Completed).ToList();
+        _upcomingTasks = _allTasks.Where(t => t.DueDate > weekFromNow && t.Status != Models.TaskStatus.Completed).ToList();
+        _completedTasks = _allTasks.Where(t => t.Status == Models.TaskStatus.Completed).ToList();
+    }
+
+    private void FilterByStatus(TaskFilterType filter)
+    {
+        _currentFilter = filter;
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        var tasks = _currentFilter switch
+        {
+            TaskFilterType.Overdue => _overdueTasks,
+            TaskFilterType.DueThisWeek => _dueSoonTasks,
+            TaskFilterType.Upcoming => _upcomingTasks,
+            TaskFilterType.Completed => _completedTasks,
+            _ => _allTasks
+        };
+
+        if (!string.IsNullOrEmpty(_taskTypeFilter) && Enum.TryParse<TaskType>(_taskTypeFilter, out var taskType))
+        {
+            tasks = tasks.Where(t => t.Type == taskType).ToList();
+        }
+
+        _filteredTasks = tasks.OrderBy(t => t.Status == Models.TaskStatus.Completed)
+                              .ThenByDescending(t => t.IsOverdue)
+                              .ThenBy(t => t.DueDate)
+                              .ToList();
+    }
+
+    private void CompleteTask(LifecycleTask task)
+    {
+        // In real app, this would call a service
+        // For mock purposes, just remove from list and add to completed
+        var index = _allTasks.FindIndex(t => t.Id == task.Id);
+        if (index >= 0)
+        {
+            var updatedTask = task with
+            {
+                Status = Models.TaskStatus.Completed,
+                CompletedDate = DateTimeOffset.UtcNow
+            };
+            _allTasks[index] = updatedTask;
+            CategorizeTasks();
+            ApplyFilters();
+        }
+    }
+
+    private string GetTaskSummaryText()
+    {
+        var active = _allTasks.Count(t => t.Status != Models.TaskStatus.Completed);
+        var overdue = _overdueTasks.Count;
+        if (overdue > 0)
+            return $"{active} active tasks, {overdue} overdue";
+        return $"{active} active tasks";
+    }
+
+    private static string GetTaskTypeLabel(TaskType type) => type switch
+    {
+        TaskType.RoleValidation => "Role Validation",
+        TaskType.SecurityRemediation => "Security Remediation",
+        TaskType.DocumentationReview => "Documentation Review",
+        TaskType.ArchitectureReview => "Architecture Review",
+        TaskType.RetirementReview => "Retirement Review",
+        TaskType.ComplianceCheck => "Compliance Check",
+        TaskType.DataConflictResolution => "Data Conflict",
+        TaskType.MaintenanceReview => "Maintenance Review",
+        TaskType.Custom => "Custom Task",
+        _ => type.ToString()
+    };
+
+    private static string GetTaskStatusClass(LifecycleTask task)
+    {
+        if (task.Status == Models.TaskStatus.Completed) return "completed";
+        if (task.IsOverdue) return "overdue";
+        if (task.DaysUntilDue <= 7) return "due-soon";
+        return "";
+    }
+
+    private static string GetDueDateLabel(LifecycleTask task)
+    {
+        if (task.Status == Models.TaskStatus.Completed && task.CompletedDate.HasValue)
+            return $"Completed {FormatRelativeDate(task.CompletedDate.Value)}";
+
+        if (task.IsOverdue)
+            return $"{task.DaysOverdue} days overdue";
+
+        if (task.DaysUntilDue == 0)
+            return "Due today";
+
+        if (task.DaysUntilDue == 1)
+            return "Due tomorrow";
+
+        if (task.DaysUntilDue <= 7)
+            return $"Due in {task.DaysUntilDue} days";
+
+        return $"Due {task.DueDate:MMM d, yyyy}";
+    }
+
+    private static string FormatRelativeDate(DateTimeOffset date)
+    {
+        var days = (DateTimeOffset.UtcNow - date).TotalDays;
+        if (days < 1) return "today";
+        if (days < 2) return "yesterday";
+        if (days < 7) return $"{(int)days} days ago";
+        return date.ToString("MMM d");
+    }
+
+    private string GetEmptyStateMessage() => _currentFilter switch
+    {
+        TaskFilterType.Overdue => "Great job! You have no overdue tasks.",
+        TaskFilterType.DueThisWeek => "No tasks due this week.",
+        TaskFilterType.Upcoming => "No upcoming tasks scheduled.",
+        TaskFilterType.Completed => "No completed tasks yet.",
+        _ => "No tasks assigned to you."
+    };
+
+    private void SetViewMode(ViewMode mode) => _viewMode = mode;
+
+    private void ViewTaskDetails(string taskId) => Navigation.NavigateTo($"/tasks/{taskId}");
+
+    private void ViewApplication(string applicationId) => Navigation.NavigateTo($"/applications/{applicationId}");
+
+    // Calendar methods
+    private void PreviousMonth() => _calendarDate = _calendarDate.AddMonths(-1);
+    private void NextMonth() => _calendarDate = _calendarDate.AddMonths(1);
+    private void GoToToday() => _calendarDate = DateTime.Today;
+
+    private IEnumerable<DateTime> GetCalendarDays()
+    {
+        var firstOfMonth = new DateTime(_calendarDate.Year, _calendarDate.Month, 1);
+        var startDay = firstOfMonth.AddDays(-(int)firstOfMonth.DayOfWeek);
+
+        for (int i = 0; i < 42; i++) // 6 weeks
+        {
+            yield return startDay.AddDays(i);
+        }
+    }
+
+    private List<LifecycleTask> GetTasksForDay(DateTime day)
+    {
+        return _allTasks
+            .Where(t => t.DueDate.Date == day.Date && t.Status != Models.TaskStatus.Completed)
+            .OrderBy(t => t.Priority)
+            .ToList();
+    }
+
+    private static string TruncateTitle(string title)
+    {
+        return title.Length <= 15 ? title : title[..12] + "...";
+    }
+
+    private async Task ExportToOutlook()
+    {
+        var activeTasks = _allTasks
+            .Where(t => t.Status != Models.TaskStatus.Completed)
+            .Select(t => new
+            {
+                id = t.Id,
+                title = $"[Lifecycle] {t.Title} - {t.ApplicationName}",
+                description = t.Description ?? "",
+                dueDate = t.DueDate.ToString("yyyyMMdd")
+            })
+            .ToArray();
+
+        await JSRuntime.InvokeVoidAsync("generateIcsFile", (object)activeTasks);
+    }
+
+    // Delegate modal methods
+    private void OpenDelegateModal(LifecycleTask task)
+    {
+        _selectedTask = task;
+        _delegateToUserId = "";
+        _delegateNote = "";
+        _showDelegateModal = true;
+    }
+
+    private void CloseDelegateModal()
+    {
+        _showDelegateModal = false;
+        _selectedTask = null;
+        _delegateToUserId = "";
+        _delegateNote = "";
+    }
+
+    private void DelegateTask()
+    {
+        if (_selectedTask == null || string.IsNullOrEmpty(_delegateToUserId))
+            return;
+
+        var newAssignee = _availableUsers.FirstOrDefault(u => u.Id == _delegateToUserId);
+        if (newAssignee == null)
+            return;
+
+        // In real app, this would call a service to update the task
+        // For mock purposes, remove from current user's list (task delegated away)
+        _allTasks.Remove(_selectedTask);
+        CategorizeTasks();
+        ApplyFilters();
+        CloseDelegateModal();
+    }
+}

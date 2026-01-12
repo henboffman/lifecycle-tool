@@ -1,0 +1,424 @@
+@page "/tasks/{Id}"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@using TaskStatus = LifecycleDashboard.Models.TaskStatus
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+
+<PageTitle>@(_task?.Title ?? "Task") - Lifecycle Dashboard</PageTitle>
+
+@if (_isLoading)
+{
+    <div class="loading-state">
+        <div class="loading-spinner"></div>
+        <span>Loading task details...</span>
+    </div>
+}
+else if (_task == null)
+{
+    <div class="not-found-state">
+        <i class="bi bi-exclamation-circle"></i>
+        <h2>Task Not Found</h2>
+        <p>The requested task could not be found.</p>
+        <button class="btn btn-primary" @onclick="GoBack">
+            <i class="bi bi-arrow-left"></i> Back to Tasks
+        </button>
+    </div>
+}
+else
+{
+    <div class="task-detail-page">
+        <!-- Header -->
+        <header class="detail-header">
+            <button class="btn-back" @onclick="GoBack" title="Back to Tasks">
+                <i class="bi bi-arrow-left"></i>
+            </button>
+            <div class="header-content">
+                <div class="header-title-row">
+                    <span class="priority-indicator @_task.Priority.ToString().ToLower()"></span>
+                    <h1>@_task.Title</h1>
+                    <span class="status-badge @_task.Status.ToString().ToLower()">
+                        @GetStatusLabel(_task.Status)
+                    </span>
+                </div>
+                <p class="composite-key">@_task.FullCompositeKey</p>
+                <div class="header-meta">
+                    <span class="meta-item">
+                        <i class="bi bi-app"></i>
+                        <button class="link-btn" @onclick="() => ViewApplication(_task.ApplicationId)">
+                            @_task.ApplicationName
+                        </button>
+                    </span>
+                    <span class="meta-item">
+                        <i class="bi bi-person"></i> @_task.AssigneeName
+                    </span>
+                    <span class="meta-item">
+                        <i class="bi bi-tag"></i> @GetTaskTypeLabel(_task.Type)
+                    </span>
+                    <span class="meta-item @(_task.IsOverdue ? "overdue" : "")">
+                        <i class="bi bi-calendar"></i>
+                        @if (_task.IsOverdue)
+                        {
+                            <span class="overdue-text">@_task.DaysOverdue days overdue</span>
+                        }
+                        else if (_task.Status == TaskStatus.Completed)
+                        {
+                            <span>Completed @_task.CompletedDate?.ToString("MMM d, yyyy")</span>
+                        }
+                        else
+                        {
+                            <span>Due @_task.DueDate.ToString("MMM d, yyyy")</span>
+                        }
+                    </span>
+                    @if (_task.IsEscalated)
+                    {
+                        <span class="meta-item escalated">
+                            <i class="bi bi-exclamation-diamond"></i> Escalated
+                        </span>
+                    }
+                </div>
+            </div>
+            <div class="header-actions">
+                @if (_task.Status != TaskStatus.Completed)
+                {
+                    <button class="btn btn-primary" @onclick="MarkComplete">
+                        <i class="bi bi-check-lg"></i> Mark Complete
+                    </button>
+                }
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="task-content">
+            <!-- Left Column: Instructions -->
+            <div class="instructions-column">
+                <!-- Task Description -->
+                @if (!string.IsNullOrEmpty(_task.Description))
+                {
+                    <section class="content-section">
+                        <h2><i class="bi bi-info-circle"></i> Description</h2>
+                        <p class="task-description">@_task.Description</p>
+                    </section>
+                }
+
+                <!-- Instructions -->
+                @if (_documentation != null)
+                {
+                    <section class="content-section">
+                        <h2><i class="bi bi-list-ol"></i> How to Complete This Task</h2>
+                        <p class="instructions-overview">@_documentation.Description</p>
+
+                        <div class="instructions-list">
+                            @foreach (var instruction in _documentation.Instructions.OrderBy(i => i.StepNumber))
+                            {
+                                <div class="instruction-item">
+                                    <div class="step-number">@instruction.StepNumber</div>
+                                    <div class="step-content">
+                                        <h3>@instruction.Title</h3>
+                                        <p>@instruction.Description</p>
+                                        @if (!string.IsNullOrEmpty(instruction.SystemReference))
+                                        {
+                                            <span class="system-ref">
+                                                <i class="bi bi-link-45deg"></i> @instruction.SystemReference
+                                            </span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(instruction.ActionUrl))
+                                        {
+                                            <a href="@instruction.ActionUrl" target="_blank" class="action-link">
+                                                <i class="bi bi-box-arrow-up-right"></i> Open in System
+                                            </a>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        @if (_documentation.EstimatedDuration != null)
+                        {
+                            <div class="estimated-time">
+                                <i class="bi bi-clock"></i>
+                                Estimated time: @FormatDuration(_documentation.EstimatedDuration.Value)
+                            </div>
+                        }
+                    </section>
+
+                    <!-- System-Specific Guidance -->
+                    @if (_documentation.SystemGuidance.Count > 0)
+                    {
+                        <section class="content-section">
+                            <h2><i class="bi bi-gear"></i> System-Specific Instructions</h2>
+                            <div class="system-guidance-list">
+                                @foreach (var guidance in _documentation.SystemGuidance)
+                                {
+                                    <div class="guidance-card @guidance.SystemName.ToLower().Replace(" ", "-")">
+                                        <div class="guidance-header">
+                                            <i class="bi @GetSystemIcon(guidance.SystemName)"></i>
+                                            <span class="system-name">@guidance.SystemName</span>
+                                            <span class="action-type">@guidance.ActionType</span>
+                                        </div>
+                                        <p class="guidance-instructions">@guidance.Instructions</p>
+                                        @if (!string.IsNullOrEmpty(guidance.DirectLink))
+                                        {
+                                            <a href="@guidance.DirectLink" target="_blank" class="guidance-link">
+                                                <i class="bi bi-box-arrow-up-right"></i> Open @guidance.SystemName
+                                            </a>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </section>
+                    }
+
+                    <!-- Prerequisites -->
+                    @if (_documentation.Prerequisites.Count > 0)
+                    {
+                        <section class="content-section">
+                            <h2><i class="bi bi-exclamation-triangle"></i> Prerequisites</h2>
+                            <ul class="prerequisites-list">
+                                @foreach (var prereq in _documentation.Prerequisites)
+                                {
+                                    <li>@prereq</li>
+                                }
+                            </ul>
+                        </section>
+                    }
+
+                    <!-- Related Documentation -->
+                    @if (_documentation.RelatedLinks.Count > 0)
+                    {
+                        <section class="content-section">
+                            <h2><i class="bi bi-book"></i> Related Documentation</h2>
+                            <div class="doc-links-list">
+                                @foreach (var doc in _documentation.RelatedLinks)
+                                {
+                                    <a href="@doc.Url" target="_blank" class="doc-link-item">
+                                        <i class="bi @GetDocTypeIcon(doc.Type)"></i>
+                                        <div class="doc-link-content">
+                                            <span class="doc-title">@doc.Title</span>
+                                            @if (!string.IsNullOrEmpty(doc.Description))
+                                            {
+                                                <span class="doc-description">@doc.Description</span>
+                                            }
+                                        </div>
+                                        <i class="bi bi-box-arrow-up-right"></i>
+                                    </a>
+                                }
+                            </div>
+                        </section>
+                    }
+                }
+                else
+                {
+                    <section class="content-section">
+                        <h2><i class="bi bi-list-ol"></i> Instructions</h2>
+                        <div class="no-documentation">
+                            <i class="bi bi-info-circle"></i>
+                            <p>No specific instructions are available for this task type. Please consult with your team lead or refer to the general documentation.</p>
+                        </div>
+                    </section>
+                }
+            </div>
+
+            <!-- Right Column: Status & History -->
+            <div class="status-column">
+                <!-- Task Info Card -->
+                <section class="info-card">
+                    <h3>Task Information</h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Task ID</span>
+                            <span class="info-value mono">@_task.Id[..8]...</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Type</span>
+                            <span class="info-value">@GetTaskTypeLabel(_task.Type)</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Priority</span>
+                            <span class="info-value priority @_task.Priority.ToString().ToLower()">
+                                @_task.Priority
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Status</span>
+                            <span class="info-value status @_task.Status.ToString().ToLower()">
+                                @GetStatusLabel(_task.Status)
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Created</span>
+                            <span class="info-value">@_task.CreatedDate.ToString("MMM d, yyyy")</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Due Date</span>
+                            <span class="info-value @(_task.IsOverdue ? "overdue" : "")">
+                                @_task.DueDate.ToString("MMM d, yyyy")
+                            </span>
+                        </div>
+                        @if (_task.CompletedDate.HasValue)
+                        {
+                            <div class="info-item">
+                                <span class="info-label">Completed</span>
+                                <span class="info-value">@_task.CompletedDate.Value.ToString("MMM d, yyyy")</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+
+                <!-- Assignee Card -->
+                <section class="info-card">
+                    <h3>Assignee</h3>
+                    <div class="assignee-info">
+                        <div class="assignee-avatar">@GetInitials(_task.AssigneeName)</div>
+                        <div class="assignee-details">
+                            <span class="assignee-name">@_task.AssigneeName</span>
+                            @if (!string.IsNullOrEmpty(_task.AssigneeEmail))
+                            {
+                                <a href="mailto:@_task.AssigneeEmail" class="assignee-email">
+                                    @_task.AssigneeEmail
+                                </a>
+                            }
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_task.OriginalAssigneeId))
+                    {
+                        <div class="delegation-notice">
+                            <i class="bi bi-arrow-left-right"></i>
+                            <span>Delegated task</span>
+                            @if (!string.IsNullOrEmpty(_task.DelegationReason))
+                            {
+                                <p class="delegation-reason">@_task.DelegationReason</p>
+                            }
+                        </div>
+                    }
+                </section>
+
+                <!-- Notes Card -->
+                @if (!string.IsNullOrEmpty(_task.Notes))
+                {
+                    <section class="info-card">
+                        <h3>Notes</h3>
+                        <p class="task-notes">@_task.Notes</p>
+                    </section>
+                }
+
+                <!-- History Card -->
+                @if (_task.History.Count > 0)
+                {
+                    <section class="info-card history-card">
+                        <h3>History</h3>
+                        <div class="history-timeline">
+                            @foreach (var entry in _task.History.OrderByDescending(h => h.Timestamp))
+                            {
+                                <div class="history-entry">
+                                    <div class="history-marker"></div>
+                                    <div class="history-content">
+                                        <span class="history-action">@entry.Action</span>
+                                        <span class="history-meta">
+                                            @entry.PerformedBy - @entry.Timestamp.ToString("MMM d, h:mm tt")
+                                        </span>
+                                        @if (!string.IsNullOrEmpty(entry.Notes))
+                                        {
+                                            <p class="history-notes">@entry.Notes</p>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </section>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string Id { get; set; } = string.Empty;
+
+    private LifecycleTask? _task;
+    private TaskDocumentation? _documentation;
+    private bool _isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _task = await DataService.GetTaskAsync(Id);
+        if (_task != null)
+        {
+            _documentation = await DataService.GetTaskDocumentationAsync(_task.Type);
+        }
+        _isLoading = false;
+    }
+
+    private void GoBack() => Navigation.NavigateTo("/tasks");
+
+    private void ViewApplication(string applicationId) => Navigation.NavigateTo($"/applications/{applicationId}");
+
+    private void MarkComplete()
+    {
+        // In a real implementation, this would call a service method
+        // For now, just navigate back
+        Navigation.NavigateTo("/tasks");
+    }
+
+    private string GetStatusLabel(TaskStatus status) => status switch
+    {
+        TaskStatus.Pending => "Pending",
+        TaskStatus.InProgress => "In Progress",
+        TaskStatus.Blocked => "Blocked",
+        TaskStatus.Completed => "Completed",
+        TaskStatus.Cancelled => "Cancelled",
+        _ => "Unknown"
+    };
+
+    private string GetTaskTypeLabel(TaskType type) => type switch
+    {
+        TaskType.RoleValidation => "Role Validation",
+        TaskType.SecurityRemediation => "Security Remediation",
+        TaskType.DocumentationReview => "Documentation Review",
+        TaskType.ArchitectureReview => "Architecture Review",
+        TaskType.RetirementReview => "Retirement Review",
+        TaskType.ComplianceCheck => "Compliance Check",
+        TaskType.DataConflictResolution => "Data Conflict Resolution",
+        TaskType.MaintenanceReview => "Maintenance Review",
+        TaskType.Custom => "Custom Task",
+        _ => type.ToString()
+    };
+
+    private string GetInitials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+            return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+        return parts.Length > 0 ? parts[0][..Math.Min(2, parts[0].Length)].ToUpper() : "??";
+    }
+
+    private string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalDays >= 1)
+            return $"{(int)duration.TotalDays} day(s)";
+        if (duration.TotalHours >= 1)
+            return $"{(int)duration.TotalHours} hour(s)";
+        return $"{(int)duration.TotalMinutes} minute(s)";
+    }
+
+    private string GetSystemIcon(string systemName) => systemName.ToLower() switch
+    {
+        "servicenow" => "bi-ticket",
+        "sharepoint" => "bi-file-earmark-text",
+        "azure devops" => "bi-git",
+        "azure portal" => "bi-cloud",
+        _ => "bi-gear"
+    };
+
+    private string GetDocTypeIcon(DocumentationLinkType type) => type switch
+    {
+        DocumentationLinkType.SharePoint => "bi-file-earmark-text",
+        DocumentationLinkType.Confluence => "bi-journal-text",
+        DocumentationLinkType.Video => "bi-play-circle",
+        DocumentationLinkType.ExternalReference => "bi-globe",
+        DocumentationLinkType.InternalDocs => "bi-file-text",
+        DocumentationLinkType.Template => "bi-file-earmark-code",
+        _ => "bi-link"
+    };
+}

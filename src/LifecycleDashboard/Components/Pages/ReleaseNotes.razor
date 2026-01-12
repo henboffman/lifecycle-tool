@@ -1,0 +1,166 @@
+@page "/release-notes"
+@using LifecycleDashboard.Models
+@using LifecycleDashboard.Services
+@inject IReleaseNotesService ReleaseNotesService
+
+<PageTitle>Release Notes - Lifecycle Dashboard</PageTitle>
+
+<div class="release-notes-page">
+    <header class="release-header">
+        <h1>Release Notes</h1>
+        <p class="release-subtitle">
+            A complete changelog of all updates, improvements, and fixes to the Lifecycle Dashboard.
+        </p>
+        @if (!string.IsNullOrEmpty(_latestVersion))
+        {
+            <div class="version-badge">
+                Current Version: <strong>@_latestVersion</strong>
+            </div>
+        }
+    </header>
+
+    <div class="release-filters">
+        <div class="filter-group">
+            <label>Filter by category:</label>
+            <select @bind="_selectedCategory" class="filter-select">
+                <option value="">All Categories</option>
+                @foreach (var category in Enum.GetValues<ReleaseNoteCategory>())
+                {
+                    <option value="@category">@GetCategoryDisplayName(category)</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    <div class="release-timeline">
+        @if (_releaseNotes.Count == 0)
+        {
+            <div class="loading-state">
+                <div class="loading-spinner"></div>
+                <span>Loading release notes...</span>
+            </div>
+        }
+        else
+        {
+            @foreach (var note in FilteredNotes)
+            {
+                <article class="release-card @(note.IsHighlighted ? "highlighted" : "") @(note.IsBreakingChange ? "breaking" : "")">
+                    <div class="release-card-header">
+                        <div class="release-meta">
+                            <span class="release-version">v@(note.Version)</span>
+                            <span class="release-category @note.Category.ToString().ToLower()">
+                                @GetCategoryDisplayName(note.Category)
+                            </span>
+                            @if (note.IsBreakingChange)
+                            {
+                                <span class="breaking-badge">Breaking Change</span>
+                            }
+                        </div>
+                        <time class="release-date" datetime="@note.Date.ToString("yyyy-MM-dd")">
+                            @note.Date.ToString("MMMM d, yyyy")
+                        </time>
+                    </div>
+
+                    <h2 class="release-title">@note.Title</h2>
+
+                    @if (!string.IsNullOrEmpty(note.Description))
+                    {
+                        <p class="release-description">@note.Description</p>
+                    }
+
+                    @if (note.Items.Count > 0)
+                    {
+                        <div class="release-items">
+                            @foreach (var groupedItems in note.Items.GroupBy(i => i.Type))
+                            {
+                                <div class="item-group">
+                                    <h3 class="item-group-header @groupedItems.Key.ToString().ToLower()">
+                                        @GetItemTypeDisplayName(groupedItems.Key)
+                                    </h3>
+                                    <ul class="item-list">
+                                        @foreach (var item in groupedItems)
+                                        {
+                                            <li>
+                                                <span class="item-text">@item.Text</span>
+                                                @if (!string.IsNullOrEmpty(item.Component))
+                                                {
+                                                    <span class="item-component">@item.Component</span>
+                                                }
+                                                @if (!string.IsNullOrEmpty(item.Link))
+                                                {
+                                                    <a href="@item.Link" class="item-link" target="_blank">
+                                                        Learn more <i class="bi bi-box-arrow-up-right"></i>
+                                                    </a>
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (note.Tags.Count > 0)
+                    {
+                        <div class="release-tags">
+                            @foreach (var tag in note.Tags)
+                            {
+                                <span class="tag">@tag</span>
+                            }
+                        </div>
+                    }
+                </article>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private List<ReleaseNote> _releaseNotes = [];
+    private string _latestVersion = "";
+    private string _selectedCategory = "";
+
+    private IEnumerable<ReleaseNote> FilteredNotes
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(_selectedCategory))
+                return _releaseNotes;
+
+            if (Enum.TryParse<ReleaseNoteCategory>(_selectedCategory, out var category))
+                return _releaseNotes.Where(n => n.Category == category);
+
+            return _releaseNotes;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _releaseNotes = (await ReleaseNotesService.GetAllAsync()).ToList();
+        _latestVersion = await ReleaseNotesService.GetLatestVersionAsync();
+    }
+
+    private static string GetCategoryDisplayName(ReleaseNoteCategory category) => category switch
+    {
+        ReleaseNoteCategory.Feature => "Feature",
+        ReleaseNoteCategory.Enhancement => "Enhancement",
+        ReleaseNoteCategory.BugFix => "Bug Fix",
+        ReleaseNoteCategory.Security => "Security",
+        ReleaseNoteCategory.Performance => "Performance",
+        ReleaseNoteCategory.Documentation => "Documentation",
+        ReleaseNoteCategory.Infrastructure => "Infrastructure",
+        ReleaseNoteCategory.Breaking => "Breaking Change",
+        _ => category.ToString()
+    };
+
+    private static string GetItemTypeDisplayName(ReleaseNoteItemType type) => type switch
+    {
+        ReleaseNoteItemType.Added => "Added",
+        ReleaseNoteItemType.Changed => "Changed",
+        ReleaseNoteItemType.Fixed => "Fixed",
+        ReleaseNoteItemType.Removed => "Removed",
+        ReleaseNoteItemType.Deprecated => "Deprecated",
+        ReleaseNoteItemType.Security => "Security",
+        _ => type.ToString()
+    };
+}
