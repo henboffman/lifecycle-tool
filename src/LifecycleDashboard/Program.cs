@@ -59,6 +59,7 @@ builder.Services.AddHttpClient<IAzureDevOpsService, AzureDevOpsService>();
 builder.Services.AddHttpClient<ISharePointService, SharePointService>();
 builder.Services.AddSingleton<IServiceNowService, ServiceNowService>();
 builder.Services.AddSingleton<IIisDatabaseService, IisDatabaseService>();
+builder.Services.AddSingleton<ISyncStateService, SyncStateService>();
 builder.Services.AddSingleton<IDataSyncOrchestrator, DataSyncOrchestrator>();
 
 var app = builder.Build();

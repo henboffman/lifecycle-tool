@@ -6,6 +6,7 @@
 @inject DataIntegration.ISharePointService SharePointService
 @inject DataIntegration.IServiceNowService ServiceNowService
 @inject DataIntegration.IIisDatabaseService IisDatabaseService
+@inject DataIntegration.ISyncStateService SyncState
 @inject IMockDataService DataService
 @implements IDisposable
 
@@ -367,8 +368,17 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Subscribe to progress updates
+        // Subscribe to progress updates from both services
         SyncOrchestrator.SyncProgressUpdated += OnProgressUpdated;
+        SyncState.ProgressUpdated += OnSyncStateProgressUpdated;
+        SyncState.JobCompleted += OnSyncStateJobCompleted;
+
+        // Restore state if a job is currently running (user navigated away and came back)
+        if (SyncState.IsRunning)
+        {
+            _runningSource = SyncState.RunningSource?.ToString();
+            _currentProgress = SyncState.CurrentProgress;
+        }
 
         // Load dev mode state from configuration
         var config = SyncOrchestrator.GetConfiguration();
@@ -405,9 +415,34 @@
         InvokeAsync(StateHasChanged);
     }
 
+    private void OnSyncStateProgressUpdated(object? sender, DataIntegration.SyncProgressEventArgs e)
+    {
+        // Update running source from sync state if not already set
+        if (_runningSource == null && SyncState.RunningSource != null)
+        {
+            _runningSource = SyncState.RunningSource.ToString();
+        }
+        _currentProgress = e;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async void OnSyncStateJobCompleted(object? sender, DataIntegration.SyncJobEventArgs e)
+    {
+        _runningSource = null;
+        _currentProgress = null;
+
+        // Reload job history to show the completed job
+        await LoadJobHistoryAsync();
+        CalculateStatistics();
+        ApplyFilter();
+        await InvokeAsync(StateHasChanged);
+    }
+
     public void Dispose()
     {
         SyncOrchestrator.SyncProgressUpdated -= OnProgressUpdated;
+        SyncState.ProgressUpdated -= OnSyncStateProgressUpdated;
+        SyncState.JobCompleted -= OnSyncStateJobCompleted;
     }
 
     private async Task CheckConnectionStatusAsync()

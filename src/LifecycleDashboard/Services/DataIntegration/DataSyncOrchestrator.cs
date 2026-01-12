@@ -19,6 +19,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
     private readonly ISecureStorageService _secureStorage;
     private readonly IAuditService _auditService;
     private readonly IDbContextFactory<LifecycleDbContext> _contextFactory;
+    private readonly ISyncStateService _syncStateService;
     private readonly ILogger<DataSyncOrchestrator> _logger;
 
     private SyncConfiguration _configuration = new();
@@ -42,6 +43,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         ISecureStorageService secureStorage,
         IAuditService auditService,
         IDbContextFactory<LifecycleDbContext> contextFactory,
+        ISyncStateService syncStateService,
         ILogger<DataSyncOrchestrator> logger)
     {
         _azureDevOpsService = azureDevOpsService;
@@ -52,6 +54,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         _secureStorage = secureStorage;
         _auditService = auditService;
         _contextFactory = contextFactory;
+        _syncStateService = syncStateService;
         _logger = logger;
     }
 
@@ -198,8 +201,9 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         _runningJobs[jobId] = cts;
         await PersistJobAsync(job);
 
-        // Raise started event
+        // Raise started event and update shared state
         SyncJobStarted?.Invoke(this, new SyncJobEventArgs { Job = job });
+        _syncStateService.StartJob(jobId, dataSource);
 
         // Log audit event
         await _auditService.LogSyncStartedAsync(dataSource.ToString(), jobId);
@@ -246,7 +250,8 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 }
             }
 
-            // Raise completed/failed event
+            // Raise completed/failed event and update shared state
+            _syncStateService.CompleteJob(result);
             if (result.Success)
             {
                 await _auditService.LogSyncCompletedAsync(dataSource.ToString(), jobId, result.RecordsProcessed,
@@ -279,10 +284,13 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
             }
             await PersistJobAsync(job);
 
+            var cancelResult = DataSyncResult.Failed(dataSource, startTime, "Sync operation was cancelled");
+            _syncStateService.CompleteJob(cancelResult);
+
             await _auditService.LogSyncFailedAsync(dataSource.ToString(), jobId,
                 "Operation was cancelled", endTime - startTime);
 
-            return DataSyncResult.Failed(dataSource, startTime, "Sync operation was cancelled");
+            return cancelResult;
         }
         catch (Exception ex)
         {
@@ -303,10 +311,13 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
             }
             await PersistJobAsync(job);
 
+            var errorResult = DataSyncResult.Failed(dataSource, startTime, ex.Message);
+            _syncStateService.CompleteJob(errorResult);
+
             await _auditService.LogSyncFailedAsync(dataSource.ToString(), jobId, ex.Message, endTime - startTime);
             SyncJobFailed?.Invoke(this, new SyncJobEventArgs { Job = job });
 
-            return DataSyncResult.Failed(dataSource, startTime, ex.Message);
+            return errorResult;
         }
         finally
         {
@@ -574,7 +585,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         // Helper to report progress
         void ReportProgress(string phase, int processed, int total, string? currentItem = null, string? message = null)
         {
-            SyncProgressUpdated?.Invoke(this, new SyncProgressEventArgs
+            var progressArgs = new SyncProgressEventArgs
             {
                 JobId = jobId,
                 DataSource = DataSourceType.AzureDevOps,
@@ -583,7 +594,9 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 TotalItems = total,
                 CurrentItem = currentItem,
                 Message = message
-            });
+            };
+            SyncProgressUpdated?.Invoke(this, progressArgs);
+            _syncStateService.UpdateProgress(progressArgs);
         }
 
         try
@@ -866,13 +879,15 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 // Security alerts (CodeQL/Advanced Security)
                 try
                 {
+                    _logger.LogDebug("Fetching security alerts for {RepoName} (Project: {Project})", repo.Name, repo.ProjectName ?? "(null)");
                     var securityResult = await _azureDevOpsService.GetSecurityAlertsAsync(repo.Id, repo.ProjectName ?? "");
+
                     if (securityResult.Success && securityResult.Data != null)
                     {
                         syncedRepo = syncedRepo with
                         {
                             AdvancedSecurityEnabled = securityResult.Data.AdvancedSecurityEnabled,
-                            LastSecurityScanDate = securityResult.Data.LastScanDate,
+                            LastSecurityScanDate = securityResult.Data.LastScanDate ?? DateTimeOffset.UtcNow,
                             OpenCriticalVulnerabilities = securityResult.Data.OpenCritical,
                             OpenHighVulnerabilities = securityResult.Data.OpenHigh,
                             OpenMediumVulnerabilities = securityResult.Data.OpenMedium,
@@ -885,16 +900,21 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                             DependencyAlertCount = securityResult.Data.DependencyAlerts
                         };
                         securitySuccess++;
+                        _logger.LogDebug("Security data for {RepoName}: AdvSec={Enabled}, Open={Open}, Closed={Closed}",
+                            repo.Name, securityResult.Data.AdvancedSecurityEnabled,
+                            securityResult.Data.TotalOpen, securityResult.Data.TotalClosed);
                     }
                     else
                     {
-                        securitySkip++;
+                        securityFail++;
+                        _logger.LogWarning("Security alerts failed for {RepoName}: {Error}",
+                            repo.Name, securityResult.ErrorMessage ?? "Unknown error (Success=false)");
                     }
                 }
                 catch (Exception ex)
                 {
                     securityFail++;
-                    _logger.LogWarning(ex, "Security alert fetch failed for {RepoName}", repo.Name);
+                    _logger.LogWarning(ex, "Security alert fetch exception for {RepoName}", repo.Name);
                 }
 
                 syncedRepos.Add(syncedRepo);
@@ -963,7 +983,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 Success = securityFail == 0,
                 SuccessCount = securitySuccess,
                 FailCount = securityFail,
-                SkipCount = securitySkip,
+                SkipCount = 0, // Security is always attempted for non-disabled repos
                 Duration = processEnd - processStart
             });
 
