@@ -22,12 +22,16 @@ public interface IAzureDevOpsService
     /// Detects the technology stack for a repository by analyzing project files.
     /// Parses .csproj, package.json, requirements.txt, etc.
     /// </summary>
-    Task<DataSyncResult<TechStackDetectionResult>> DetectTechStackAsync(string repositoryId);
+    /// <param name="repositoryId">Repository ID</param>
+    /// <param name="defaultBranch">Default branch name (e.g., "main", "master"). Required for API call.</param>
+    Task<DataSyncResult<TechStackDetectionResult>> DetectTechStackAsync(string repositoryId, string? defaultBranch = null);
 
     /// <summary>
     /// Gets package references from a repository (NuGet, npm, pip, etc.).
     /// </summary>
-    Task<DataSyncResult<List<PackageReference>>> GetPackagesAsync(string repositoryId);
+    /// <param name="repositoryId">Repository ID</param>
+    /// <param name="defaultBranch">Default branch name (e.g., "main", "master"). Required for API call.</param>
+    Task<DataSyncResult<List<PackageReference>>> GetPackagesAsync(string repositoryId, string? defaultBranch = null);
 
     /// <summary>
     /// Gets commit history for a repository.
@@ -37,7 +41,9 @@ public interface IAzureDevOpsService
     /// <summary>
     /// Gets README status for a repository.
     /// </summary>
-    Task<DataSyncResult<ReadmeStatus>> GetReadmeStatusAsync(string repositoryId);
+    /// <param name="repositoryId">Repository ID</param>
+    /// <param name="defaultBranch">Default branch name (e.g., "main", "master"). Required for API call.</param>
+    Task<DataSyncResult<ReadmeStatus>> GetReadmeStatusAsync(string repositoryId, string? defaultBranch = null);
 
     /// <summary>
     /// Gets the latest pipeline/build status for a repository.

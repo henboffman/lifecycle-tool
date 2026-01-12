@@ -519,7 +519,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 // Tech stack detection
                 try
                 {
-                    var techStackResult = await _azureDevOpsService.DetectTechStackAsync(repo.Id);
+                    var techStackResult = await _azureDevOpsService.DetectTechStackAsync(repo.Id, repo.DefaultBranch);
                     if (techStackResult.Success && techStackResult.Data != null)
                     {
                         syncedRepo = syncedRepo with
@@ -574,7 +574,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 // Packages
                 try
                 {
-                    var packagesResult = await _azureDevOpsService.GetPackagesAsync(repo.Id);
+                    var packagesResult = await _azureDevOpsService.GetPackagesAsync(repo.Id, repo.DefaultBranch);
                     if (packagesResult.Success && packagesResult.Data != null)
                     {
                         syncedRepo = syncedRepo with
@@ -606,7 +606,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 // README status
                 try
                 {
-                    var readmeResult = await _azureDevOpsService.GetReadmeStatusAsync(repo.Id);
+                    var readmeResult = await _azureDevOpsService.GetReadmeStatusAsync(repo.Id, repo.DefaultBranch);
                     if (readmeResult.Success && readmeResult.Data != null)
                     {
                         syncedRepo = syncedRepo with

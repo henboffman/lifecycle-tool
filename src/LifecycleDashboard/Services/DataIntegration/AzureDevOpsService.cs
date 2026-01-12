@@ -172,7 +172,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     }
 
     /// <inheritdoc />
-    public async Task<DataSyncResult<TechStackDetectionResult>> DetectTechStackAsync(string repositoryId)
+    public async Task<DataSyncResult<TechStackDetectionResult>> DetectTechStackAsync(string repositoryId, string? defaultBranch = null)
     {
         var startTime = DateTimeOffset.UtcNow;
 
@@ -187,15 +187,14 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
             var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
 
-            // Get the file tree (use $top=8000 to get all files)
-            var itemsResponse = await SendRequestAsync(
-                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?$top=8000&recursionLevel=Full&api-version=7.1", auth);
+            // Get the file tree with branch fallback
+            var (itemsResponse, branchUsed) = await GetRepositoryItemsWithFallbackAsync(baseUrl, auth, project, repositoryId, defaultBranch);
 
-            if (!itemsResponse.IsSuccessStatusCode)
+            if (itemsResponse == null || !itemsResponse.IsSuccessStatusCode)
             {
                 return DataSyncResult<TechStackDetectionResult>.Failed(
                     DataSourceType.AzureDevOps, startTime,
-                    $"Failed to get repository items: {itemsResponse.StatusCode}");
+                    "Failed to get repository items - tried all branch fallbacks (repo may be empty)");
             }
 
             var content = await itemsResponse.Content.ReadAsStringAsync();
@@ -285,7 +284,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     }
 
     /// <inheritdoc />
-    public async Task<DataSyncResult<List<PackageReference>>> GetPackagesAsync(string repositoryId)
+    public async Task<DataSyncResult<List<PackageReference>>> GetPackagesAsync(string repositoryId, string? defaultBranch = null)
     {
         var startTime = DateTimeOffset.UtcNow;
 
@@ -301,15 +300,14 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
             var packages = new List<PackageReference>();
 
-            // Get the file tree (use $top=8000 to get all files)
-            var itemsResponse = await SendRequestAsync(
-                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?$top=8000&recursionLevel=Full&api-version=7.1", auth);
+            // Get the file tree with branch fallback
+            var (itemsResponse, branchUsed) = await GetRepositoryItemsWithFallbackAsync(baseUrl, auth, project, repositoryId, defaultBranch);
 
-            if (!itemsResponse.IsSuccessStatusCode)
+            if (itemsResponse == null || !itemsResponse.IsSuccessStatusCode)
             {
                 return DataSyncResult<List<PackageReference>>.Failed(
                     DataSourceType.AzureDevOps, startTime,
-                    $"Failed to get repository items: {itemsResponse.StatusCode}");
+                    "Failed to get repository items - tried all branch fallbacks (repo may be empty)");
             }
 
             var content = await itemsResponse.Content.ReadAsStringAsync();
@@ -449,7 +447,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     }
 
     /// <inheritdoc />
-    public async Task<DataSyncResult<ReadmeStatus>> GetReadmeStatusAsync(string repositoryId)
+    public async Task<DataSyncResult<ReadmeStatus>> GetReadmeStatusAsync(string repositoryId, string? defaultBranch = null)
     {
         var startTime = DateTimeOffset.UtcNow;
 
@@ -464,9 +462,30 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
             var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
 
-            // Try to get README.md
-            var readmeResponse = await SendRequestAsync(
-                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?path=/README.md&api-version=7.1", auth);
+            // Try to get README.md with branch fallback
+            HttpResponseMessage? readmeResponse = null;
+            var branchesToTry = new List<string>();
+            if (!string.IsNullOrEmpty(defaultBranch)) branchesToTry.Add(defaultBranch);
+            if (!branchesToTry.Contains("main", StringComparer.OrdinalIgnoreCase)) branchesToTry.Add("main");
+            if (!branchesToTry.Contains("master", StringComparer.OrdinalIgnoreCase)) branchesToTry.Add("master");
+
+            foreach (var branch in branchesToTry)
+            {
+                readmeResponse = await SendRequestAsync(
+                    $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?path=/README.md&versionDescriptor.version={Uri.EscapeDataString(branch)}&versionDescriptor.versionType=branch&api-version=7.1", auth);
+
+                if (readmeResponse.IsSuccessStatusCode)
+                    break;
+            }
+
+            if (readmeResponse == null)
+            {
+                return DataSyncResult<ReadmeStatus>.Succeeded(DataSourceType.AzureDevOps, new ReadmeStatus
+                {
+                    RepositoryId = repositoryId,
+                    Exists = false
+                });
+            }
 
             var status = new ReadmeStatus
             {
@@ -747,6 +766,46 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     }
 
     #region Private Helpers
+
+    /// <summary>
+    /// Gets repository items (file tree) with branch fallback: defaultBranch -> main -> master
+    /// </summary>
+    private async Task<(HttpResponseMessage? Response, string? BranchUsed)> GetRepositoryItemsWithFallbackAsync(
+        string baseUrl, AuthenticationHeaderValue auth, string project, string repositoryId, string? defaultBranch)
+    {
+        // Build list of branches to try in order
+        var branchesToTry = new List<string>();
+
+        if (!string.IsNullOrEmpty(defaultBranch))
+        {
+            branchesToTry.Add(defaultBranch);
+        }
+
+        // Add fallback branches if not already in list
+        if (!branchesToTry.Contains("main", StringComparer.OrdinalIgnoreCase))
+            branchesToTry.Add("main");
+        if (!branchesToTry.Contains("master", StringComparer.OrdinalIgnoreCase))
+            branchesToTry.Add("master");
+
+        foreach (var branch in branchesToTry)
+        {
+            var url = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?$top=8000&recursionLevel=Full&versionDescriptor.version={Uri.EscapeDataString(branch)}&versionDescriptor.versionType=branch&api-version=7.1";
+
+            _logger.LogDebug("Trying to fetch items from repo {RepositoryId} branch {Branch}", repositoryId, branch);
+            var response = await SendRequestAsync(url, auth);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Successfully fetched items from repo {RepositoryId} using branch {Branch}", repositoryId, branch);
+                return (response, branch);
+            }
+
+            _logger.LogDebug("Failed to fetch items from repo {RepositoryId} branch {Branch}: {Status}", repositoryId, branch, response.StatusCode);
+        }
+
+        _logger.LogWarning("Could not fetch items from repo {RepositoryId} - tried branches: {Branches}", repositoryId, string.Join(", ", branchesToTry));
+        return (null, null);
+    }
 
     private async Task<(bool Configured, string? Error, string? BaseUrl, AuthenticationHeaderValue? Auth)> GetConfigurationAsync()
     {
