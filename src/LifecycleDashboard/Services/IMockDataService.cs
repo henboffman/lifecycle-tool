@@ -219,6 +219,92 @@ public interface IMockDataService
     /// </summary>
     Task ClearSyncedRepositoriesAsync();
 
+    // Imported ServiceNow Applications
+
+    /// <summary>
+    /// Gets all imported ServiceNow applications.
+    /// </summary>
+    Task<IReadOnlyList<ImportedServiceNowApplication>> GetImportedServiceNowApplicationsAsync();
+
+    /// <summary>
+    /// Stores imported ServiceNow applications.
+    /// </summary>
+    Task StoreServiceNowApplicationsAsync(IEnumerable<ImportedServiceNowApplication> applications);
+
+    /// <summary>
+    /// Clears all imported ServiceNow application data.
+    /// </summary>
+    Task ClearServiceNowApplicationsAsync();
+
+    /// <summary>
+    /// Gets the saved ServiceNow CSV column mapping.
+    /// </summary>
+    Task<ServiceNowColumnMapping?> GetServiceNowColumnMappingAsync();
+
+    /// <summary>
+    /// Saves the ServiceNow CSV column mapping.
+    /// </summary>
+    Task SaveServiceNowColumnMappingAsync(ServiceNowColumnMapping mapping);
+
+    // Application Name Mappings (links ServiceNow apps to SharePoint folders and Azure DevOps repos)
+
+    /// <summary>
+    /// Gets all application name mappings.
+    /// </summary>
+    Task<IReadOnlyList<AppNameMapping>> GetAppNameMappingsAsync();
+
+    /// <summary>
+    /// Stores application name mappings from CSV import.
+    /// </summary>
+    Task StoreAppNameMappingsAsync(IEnumerable<AppNameMapping> mappings);
+
+    /// <summary>
+    /// Gets a specific app name mapping by ServiceNow application name.
+    /// </summary>
+    Task<AppNameMapping?> GetAppNameMappingByServiceNowNameAsync(string serviceNowAppName);
+
+    /// <summary>
+    /// Gets a specific app name mapping by SharePoint folder name.
+    /// </summary>
+    Task<AppNameMapping?> GetAppNameMappingBySharePointFolderAsync(string sharePointFolderName);
+
+    /// <summary>
+    /// Gets a specific app name mapping by Azure DevOps repository name.
+    /// </summary>
+    Task<AppNameMapping?> GetAppNameMappingByRepoNameAsync(string repoName);
+
+    /// <summary>
+    /// Clears all application name mappings.
+    /// </summary>
+    Task ClearAppNameMappingsAsync();
+
+    /// <summary>
+    /// Gets the saved app name mapping CSV column configuration.
+    /// </summary>
+    Task<AppNameMappingConfig?> GetAppNameMappingConfigAsync();
+
+    /// <summary>
+    /// Saves the app name mapping CSV column configuration.
+    /// </summary>
+    Task SaveAppNameMappingConfigAsync(AppNameMappingConfig config);
+
+    // SharePoint Discovered Folders
+
+    /// <summary>
+    /// Gets all discovered SharePoint application folders.
+    /// </summary>
+    Task<IReadOnlyList<DiscoveredSharePointFolder>> GetDiscoveredSharePointFoldersAsync();
+
+    /// <summary>
+    /// Stores discovered SharePoint application folders from sync.
+    /// </summary>
+    Task StoreDiscoveredSharePointFoldersAsync(IEnumerable<DiscoveredSharePointFolder> folders);
+
+    /// <summary>
+    /// Clears all discovered SharePoint folder data.
+    /// </summary>
+    Task ClearDiscoveredSharePointFoldersAsync();
+
     // User Management
 
     /// <summary>
@@ -394,7 +480,8 @@ public record DataSourceConnectionSettings
     public string? ApiKey { get; init; }
     public string? ConnectionString { get; init; }
     public string? SiteUrl { get; init; }
-    public string? ListName { get; init; }
+    /// <summary>SharePoint root path (e.g., Documents/general/Offerings).</summary>
+    public string? RootPath { get; init; }
     public string? Instance { get; init; }
     public string? Table { get; init; }
 }
@@ -493,4 +580,197 @@ public record SyncedPackageReference
     public required string PackageManager { get; init; }
     public string? SourceFile { get; init; }
     public bool IsDevelopmentDependency { get; init; }
+}
+
+/// <summary>
+/// Application imported from ServiceNow CSV.
+/// </summary>
+public record ImportedServiceNowApplication
+{
+    public required string Id { get; init; }
+    public required string ServiceNowId { get; init; }
+    public required string Name { get; init; }
+    public string? Description { get; init; }
+    public string? Capability { get; init; }
+    public string? Status { get; init; }
+    public string? OwnerId { get; init; }
+    public string? OwnerName { get; init; }
+    public string? TechnicalLeadId { get; init; }
+    public string? TechnicalLeadName { get; init; }
+    public string? BusinessOwnerId { get; init; }
+    public string? BusinessOwnerName { get; init; }
+    public string? RepositoryUrl { get; init; }
+    public string? DocumentationUrl { get; init; }
+    public string? Environment { get; init; }
+    public string? Criticality { get; init; }
+    public string? SupportGroup { get; init; }
+    public DateTimeOffset ImportedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    // Raw values from CSV (for debugging/verification)
+    public Dictionary<string, string> RawCsvValues { get; init; } = [];
+
+    // Linked repository (if mapped)
+    public string? LinkedRepositoryId { get; init; }
+    public string? LinkedRepositoryName { get; init; }
+}
+
+/// <summary>
+/// Saved column mapping for ServiceNow CSV import.
+/// Maps CSV column headers to application properties.
+/// </summary>
+public record ServiceNowColumnMapping
+{
+    public string? ServiceNowIdColumn { get; init; }
+    public string? NameColumn { get; init; }
+    public string? DescriptionColumn { get; init; }
+    public string? CapabilityColumn { get; init; }
+    public string? StatusColumn { get; init; }
+    public string? OwnerIdColumn { get; init; }
+    public string? OwnerNameColumn { get; init; }
+    public string? TechnicalLeadIdColumn { get; init; }
+    public string? TechnicalLeadNameColumn { get; init; }
+    public string? BusinessOwnerIdColumn { get; init; }
+    public string? BusinessOwnerNameColumn { get; init; }
+    public string? RepositoryUrlColumn { get; init; }
+    public string? DocumentationUrlColumn { get; init; }
+    public string? EnvironmentColumn { get; init; }
+    public string? CriticalityColumn { get; init; }
+    public string? SupportGroupColumn { get; init; }
+
+    public DateTimeOffset SavedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Mapping between application names across different data sources.
+/// ServiceNow application name is treated as the canonical/correct name.
+/// </summary>
+public record AppNameMapping
+{
+    public required string Id { get; init; }
+
+    /// <summary>The canonical application name from ServiceNow.</summary>
+    public required string ServiceNowAppName { get; init; }
+
+    /// <summary>The folder name in SharePoint (may differ from ServiceNow name).</summary>
+    public string? SharePointFolderName { get; init; }
+
+    /// <summary>The repository name(s) in Azure DevOps (may differ from ServiceNow name).</summary>
+    public List<string> AzureDevOpsRepoNames { get; init; } = [];
+
+    /// <summary>Alternative names or aliases for this application.</summary>
+    public List<string> AlternativeNames { get; init; } = [];
+
+    /// <summary>The capability/business area this application belongs to.</summary>
+    public string? Capability { get; init; }
+
+    /// <summary>Notes about the mapping (e.g., why names differ).</summary>
+    public string? Notes { get; init; }
+
+    /// <summary>When this mapping was created/imported.</summary>
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>When this mapping was last updated.</summary>
+    public DateTimeOffset? UpdatedAt { get; init; }
+
+    /// <summary>Raw CSV values for debugging.</summary>
+    public Dictionary<string, string> RawCsvValues { get; init; } = [];
+}
+
+/// <summary>
+/// Configuration for app name mapping CSV import.
+/// Maps CSV column headers to mapping properties.
+/// </summary>
+public record AppNameMappingConfig
+{
+    /// <summary>Column containing the ServiceNow/canonical application name.</summary>
+    public string? ServiceNowAppNameColumn { get; init; }
+
+    /// <summary>Column containing the SharePoint folder name.</summary>
+    public string? SharePointFolderNameColumn { get; init; }
+
+    /// <summary>Column containing Azure DevOps repository name(s). May contain multiple comma-separated values.</summary>
+    public string? AzureDevOpsRepoNameColumn { get; init; }
+
+    /// <summary>Column containing alternative names/aliases.</summary>
+    public string? AlternativeNamesColumn { get; init; }
+
+    /// <summary>Column containing the capability/business area.</summary>
+    public string? CapabilityColumn { get; init; }
+
+    /// <summary>Column containing notes about the mapping.</summary>
+    public string? NotesColumn { get; init; }
+
+    /// <summary>When this configuration was saved.</summary>
+    public DateTimeOffset SavedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// A SharePoint folder discovered during sync.
+/// </summary>
+public record DiscoveredSharePointFolder
+{
+    public required string Id { get; init; }
+
+    /// <summary>Folder name (potential application name).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Full path in SharePoint (e.g., "Documents/general/Offerings/Finance/BudgetApp").</summary>
+    public required string FullPath { get; init; }
+
+    /// <summary>URL to the folder in SharePoint.</summary>
+    public string? Url { get; init; }
+
+    /// <summary>Parent capability folder name.</summary>
+    public string? Capability { get; init; }
+
+    /// <summary>Template subfolders found (Project Documents, Technical Documentation, etc.).</summary>
+    public List<string> TemplateFoldersFound { get; init; } = [];
+
+    /// <summary>Whether this folder has all 4 expected template subfolders.</summary>
+    public bool HasAllTemplateFolders => TemplateFoldersFound.Count >= 4;
+
+    /// <summary>Document counts per template folder.</summary>
+    public Dictionary<string, int> DocumentCounts { get; init; } = [];
+
+    /// <summary>Total document count across all subfolders.</summary>
+    public int TotalDocumentCount => DocumentCounts.Values.Sum();
+
+    /// <summary>When the folder was last modified in SharePoint.</summary>
+    public DateTimeOffset? LastModified { get; init; }
+
+    /// <summary>When this folder was discovered/synced.</summary>
+    public DateTimeOffset SyncedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Linked ServiceNow application name (if mapped).</summary>
+    public string? LinkedServiceNowAppName { get; init; }
+
+    /// <summary>Linked application ID (if resolved).</summary>
+    public string? LinkedApplicationId { get; init; }
+}
+
+/// <summary>
+/// SharePoint configuration settings.
+/// </summary>
+public record SharePointConfig
+{
+    /// <summary>Root path for offerings documentation (e.g., "Documents/general/Offerings").</summary>
+    public string RootPath { get; init; } = "Documents/general/Offerings";
+
+    /// <summary>Expected template subfolder names.</summary>
+    public List<string> TemplateFolderNames { get; init; } =
+    [
+        "Project Documents",
+        "Promotional Content",
+        "Technical Documentation",
+        "User Documentation"
+    ];
+
+    /// <summary>Whether to recursively search for application folders.</summary>
+    public bool RecursiveSearch { get; init; } = true;
+
+    /// <summary>Maximum folder depth to search (0 = unlimited).</summary>
+    public int MaxSearchDepth { get; init; } = 3;
+
+    /// <summary>When this configuration was last updated.</summary>
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
 }

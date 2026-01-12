@@ -160,6 +160,60 @@
     font-size: 0.9rem;
 }
 
+/* Sync Progress */
+.sync-progress {
+    padding: 0.5rem 0;
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.progress-phase {
+    font-size: 0.85rem;
+    color: var(--header-text, #1a1a2e);
+    font-weight: 500;
+}
+
+.progress-percent {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--primary, #4361ee);
+}
+
+.progress-bar-container {
+    height: 8px;
+    background: var(--bg-muted, #e9ecef);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary, #4361ee), #6366f1);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.progress-current {
+    font-size: 0.75rem;
+    color: var(--text-muted, #6c757d);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.25rem;
+}
+
+.progress-counts {
+    font-size: 0.7rem;
+    color: var(--text-muted, #9ca3af);
+    text-align: right;
+}
+
 .source-footer {
     display: flex;
     justify-content: flex-end;

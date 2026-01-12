@@ -85,6 +85,11 @@ public interface IDataSyncOrchestrator
     /// Event raised when a conflict is detected.
     /// </summary>
     event EventHandler<DataConflictEventArgs>? ConflictDetected;
+
+    /// <summary>
+    /// Event raised when sync progress is updated.
+    /// </summary>
+    event EventHandler<SyncProgressEventArgs>? SyncProgressUpdated;
 }
 
 /// <summary>
@@ -196,4 +201,34 @@ public record SyncStatistics
 
     /// <summary>Statistics period end.</summary>
     public DateTimeOffset PeriodEnd { get; init; }
+}
+
+/// <summary>
+/// Event arguments for sync progress updates.
+/// </summary>
+public class SyncProgressEventArgs : EventArgs
+{
+    /// <summary>The job ID for this progress update.</summary>
+    public required string JobId { get; init; }
+
+    /// <summary>The data source being synced.</summary>
+    public required DataSourceType DataSource { get; init; }
+
+    /// <summary>Current phase of the sync operation.</summary>
+    public required string Phase { get; init; }
+
+    /// <summary>Total number of items to process.</summary>
+    public int TotalItems { get; init; }
+
+    /// <summary>Number of items processed so far.</summary>
+    public int ProcessedItems { get; init; }
+
+    /// <summary>Current item being processed (if applicable).</summary>
+    public string? CurrentItem { get; init; }
+
+    /// <summary>Progress percentage (0-100).</summary>
+    public int ProgressPercent => TotalItems > 0 ? (int)Math.Round((double)ProcessedItems / TotalItems * 100) : 0;
+
+    /// <summary>Optional status message.</summary>
+    public string? Message { get; init; }
 }

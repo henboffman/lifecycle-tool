@@ -64,6 +64,7 @@ public static class SecretKeys
     public const string SharePointSiteUrl = "lifecycle:datasource:sharepoint:siteurl";
     public const string SharePointClientId = "lifecycle:datasource:sharepoint:clientid";
     public const string SharePointClientSecret = "lifecycle:datasource:sharepoint:clientsecret";
+    public const string SharePointRootPath = "lifecycle:datasource:sharepoint:rootpath";
 
     // ServiceNow
     public const string ServiceNowInstance = "lifecycle:datasource:servicenow:instance";

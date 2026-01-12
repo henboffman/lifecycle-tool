@@ -286,9 +286,8 @@
     color: #ef4444;
 }
 
-.quality-score {
-    font-size: 0.75rem;
-    color: var(--color-text-muted);
+.readme-label {
+    font-size: 0.85rem;
 }
 
 /* Badge */

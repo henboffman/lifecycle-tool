@@ -153,18 +153,16 @@
                             <td>
                                 @if (repo.HasReadme)
                                 {
-                                    <span class="readme-status has-readme" title="Quality: @(repo.ReadmeQualityScore ?? 0)%">
+                                    <span class="readme-status has-readme" title="README file found">
                                         <i class="bi bi-check-circle-fill"></i>
-                                        @if (repo.ReadmeQualityScore.HasValue)
-                                        {
-                                            <span class="quality-score">@repo.ReadmeQualityScore%</span>
-                                        }
+                                        <span class="readme-label">Yes</span>
                                     </span>
                                 }
                                 else
                                 {
-                                    <span class="readme-status no-readme">
+                                    <span class="readme-status no-readme" title="No README file">
                                         <i class="bi bi-x-circle"></i>
+                                        <span class="readme-label">No</span>
                                     </span>
                                 }
                             </td>

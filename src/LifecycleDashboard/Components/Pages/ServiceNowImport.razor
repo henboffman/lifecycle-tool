@@ -1,0 +1,672 @@
+@page "/servicenow-import"
+@using LifecycleDashboard.Services
+@using System.Text
+@inject IMockDataService DataService
+@inject IJSRuntime JS
+
+<PageTitle>ServiceNow Import - Lifecycle Dashboard</PageTitle>
+
+<div class="import-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>ServiceNow CSV Import</h1>
+            <p class="subtitle">Import business applications from ServiceNow CSV export</p>
+        </div>
+    </header>
+
+    <!-- Step 1: File Upload -->
+    <section class="import-section">
+        <div class="section-header">
+            <span class="step-number @(_currentStep >= 1 ? "active" : "")">1</span>
+            <h2>Upload CSV File</h2>
+        </div>
+
+        <div class="upload-area @(_csvFile != null ? "has-file" : "")" @ondragover:preventDefault @ondrop="HandleDrop">
+            @if (_csvFile == null)
+            {
+                <i class="bi bi-cloud-upload upload-icon"></i>
+                <p>Drag and drop your ServiceNow CSV export here, or</p>
+                <InputFile OnChange="HandleFileSelected" accept=".csv" class="file-input" id="csvFileInput" />
+                <label for="csvFileInput" class="btn btn-primary">Choose File</label>
+            }
+            else
+            {
+                <i class="bi bi-file-earmark-check upload-icon success"></i>
+                <p class="filename">@_csvFile.Name</p>
+                <p class="file-info">@FormatFileSize(_csvFile.Size) - @_detectedColumns.Count columns detected</p>
+                <button class="btn btn-outline" @onclick="ClearFile">
+                    <i class="bi bi-x"></i> Remove
+                </button>
+            }
+        </div>
+
+        @if (_uploadError != null)
+        {
+            <div class="error-message">
+                <i class="bi bi-exclamation-triangle"></i> @_uploadError
+            </div>
+        }
+    </section>
+
+    @if (_currentStep >= 2)
+    {
+        <!-- Step 2: Column Mapping -->
+        <section class="import-section">
+            <div class="section-header">
+                <span class="step-number active">2</span>
+                <h2>Map CSV Columns to Application Fields</h2>
+                @if (_savedMapping != null)
+                {
+                    <span class="mapping-saved-badge">
+                        <i class="bi bi-check-circle"></i> Previous mapping loaded
+                    </span>
+                }
+            </div>
+
+            <p class="section-description">
+                Select which CSV column corresponds to each application property.
+                Required fields are marked with <span class="required-marker">*</span>
+            </p>
+
+            <div class="mapping-grid">
+                @foreach (var field in _mappingFields)
+                {
+                    <div class="mapping-row @(field.IsRequired && string.IsNullOrEmpty(GetMappingValue(field.PropertyName)) ? "missing-required" : "")">
+                        <label class="field-label">
+                            @field.DisplayName
+                            @if (field.IsRequired)
+                            {
+                                <span class="required-marker">*</span>
+                            }
+                        </label>
+                        <select class="mapping-select"
+                                value="@GetMappingValue(field.PropertyName)"
+                                @onchange="e => SetMappingValue(field.PropertyName, e.Value?.ToString())">
+                            <option value="">-- Select Column --</option>
+                            @foreach (var col in _detectedColumns)
+                            {
+                                <option value="@col">@col</option>
+                            }
+                        </select>
+                        @if (!string.IsNullOrEmpty(GetMappingValue(field.PropertyName)))
+                        {
+                            <span class="sample-value" title="Sample value from first row">
+                                @GetSampleValue(GetMappingValue(field.PropertyName)!)
+                            </span>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="mapping-actions">
+                <button class="btn btn-outline" @onclick="SaveMapping" disabled="@(!HasRequiredMappings())">
+                    <i class="bi bi-save"></i> Save Mapping
+                </button>
+                <button class="btn btn-outline" @onclick="ClearMapping">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reset
+                </button>
+                <button class="btn btn-primary" @onclick="GeneratePreview" disabled="@(!HasRequiredMappings())">
+                    <i class="bi bi-eye"></i> Preview Import
+                </button>
+            </div>
+        </section>
+    }
+
+    @if (_currentStep >= 3 && _previewData.Count > 0)
+    {
+        <!-- Step 3: Preview -->
+        <section class="import-section">
+            <div class="section-header">
+                <span class="step-number active">3</span>
+                <h2>Preview Import Data</h2>
+            </div>
+
+            <div class="preview-stats">
+                <div class="stat">
+                    <span class="stat-value">@_totalRows</span>
+                    <span class="stat-label">Total Rows</span>
+                </div>
+                <div class="stat success">
+                    <span class="stat-value">@_previewData.Count</span>
+                    <span class="stat-label">Valid</span>
+                </div>
+                <div class="stat warning">
+                    <span class="stat-value">@_parseWarnings.Count</span>
+                    <span class="stat-label">Warnings</span>
+                </div>
+                <div class="stat error">
+                    <span class="stat-value">@_parseErrors.Count</span>
+                    <span class="stat-label">Errors</span>
+                </div>
+            </div>
+
+            @if (_parseWarnings.Count > 0 || _parseErrors.Count > 0)
+            {
+                <div class="parse-issues">
+                    @foreach (var error in _parseErrors.Take(5))
+                    {
+                        <div class="issue error">
+                            <i class="bi bi-x-circle"></i>
+                            <span>Row @error.RowNumber: @error.Message</span>
+                        </div>
+                    }
+                    @foreach (var warning in _parseWarnings.Take(5))
+                    {
+                        <div class="issue warning">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <span>Row @warning.RowNumber: @warning.Message</span>
+                        </div>
+                    }
+                    @if (_parseErrors.Count + _parseWarnings.Count > 10)
+                    {
+                        <div class="more-issues">
+                            ... and @(_parseErrors.Count + _parseWarnings.Count - 10) more issues
+                        </div>
+                    }
+                </div>
+            }
+
+            <div class="preview-table-container">
+                <table class="preview-table">
+                    <thead>
+                        <tr>
+                            <th>ServiceNow ID</th>
+                            <th>Name</th>
+                            <th>Capability</th>
+                            <th>Owner</th>
+                            <th>Tech Lead</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var app in _previewData.Take(20))
+                        {
+                            <tr>
+                                <td class="mono">@app.ServiceNowId</td>
+                                <td>@app.Name</td>
+                                <td>@(app.Capability ?? "-")</td>
+                                <td>@(app.OwnerName ?? "-")</td>
+                                <td>@(app.TechnicalLeadName ?? "-")</td>
+                                <td>@(app.Status ?? "-")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_previewData.Count > 20)
+            {
+                <div class="preview-footer">
+                    Showing 20 of @_previewData.Count applications
+                </div>
+            }
+
+            <div class="import-actions">
+                <button class="btn btn-outline" @onclick="() => _currentStep = 2">
+                    <i class="bi bi-arrow-left"></i> Back to Mapping
+                </button>
+                <button class="btn btn-primary btn-lg" @onclick="ExecuteImport" disabled="@(_importing || _previewData.Count == 0)">
+                    @if (_importing)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Importing...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-download"></i>
+                        <span>Import @_previewData.Count Applications</span>
+                    }
+                </button>
+            </div>
+        </section>
+    }
+
+    @if (_importComplete)
+    {
+        <!-- Step 4: Complete -->
+        <section class="import-section success-section">
+            <div class="success-content">
+                <i class="bi bi-check-circle-fill success-icon"></i>
+                <h2>Import Complete!</h2>
+                <p>Successfully imported @_importedCount applications from ServiceNow.</p>
+                <div class="success-actions">
+                    <button class="btn btn-outline" @onclick="ResetImport">
+                        <i class="bi bi-arrow-repeat"></i> Import Another File
+                    </button>
+                    <a href="/applications" class="btn btn-primary">
+                        <i class="bi bi-arrow-right"></i> View Applications
+                    </a>
+                </div>
+            </div>
+        </section>
+    }
+
+    <!-- Previously Imported Data -->
+    @if (_existingImports.Count > 0 && !_importComplete)
+    {
+        <section class="import-section existing-section">
+            <div class="section-header">
+                <h2>Previously Imported</h2>
+                <span class="import-count">@_existingImports.Count applications</span>
+            </div>
+            <p class="section-description">
+                You have existing ServiceNow data. New imports will update existing records by ServiceNow ID.
+            </p>
+            <button class="btn btn-outline btn-sm" @onclick="ClearExistingData">
+                <i class="bi bi-trash"></i> Clear All Imported Data
+            </button>
+        </section>
+    }
+</div>
+
+@code {
+    private IBrowserFile? _csvFile;
+    private List<string> _detectedColumns = [];
+    private List<Dictionary<string, string>> _csvRows = [];
+    private string? _uploadError;
+
+    private int _currentStep = 1;
+    private ServiceNowColumnMapping? _savedMapping;
+    private Dictionary<string, string?> _currentMapping = new();
+
+    private List<ImportedServiceNowApplication> _previewData = [];
+    private List<ImportedServiceNowApplication> _existingImports = [];
+    private List<ParseIssue> _parseErrors = [];
+    private List<ParseIssue> _parseWarnings = [];
+    private int _totalRows;
+
+    private bool _importing;
+    private bool _importComplete;
+    private int _importedCount;
+
+    private readonly List<MappingField> _mappingFields =
+    [
+        new("ServiceNowIdColumn", "ServiceNow ID", true),
+        new("NameColumn", "Application Name", true),
+        new("DescriptionColumn", "Description", false),
+        new("CapabilityColumn", "Capability/Business Area", false),
+        new("StatusColumn", "Status", false),
+        new("OwnerIdColumn", "Owner ID", false),
+        new("OwnerNameColumn", "Owner Name", false),
+        new("TechnicalLeadIdColumn", "Technical Lead ID", false),
+        new("TechnicalLeadNameColumn", "Technical Lead Name", false),
+        new("BusinessOwnerIdColumn", "Business Owner ID", false),
+        new("BusinessOwnerNameColumn", "Business Owner Name", false),
+        new("RepositoryUrlColumn", "Repository URL", false),
+        new("DocumentationUrlColumn", "Documentation URL", false),
+        new("EnvironmentColumn", "Environment", false),
+        new("CriticalityColumn", "Criticality", false),
+        new("SupportGroupColumn", "Support Group", false)
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _savedMapping = await DataService.GetServiceNowColumnMappingAsync();
+        _existingImports = (await DataService.GetImportedServiceNowApplicationsAsync()).ToList();
+
+        if (_savedMapping != null)
+        {
+            LoadMappingFromSaved(_savedMapping);
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        _uploadError = null;
+        _csvFile = e.File;
+
+        if (_csvFile.Size > 50 * 1024 * 1024) // 50MB limit
+        {
+            _uploadError = "File too large. Maximum size is 50MB.";
+            _csvFile = null;
+            return;
+        }
+
+        await ParseCsvFile();
+    }
+
+    private async Task HandleDrop()
+    {
+        // Note: Drag and drop requires additional JS interop for full implementation
+        await Task.CompletedTask;
+    }
+
+    private async Task ParseCsvFile()
+    {
+        if (_csvFile == null) return;
+
+        try
+        {
+            using var stream = _csvFile.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            var content = await reader.ReadToEndAsync();
+            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            if (lines.Length == 0)
+            {
+                _uploadError = "CSV file is empty.";
+                return;
+            }
+
+            // Parse header row
+            _detectedColumns = ParseCsvLine(lines[0]).ToList();
+
+            if (_detectedColumns.Count == 0)
+            {
+                _uploadError = "Could not detect columns in CSV header.";
+                return;
+            }
+
+            // Parse data rows
+            _csvRows.Clear();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var values = ParseCsvLine(lines[i]);
+                if (values.Count > 0)
+                {
+                    var row = new Dictionary<string, string>();
+                    for (int j = 0; j < Math.Min(_detectedColumns.Count, values.Count); j++)
+                    {
+                        row[_detectedColumns[j]] = values[j];
+                    }
+                    _csvRows.Add(row);
+                }
+            }
+
+            _totalRows = _csvRows.Count;
+            _currentStep = 2;
+
+            // Try to auto-map columns based on saved mapping or common patterns
+            if (_savedMapping != null)
+            {
+                LoadMappingFromSaved(_savedMapping);
+            }
+            else
+            {
+                AutoDetectMapping();
+            }
+        }
+        catch (Exception ex)
+        {
+            _uploadError = $"Error parsing CSV: {ex.Message}";
+        }
+    }
+
+    private List<string> ParseCsvLine(string line)
+    {
+        var values = new List<string>();
+        var current = new StringBuilder();
+        bool inQuotes = false;
+
+        foreach (char c in line)
+        {
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+            }
+            else if (c == ',' && !inQuotes)
+            {
+                values.Add(current.ToString().Trim());
+                current.Clear();
+            }
+            else if (c != '\r')
+            {
+                current.Append(c);
+            }
+        }
+
+        values.Add(current.ToString().Trim());
+        return values;
+    }
+
+    private void LoadMappingFromSaved(ServiceNowColumnMapping mapping)
+    {
+        _currentMapping["ServiceNowIdColumn"] = mapping.ServiceNowIdColumn;
+        _currentMapping["NameColumn"] = mapping.NameColumn;
+        _currentMapping["DescriptionColumn"] = mapping.DescriptionColumn;
+        _currentMapping["CapabilityColumn"] = mapping.CapabilityColumn;
+        _currentMapping["StatusColumn"] = mapping.StatusColumn;
+        _currentMapping["OwnerIdColumn"] = mapping.OwnerIdColumn;
+        _currentMapping["OwnerNameColumn"] = mapping.OwnerNameColumn;
+        _currentMapping["TechnicalLeadIdColumn"] = mapping.TechnicalLeadIdColumn;
+        _currentMapping["TechnicalLeadNameColumn"] = mapping.TechnicalLeadNameColumn;
+        _currentMapping["BusinessOwnerIdColumn"] = mapping.BusinessOwnerIdColumn;
+        _currentMapping["BusinessOwnerNameColumn"] = mapping.BusinessOwnerNameColumn;
+        _currentMapping["RepositoryUrlColumn"] = mapping.RepositoryUrlColumn;
+        _currentMapping["DocumentationUrlColumn"] = mapping.DocumentationUrlColumn;
+        _currentMapping["EnvironmentColumn"] = mapping.EnvironmentColumn;
+        _currentMapping["CriticalityColumn"] = mapping.CriticalityColumn;
+        _currentMapping["SupportGroupColumn"] = mapping.SupportGroupColumn;
+    }
+
+    private void AutoDetectMapping()
+    {
+        var patterns = new Dictionary<string, string[]>
+        {
+            ["ServiceNowIdColumn"] = ["u_application_id", "application_id", "ci_id", "sys_id", "id"],
+            ["NameColumn"] = ["name", "application_name", "app_name", "display_name"],
+            ["DescriptionColumn"] = ["description", "short_description", "desc"],
+            ["CapabilityColumn"] = ["capability", "u_capability", "business_area", "category"],
+            ["StatusColumn"] = ["status", "install_status", "state"],
+            ["OwnerIdColumn"] = ["owner_id", "owned_by.employee_number", "owner.id"],
+            ["OwnerNameColumn"] = ["owner_name", "owned_by.name", "owner", "owned_by"],
+            ["TechnicalLeadIdColumn"] = ["tech_lead_id", "u_technical_lead.employee_number", "technical_lead.id"],
+            ["TechnicalLeadNameColumn"] = ["tech_lead_name", "u_technical_lead.name", "technical_lead", "tech_lead"],
+        };
+
+        foreach (var (field, candidatePatterns) in patterns)
+        {
+            foreach (var pattern in candidatePatterns)
+            {
+                var match = _detectedColumns.FirstOrDefault(c =>
+                    c.Equals(pattern, StringComparison.OrdinalIgnoreCase) ||
+                    c.Replace("_", "").Equals(pattern.Replace("_", ""), StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    _currentMapping[field] = match;
+                    break;
+                }
+            }
+        }
+    }
+
+    private string? GetMappingValue(string propertyName)
+    {
+        return _currentMapping.TryGetValue(propertyName, out var value) ? value : null;
+    }
+
+    private void SetMappingValue(string propertyName, string? value)
+    {
+        _currentMapping[propertyName] = value;
+    }
+
+    private string GetSampleValue(string columnName)
+    {
+        if (_csvRows.Count == 0) return "";
+        if (_csvRows[0].TryGetValue(columnName, out var value))
+        {
+            return value.Length > 40 ? value[..40] + "..." : value;
+        }
+        return "";
+    }
+
+    private bool HasRequiredMappings()
+    {
+        return !string.IsNullOrEmpty(GetMappingValue("ServiceNowIdColumn")) &&
+               !string.IsNullOrEmpty(GetMappingValue("NameColumn"));
+    }
+
+    private async Task SaveMapping()
+    {
+        var mapping = new ServiceNowColumnMapping
+        {
+            ServiceNowIdColumn = GetMappingValue("ServiceNowIdColumn"),
+            NameColumn = GetMappingValue("NameColumn"),
+            DescriptionColumn = GetMappingValue("DescriptionColumn"),
+            CapabilityColumn = GetMappingValue("CapabilityColumn"),
+            StatusColumn = GetMappingValue("StatusColumn"),
+            OwnerIdColumn = GetMappingValue("OwnerIdColumn"),
+            OwnerNameColumn = GetMappingValue("OwnerNameColumn"),
+            TechnicalLeadIdColumn = GetMappingValue("TechnicalLeadIdColumn"),
+            TechnicalLeadNameColumn = GetMappingValue("TechnicalLeadNameColumn"),
+            BusinessOwnerIdColumn = GetMappingValue("BusinessOwnerIdColumn"),
+            BusinessOwnerNameColumn = GetMappingValue("BusinessOwnerNameColumn"),
+            RepositoryUrlColumn = GetMappingValue("RepositoryUrlColumn"),
+            DocumentationUrlColumn = GetMappingValue("DocumentationUrlColumn"),
+            EnvironmentColumn = GetMappingValue("EnvironmentColumn"),
+            CriticalityColumn = GetMappingValue("CriticalityColumn"),
+            SupportGroupColumn = GetMappingValue("SupportGroupColumn")
+        };
+
+        await DataService.SaveServiceNowColumnMappingAsync(mapping);
+        _savedMapping = mapping;
+    }
+
+    private void ClearMapping()
+    {
+        _currentMapping.Clear();
+    }
+
+    private void GeneratePreview()
+    {
+        _previewData.Clear();
+        _parseErrors.Clear();
+        _parseWarnings.Clear();
+
+        var snIdCol = GetMappingValue("ServiceNowIdColumn");
+        var nameCol = GetMappingValue("NameColumn");
+
+        if (string.IsNullOrEmpty(snIdCol) || string.IsNullOrEmpty(nameCol))
+        {
+            return;
+        }
+
+        for (int i = 0; i < _csvRows.Count; i++)
+        {
+            var row = _csvRows[i];
+            var rowNum = i + 2; // 1-indexed, plus header row
+
+            // Get required fields
+            var serviceNowId = GetCsvValue(row, snIdCol);
+            var name = GetCsvValue(row, nameCol);
+
+            if (string.IsNullOrWhiteSpace(serviceNowId))
+            {
+                _parseErrors.Add(new ParseIssue(rowNum, "Missing ServiceNow ID"));
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                _parseErrors.Add(new ParseIssue(rowNum, "Missing Application Name"));
+                continue;
+            }
+
+            // Check for duplicates in preview
+            if (_previewData.Any(p => p.ServiceNowId == serviceNowId))
+            {
+                _parseWarnings.Add(new ParseIssue(rowNum, $"Duplicate ServiceNow ID: {serviceNowId}"));
+                continue;
+            }
+
+            var app = new ImportedServiceNowApplication
+            {
+                Id = Guid.NewGuid().ToString(),
+                ServiceNowId = serviceNowId,
+                Name = name,
+                Description = GetCsvValue(row, GetMappingValue("DescriptionColumn")),
+                Capability = GetCsvValue(row, GetMappingValue("CapabilityColumn")),
+                Status = GetCsvValue(row, GetMappingValue("StatusColumn")),
+                OwnerId = GetCsvValue(row, GetMappingValue("OwnerIdColumn")),
+                OwnerName = GetCsvValue(row, GetMappingValue("OwnerNameColumn")),
+                TechnicalLeadId = GetCsvValue(row, GetMappingValue("TechnicalLeadIdColumn")),
+                TechnicalLeadName = GetCsvValue(row, GetMappingValue("TechnicalLeadNameColumn")),
+                BusinessOwnerId = GetCsvValue(row, GetMappingValue("BusinessOwnerIdColumn")),
+                BusinessOwnerName = GetCsvValue(row, GetMappingValue("BusinessOwnerNameColumn")),
+                RepositoryUrl = GetCsvValue(row, GetMappingValue("RepositoryUrlColumn")),
+                DocumentationUrl = GetCsvValue(row, GetMappingValue("DocumentationUrlColumn")),
+                Environment = GetCsvValue(row, GetMappingValue("EnvironmentColumn")),
+                Criticality = GetCsvValue(row, GetMappingValue("CriticalityColumn")),
+                SupportGroup = GetCsvValue(row, GetMappingValue("SupportGroupColumn")),
+                RawCsvValues = row,
+                ImportedAt = DateTimeOffset.UtcNow
+            };
+
+            _previewData.Add(app);
+        }
+
+        _currentStep = 3;
+    }
+
+    private string? GetCsvValue(Dictionary<string, string> row, string? columnName)
+    {
+        if (string.IsNullOrEmpty(columnName)) return null;
+        return row.TryGetValue(columnName, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+    }
+
+    private async Task ExecuteImport()
+    {
+        if (_previewData.Count == 0) return;
+
+        _importing = true;
+        StateHasChanged();
+
+        try
+        {
+            await DataService.StoreServiceNowApplicationsAsync(_previewData);
+            _importedCount = _previewData.Count;
+            _importComplete = true;
+            _existingImports = (await DataService.GetImportedServiceNowApplicationsAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            _uploadError = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+
+    private void ClearFile()
+    {
+        _csvFile = null;
+        _detectedColumns.Clear();
+        _csvRows.Clear();
+        _previewData.Clear();
+        _parseErrors.Clear();
+        _parseWarnings.Clear();
+        _currentStep = 1;
+        _uploadError = null;
+    }
+
+    private void ResetImport()
+    {
+        ClearFile();
+        _importComplete = false;
+        _importedCount = 0;
+    }
+
+    private async Task ClearExistingData()
+    {
+        await DataService.ClearServiceNowApplicationsAsync();
+        _existingImports.Clear();
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+
+    private record MappingField(string PropertyName, string DisplayName, bool IsRequired);
+    private record ParseIssue(int RowNumber, string Message);
+}

@@ -1261,9 +1261,10 @@
                                     <label>Site URL</label>
                                     <input type="url" class="form-input" @bind="_dsFormSiteUrl" placeholder="https://company.sharepoint.com/sites/applications" />
                                 </div>
-                                <div class="form-group">
-                                    <label>List Name</label>
-                                    <input type="text" class="form-input" @bind="_dsFormListName" placeholder="e.g., Applications" />
+                                <div class="form-group wide">
+                                    <label>Root Path</label>
+                                    <input type="text" class="form-input" @bind="_dsFormRootPath" placeholder="Documents/general/Offerings" />
+                                    <small class="form-hint">Path to offerings folder (e.g., Documents/general/Offerings)</small>
                                 </div>
                                 break;
 
@@ -1539,7 +1540,7 @@
     private string _dsFormUsername = "";
     private string _dsFormApiKey = "";
     private string _dsFormSiteUrl = "";
-    private string _dsFormListName = "";
+    private string _dsFormRootPath = "";
     private string _dsFormInstance = "";
     private string _dsFormTable = "";
     private string _dsFormConnectionString = "";
@@ -2407,7 +2408,7 @@
         _dsFormOrganization = settings?.Organization ?? "";
         _dsFormProject = settings?.Project ?? "";
         _dsFormSiteUrl = settings?.SiteUrl ?? "";
-        _dsFormListName = settings?.ListName ?? "";
+        _dsFormRootPath = settings?.RootPath ?? "Documents/general/Offerings";
         _dsFormInstance = settings?.Instance ?? "";
         _dsFormTable = settings?.Table ?? "";
 
@@ -2460,6 +2461,8 @@
             case DataSourceType.SharePoint:
                 if (!string.IsNullOrEmpty(_dsFormSiteUrl))
                     await SecureStorage.StoreSecretAsync(SecretKeys.SharePointSiteUrl, _dsFormSiteUrl);
+                if (!string.IsNullOrEmpty(_dsFormRootPath))
+                    await SecureStorage.StoreSecretAsync(SecretKeys.SharePointRootPath, _dsFormRootPath);
                 if (!string.IsNullOrEmpty(_dsFormApiKey))
                 {
                     // For SharePoint, ApiKey field is used for Client ID
@@ -2495,7 +2498,7 @@
             Organization = _dsFormOrganization,
             Project = _dsFormProject,
             SiteUrl = _dsFormSiteUrl,
-            ListName = _dsFormListName,
+            RootPath = _dsFormRootPath,
             Instance = _dsFormInstance,
             Table = _dsFormTable
             // ApiKey and ConnectionString are in secure storage

@@ -2692,7 +2692,7 @@ public class MockDataService : IMockDataService
                 ConnectionSettings = new DataSourceConnectionSettings
                 {
                     SiteUrl = "",
-                    ListName = ""
+                    RootPath = "Documents/general/Offerings"
                 },
                 LastSyncStatus = "Not configured"
             },
@@ -2850,6 +2850,221 @@ public class MockDataService : IMockDataService
     public Task ClearSyncedRepositoriesAsync()
     {
         _syncedRepositories.Clear();
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region ServiceNow Application Storage
+
+    private readonly List<ImportedServiceNowApplication> _importedServiceNowApps = [];
+    private ServiceNowColumnMapping? _serviceNowColumnMapping;
+
+    public Task<IReadOnlyList<ImportedServiceNowApplication>> GetImportedServiceNowApplicationsAsync()
+    {
+        return Task.FromResult<IReadOnlyList<ImportedServiceNowApplication>>(
+            _importedServiceNowApps.OrderBy(a => a.Name).ToList());
+    }
+
+    public Task StoreServiceNowApplicationsAsync(IEnumerable<ImportedServiceNowApplication> applications)
+    {
+        foreach (var app in applications)
+        {
+            var existingIndex = _importedServiceNowApps.FindIndex(a => a.ServiceNowId == app.ServiceNowId);
+            if (existingIndex >= 0)
+            {
+                _importedServiceNowApps[existingIndex] = app;
+            }
+            else
+            {
+                _importedServiceNowApps.Add(app);
+            }
+        }
+
+        RecordAuditLogAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            EventType = "ServiceNowApplicationsImported",
+            Category = "Sync",
+            Message = $"Imported {applications.Count()} applications from ServiceNow CSV",
+            UserId = "system",
+            UserName = "System",
+            EntityType = "ServiceNowApplication"
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task ClearServiceNowApplicationsAsync()
+    {
+        _importedServiceNowApps.Clear();
+        return Task.CompletedTask;
+    }
+
+    public Task<ServiceNowColumnMapping?> GetServiceNowColumnMappingAsync()
+    {
+        return Task.FromResult(_serviceNowColumnMapping);
+    }
+
+    public Task SaveServiceNowColumnMappingAsync(ServiceNowColumnMapping mapping)
+    {
+        _serviceNowColumnMapping = mapping with { SavedAt = DateTimeOffset.UtcNow };
+
+        RecordAuditLogAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            EventType = "ServiceNowMappingSaved",
+            Category = "Config",
+            Message = "ServiceNow CSV column mapping was saved",
+            UserId = "system",
+            UserName = "System",
+            EntityType = "ServiceNowColumnMapping"
+        });
+
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region App Name Mapping Storage
+
+    private readonly List<AppNameMapping> _appNameMappings = [];
+    private AppNameMappingConfig? _appNameMappingConfig;
+
+    public Task<IReadOnlyList<AppNameMapping>> GetAppNameMappingsAsync()
+    {
+        return Task.FromResult<IReadOnlyList<AppNameMapping>>(
+            _appNameMappings.OrderBy(m => m.ServiceNowAppName).ToList());
+    }
+
+    public Task StoreAppNameMappingsAsync(IEnumerable<AppNameMapping> mappings)
+    {
+        foreach (var mapping in mappings)
+        {
+            // Check for existing mapping by ServiceNow name
+            var existingIndex = _appNameMappings.FindIndex(m =>
+                m.ServiceNowAppName.Equals(mapping.ServiceNowAppName, StringComparison.OrdinalIgnoreCase));
+
+            if (existingIndex >= 0)
+            {
+                _appNameMappings[existingIndex] = mapping with { UpdatedAt = DateTimeOffset.UtcNow };
+            }
+            else
+            {
+                _appNameMappings.Add(mapping);
+            }
+        }
+
+        RecordAuditLogAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            EventType = "AppNameMappingsImported",
+            Category = "DataSync",
+            Message = $"Imported {mappings.Count()} app name mappings",
+            UserId = "system",
+            UserName = "System",
+            EntityType = "AppNameMapping",
+            Details = new Dictionary<string, string> { ["Count"] = mappings.Count().ToString() }
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task<AppNameMapping?> GetAppNameMappingByServiceNowNameAsync(string serviceNowAppName)
+    {
+        var mapping = _appNameMappings.FirstOrDefault(m =>
+            m.ServiceNowAppName.Equals(serviceNowAppName, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(mapping);
+    }
+
+    public Task<AppNameMapping?> GetAppNameMappingBySharePointFolderAsync(string sharePointFolderName)
+    {
+        var mapping = _appNameMappings.FirstOrDefault(m =>
+            m.SharePointFolderName?.Equals(sharePointFolderName, StringComparison.OrdinalIgnoreCase) == true);
+        return Task.FromResult(mapping);
+    }
+
+    public Task<AppNameMapping?> GetAppNameMappingByRepoNameAsync(string repoName)
+    {
+        var mapping = _appNameMappings.FirstOrDefault(m =>
+            m.AzureDevOpsRepoNames.Any(r => r.Equals(repoName, StringComparison.OrdinalIgnoreCase)));
+        return Task.FromResult(mapping);
+    }
+
+    public Task ClearAppNameMappingsAsync()
+    {
+        _appNameMappings.Clear();
+        return Task.CompletedTask;
+    }
+
+    public Task<AppNameMappingConfig?> GetAppNameMappingConfigAsync()
+    {
+        return Task.FromResult(_appNameMappingConfig);
+    }
+
+    public Task SaveAppNameMappingConfigAsync(AppNameMappingConfig config)
+    {
+        _appNameMappingConfig = config with { SavedAt = DateTimeOffset.UtcNow };
+
+        RecordAuditLogAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            EventType = "AppNameMappingConfigSaved",
+            Category = "Config",
+            Message = "App name mapping CSV column configuration was saved",
+            UserId = "system",
+            UserName = "System",
+            EntityType = "AppNameMappingConfig"
+        });
+
+        return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region SharePoint Folder Storage
+
+    private readonly List<DiscoveredSharePointFolder> _discoveredSharePointFolders = [];
+
+    public Task<IReadOnlyList<DiscoveredSharePointFolder>> GetDiscoveredSharePointFoldersAsync()
+    {
+        return Task.FromResult<IReadOnlyList<DiscoveredSharePointFolder>>(
+            _discoveredSharePointFolders.OrderBy(f => f.Capability).ThenBy(f => f.Name).ToList());
+    }
+
+    public Task StoreDiscoveredSharePointFoldersAsync(IEnumerable<DiscoveredSharePointFolder> folders)
+    {
+        foreach (var folder in folders)
+        {
+            var existingIndex = _discoveredSharePointFolders.FindIndex(f => f.FullPath == folder.FullPath);
+            if (existingIndex >= 0)
+            {
+                _discoveredSharePointFolders[existingIndex] = folder with { SyncedAt = DateTimeOffset.UtcNow };
+            }
+            else
+            {
+                _discoveredSharePointFolders.Add(folder);
+            }
+        }
+
+        RecordAuditLogAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            EventType = "SharePointFoldersSynced",
+            Category = "DataSync",
+            Message = $"Synced {folders.Count()} SharePoint folders",
+            UserId = "system",
+            UserName = "System",
+            EntityType = "DiscoveredSharePointFolder",
+            Details = new Dictionary<string, string> { ["Count"] = folders.Count().ToString() }
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task ClearDiscoveredSharePointFoldersAsync()
+    {
+        _discoveredSharePointFolders.Clear();
         return Task.CompletedTask;
     }
 

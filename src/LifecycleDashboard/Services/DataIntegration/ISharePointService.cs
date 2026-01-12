@@ -178,8 +178,8 @@ public record SharePointDocument
 /// </summary>
 public static class SharePointFolders
 {
-    /// <summary>Root path for offerings documentation.</summary>
-    public const string OfferingsRoot = "Documents/General/Offerings";
+    /// <summary>Default root path for offerings documentation (Documents/general/Offerings).</summary>
+    public const string DefaultOfferingsRoot = "Documents/general/Offerings";
 
     /// <summary>Project Documents template folder name.</summary>
     public const string ProjectDocuments = "Project Documents";
@@ -201,4 +201,16 @@ public static class SharePointFolders
         TechnicalDocumentation,
         UserDocumentation
     ];
+
+    /// <summary>
+    /// Gets the full path to an application folder.
+    /// </summary>
+    public static string GetApplicationFolderPath(string rootPath, string capability, string appName) =>
+        $"{rootPath}/{capability}/{appName}";
+
+    /// <summary>
+    /// Gets the full path to a template subfolder within an application folder.
+    /// </summary>
+    public static string GetTemplateFolderPath(string rootPath, string capability, string appName, string templateFolder) =>
+        $"{rootPath}/{capability}/{appName}/{templateFolder}";
 }

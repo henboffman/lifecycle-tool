@@ -27,6 +27,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
     public event EventHandler<SyncJobEventArgs>? SyncJobCompleted;
     public event EventHandler<SyncJobEventArgs>? SyncJobFailed;
     public event EventHandler<DataConflictEventArgs>? ConflictDetected;
+    public event EventHandler<SyncProgressEventArgs>? SyncProgressUpdated;
 
     public DataSyncOrchestrator(
         IAzureDevOpsService azureDevOpsService,
@@ -142,10 +143,10 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         {
             var result = dataSource switch
             {
-                DataSourceType.AzureDevOps => await SyncAzureDevOpsAsync(cts.Token),
-                DataSourceType.SharePoint => await SyncSharePointAsync(cts.Token),
-                DataSourceType.ServiceNow => await SyncServiceNowAsync(cts.Token),
-                DataSourceType.IisDatabase => await SyncIisDatabaseAsync(cts.Token),
+                DataSourceType.AzureDevOps => await SyncAzureDevOpsAsync(jobId, cts.Token),
+                DataSourceType.SharePoint => await SyncSharePointAsync(jobId, cts.Token),
+                DataSourceType.ServiceNow => await SyncServiceNowAsync(jobId, cts.Token),
+                DataSourceType.IisDatabase => await SyncIisDatabaseAsync(jobId, cts.Token),
                 _ => DataSyncResult.Failed(dataSource, startTime, $"Unknown data source: {dataSource}")
             };
 
@@ -421,7 +422,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         }
     }
 
-    private async Task<DataSyncResult> SyncAzureDevOpsAsync(CancellationToken cancellationToken)
+    private async Task<DataSyncResult> SyncAzureDevOpsAsync(string jobId, CancellationToken cancellationToken)
     {
         var startTime = DateTimeOffset.UtcNow;
         var errors = new List<SyncError>();
@@ -429,12 +430,29 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
 
         _logger.LogInformation("Starting Azure DevOps sync...");
 
+        // Helper to report progress
+        void ReportProgress(string phase, int processed, int total, string? currentItem = null, string? message = null)
+        {
+            SyncProgressUpdated?.Invoke(this, new SyncProgressEventArgs
+            {
+                JobId = jobId,
+                DataSource = DataSourceType.AzureDevOps,
+                Phase = phase,
+                ProcessedItems = processed,
+                TotalItems = total,
+                CurrentItem = currentItem,
+                Message = message
+            });
+        }
+
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             // Step 1: Get all repositories from Azure DevOps
             _logger.LogInformation("Fetching repositories from Azure DevOps...");
+            ReportProgress("Fetching repositories", 0, 0, message: "Retrieving repository list from Azure DevOps...");
+
             var reposResult = await _azureDevOpsService.GetRepositoriesAsync();
 
             if (!reposResult.Success)
@@ -446,12 +464,16 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
 
             var repos = reposResult.Data ?? [];
             _logger.LogInformation("Found {Count} repositories in Azure DevOps", repos.Count);
+            ReportProgress("Processing repositories", 0, repos.Count, message: $"Found {repos.Count} repositories");
 
             // Step 2: Convert each repo to a SyncedRepository and store it
+            var processedCount = 0;
             foreach (var repo in repos)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                _logger.LogInformation("Processing repository: {RepoName}", repo.Name);
+                processedCount++;
+                _logger.LogInformation("Processing repository: {RepoName} ({Current}/{Total})", repo.Name, processedCount, repos.Count);
+                ReportProgress("Processing repositories", processedCount, repos.Count, repo.Name);
 
                 var syncedRepo = new SyncedRepository
                 {
@@ -576,16 +598,35 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         }
     }
 
-    private async Task<DataSyncResult> SyncSharePointAsync(CancellationToken cancellationToken)
+    private async Task<DataSyncResult> SyncSharePointAsync(string jobId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        SyncProgressUpdated?.Invoke(this, new SyncProgressEventArgs
+        {
+            JobId = jobId,
+            DataSource = DataSourceType.SharePoint,
+            Phase = "Syncing documentation",
+            ProcessedItems = 0,
+            TotalItems = 0,
+            Message = "Synchronizing documentation status..."
+        });
         return await _sharePointService.SyncDocumentationStatusAsync();
     }
 
-    private async Task<DataSyncResult> SyncServiceNowAsync(CancellationToken cancellationToken)
+    private async Task<DataSyncResult> SyncServiceNowAsync(string jobId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var startTime = DateTimeOffset.UtcNow;
+
+        SyncProgressUpdated?.Invoke(this, new SyncProgressEventArgs
+        {
+            JobId = jobId,
+            DataSource = DataSourceType.ServiceNow,
+            Phase = "Loading CSV",
+            ProcessedItems = 0,
+            TotalItems = 0,
+            Message = "Loading ServiceNow CSV files..."
+        });
 
         // Get CSV directory from ServiceNow instance configuration
         var csvDir = await _secureStorage.GetSecretAsync(SecretKeys.ServiceNowInstance);
@@ -609,9 +650,18 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         return await _serviceNowService.SyncFromCsvAsync(appsPath, actualRolesPath);
     }
 
-    private async Task<DataSyncResult> SyncIisDatabaseAsync(CancellationToken cancellationToken)
+    private async Task<DataSyncResult> SyncIisDatabaseAsync(string jobId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        SyncProgressUpdated?.Invoke(this, new SyncProgressEventArgs
+        {
+            JobId = jobId,
+            DataSource = DataSourceType.IisDatabase,
+            Phase = "Querying database",
+            ProcessedItems = 0,
+            TotalItems = 0,
+            Message = "Querying IIS database for usage data..."
+        });
         return await _iisDatabaseService.SyncUsageDataAsync();
     }
 

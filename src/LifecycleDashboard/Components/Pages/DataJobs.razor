@@ -6,6 +6,7 @@
 @inject DataIntegration.ISharePointService SharePointService
 @inject DataIntegration.IServiceNowService ServiceNowService
 @inject DataIntegration.IIisDatabaseService IisDatabaseService
+@implements IDisposable
 
 <PageTitle>Data Jobs - Lifecycle Dashboard</PageTitle>
 
@@ -50,24 +51,47 @@
                         <span class="status-badge @source.Status.ToLower()">@GetStatusLabel(source.Status)</span>
                     </div>
                     <div class="source-body">
-                        <div class="source-stats">
-                            <div class="stat">
-                                <span class="stat-label">Last Sync</span>
-                                <span class="stat-value">@FormatDate(source.LastSync)</span>
+                        @if (_runningSource == source.Name && _currentProgress != null)
+                        {
+                            <div class="sync-progress">
+                                <div class="progress-header">
+                                    <span class="progress-phase">@_currentProgress.Phase</span>
+                                    <span class="progress-percent">@_currentProgress.ProgressPercent%</span>
+                                </div>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar" style="width: @(_currentProgress.ProgressPercent)%"></div>
+                                </div>
+                                @if (!string.IsNullOrEmpty(_currentProgress.CurrentItem))
+                                {
+                                    <div class="progress-current">@_currentProgress.CurrentItem</div>
+                                }
+                                @if (_currentProgress.TotalItems > 0)
+                                {
+                                    <div class="progress-counts">@_currentProgress.ProcessedItems of @_currentProgress.TotalItems</div>
+                                }
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Records</span>
-                                <span class="stat-value">@source.RecordCount.ToString("N0")</span>
+                        }
+                        else
+                        {
+                            <div class="source-stats">
+                                <div class="stat">
+                                    <span class="stat-label">Last Sync</span>
+                                    <span class="stat-value">@FormatDate(source.LastSync)</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Records</span>
+                                    <span class="stat-value">@source.RecordCount.ToString("N0")</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Next Run</span>
+                                    <span class="stat-value">@FormatNextRun(source.NextRun)</span>
+                                </div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Next Run</span>
-                                <span class="stat-value">@FormatNextRun(source.NextRun)</span>
+                            <div class="source-schedule">
+                                <i class="bi bi-calendar3 schedule-icon"></i>
+                                <span>@source.Schedule</span>
                             </div>
-                        </div>
-                        <div class="source-schedule">
-                            <i class="bi bi-calendar3 schedule-icon"></i>
-                            <span>@source.Schedule</span>
-                        </div>
+                        }
                     </div>
                     <div class="source-footer">
                         <button class="btn btn-sm btn-outline" @onclick='() => NavigateToConfig()'>Configure</button>
@@ -261,14 +285,29 @@
 
     private bool _isRunningAll;
     private string? _runningSource;
+    private DataIntegration.SyncProgressEventArgs? _currentProgress;
 
     protected override async Task OnInitializedAsync()
     {
+        // Subscribe to progress updates
+        SyncOrchestrator.SyncProgressUpdated += OnProgressUpdated;
+
         InitializeDataSources();
         await CheckConnectionStatusAsync();
         await LoadJobHistoryAsync();
         CalculateStatistics();
         ApplyFilter();
+    }
+
+    private void OnProgressUpdated(object? sender, DataIntegration.SyncProgressEventArgs e)
+    {
+        _currentProgress = e;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        SyncOrchestrator.SyncProgressUpdated -= OnProgressUpdated;
     }
 
     private async Task CheckConnectionStatusAsync()
@@ -476,11 +515,13 @@
     private async Task RunJob(DataSource source)
     {
         _runningSource = source.Name;
+        _currentProgress = null;
         StateHasChanged();
 
         await RunJobInternal(source);
 
         _runningSource = null;
+        _currentProgress = null;
         StateHasChanged();
     }
 

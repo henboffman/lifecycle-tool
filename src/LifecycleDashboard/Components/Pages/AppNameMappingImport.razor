@@ -1,0 +1,688 @@
+@page "/app-name-mapping"
+@using LifecycleDashboard.Services
+@using System.Text
+@inject IMockDataService DataService
+@inject IJSRuntime JS
+
+<PageTitle>App Name Mapping - Lifecycle Dashboard</PageTitle>
+
+<div class="import-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Application Name Mapping</h1>
+            <p class="subtitle">Map ServiceNow application names to SharePoint folders and Azure DevOps repositories</p>
+        </div>
+    </header>
+
+    <!-- Explanation -->
+    <section class="info-section">
+        <div class="info-content">
+            <i class="bi bi-info-circle"></i>
+            <div>
+                <strong>Why mapping is needed:</strong>
+                <p>Application names in ServiceNow may differ from folder names in SharePoint or repository names in Azure DevOps.
+                This mapping allows the system to link data across all sources using ServiceNow as the canonical name.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Step 1: File Upload -->
+    <section class="import-section">
+        <div class="section-header">
+            <span class="step-number @(_currentStep >= 1 ? "active" : "")">1</span>
+            <h2>Upload Mapping CSV</h2>
+        </div>
+
+        <div class="upload-area @(_csvFile != null ? "has-file" : "")">
+            @if (_csvFile == null)
+            {
+                <i class="bi bi-cloud-upload upload-icon"></i>
+                <p>Upload a CSV file with application name mappings</p>
+                <InputFile OnChange="HandleFileSelected" accept=".csv" class="file-input" id="csvFileInput" />
+                <label for="csvFileInput" class="btn btn-primary">Choose File</label>
+                <p class="hint">Expected columns: ServiceNow App Name, SharePoint Folder, Azure DevOps Repo(s)</p>
+            }
+            else
+            {
+                <i class="bi bi-file-earmark-check upload-icon success"></i>
+                <p class="filename">@_csvFile.Name</p>
+                <p class="file-info">@FormatFileSize(_csvFile.Size) - @_detectedColumns.Count columns detected</p>
+                <button class="btn btn-outline" @onclick="ClearFile">
+                    <i class="bi bi-x"></i> Remove
+                </button>
+            }
+        </div>
+
+        @if (_uploadError != null)
+        {
+            <div class="error-message">
+                <i class="bi bi-exclamation-triangle"></i> @_uploadError
+            </div>
+        }
+    </section>
+
+    @if (_currentStep >= 2)
+    {
+        <!-- Step 2: Column Mapping -->
+        <section class="import-section">
+            <div class="section-header">
+                <span class="step-number active">2</span>
+                <h2>Map CSV Columns</h2>
+                @if (_savedConfig != null)
+                {
+                    <span class="mapping-saved-badge">
+                        <i class="bi bi-check-circle"></i> Previous mapping loaded
+                    </span>
+                }
+            </div>
+
+            <p class="section-description">
+                Select which CSV column corresponds to each mapping field.
+                <span class="required-marker">*</span> = Required
+            </p>
+
+            <div class="mapping-grid">
+                @foreach (var field in _mappingFields)
+                {
+                    <div class="mapping-row @(field.IsRequired && string.IsNullOrEmpty(GetMappingValue(field.PropertyName)) ? "missing-required" : "")">
+                        <label class="field-label">
+                            @field.DisplayName
+                            @if (field.IsRequired)
+                            {
+                                <span class="required-marker">*</span>
+                            }
+                            @if (!string.IsNullOrEmpty(field.Description))
+                            {
+                                <span class="field-hint">@field.Description</span>
+                            }
+                        </label>
+                        <select class="mapping-select"
+                                value="@GetMappingValue(field.PropertyName)"
+                                @onchange="e => SetMappingValue(field.PropertyName, e.Value?.ToString())">
+                            <option value="">-- Select Column --</option>
+                            @foreach (var col in _detectedColumns)
+                            {
+                                <option value="@col">@col</option>
+                            }
+                        </select>
+                        @if (!string.IsNullOrEmpty(GetMappingValue(field.PropertyName)))
+                        {
+                            <span class="sample-value" title="Sample value from first row">
+                                @GetSampleValue(GetMappingValue(field.PropertyName)!)
+                            </span>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="mapping-actions">
+                <button class="btn btn-outline" @onclick="SaveConfig" disabled="@(!HasRequiredMappings())">
+                    <i class="bi bi-save"></i> Save Mapping
+                </button>
+                <button class="btn btn-outline" @onclick="ClearMapping">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reset
+                </button>
+                <button class="btn btn-primary" @onclick="GeneratePreview" disabled="@(!HasRequiredMappings())">
+                    <i class="bi bi-eye"></i> Preview Import
+                </button>
+            </div>
+        </section>
+    }
+
+    @if (_currentStep >= 3 && _previewData.Count > 0)
+    {
+        <!-- Step 3: Preview -->
+        <section class="import-section">
+            <div class="section-header">
+                <span class="step-number active">3</span>
+                <h2>Preview Mappings</h2>
+            </div>
+
+            <div class="preview-stats">
+                <div class="stat">
+                    <span class="stat-value">@_totalRows</span>
+                    <span class="stat-label">Total Rows</span>
+                </div>
+                <div class="stat success">
+                    <span class="stat-value">@_previewData.Count</span>
+                    <span class="stat-label">Valid</span>
+                </div>
+                <div class="stat warning">
+                    <span class="stat-value">@_parseWarnings.Count</span>
+                    <span class="stat-label">Warnings</span>
+                </div>
+                <div class="stat error">
+                    <span class="stat-value">@_parseErrors.Count</span>
+                    <span class="stat-label">Errors</span>
+                </div>
+            </div>
+
+            @if (_parseWarnings.Count > 0 || _parseErrors.Count > 0)
+            {
+                <div class="parse-issues">
+                    @foreach (var error in _parseErrors.Take(5))
+                    {
+                        <div class="issue error">
+                            <i class="bi bi-x-circle"></i>
+                            <span>Row @error.RowNumber: @error.Message</span>
+                        </div>
+                    }
+                    @foreach (var warning in _parseWarnings.Take(5))
+                    {
+                        <div class="issue warning">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <span>Row @warning.RowNumber: @warning.Message</span>
+                        </div>
+                    }
+                    @if (_parseErrors.Count + _parseWarnings.Count > 10)
+                    {
+                        <div class="more-issues">
+                            ... and @(_parseErrors.Count + _parseWarnings.Count - 10) more issues
+                        </div>
+                    }
+                </div>
+            }
+
+            <div class="preview-table-container">
+                <table class="preview-table">
+                    <thead>
+                        <tr>
+                            <th>ServiceNow App Name</th>
+                            <th>SharePoint Folder</th>
+                            <th>Azure DevOps Repos</th>
+                            <th>Capability</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var mapping in _previewData.Take(20))
+                        {
+                            <tr>
+                                <td class="primary-name">@mapping.ServiceNowAppName</td>
+                                <td>@(mapping.SharePointFolderName ?? "-")</td>
+                                <td>
+                                    @if (mapping.AzureDevOpsRepoNames.Count > 0)
+                                    {
+                                        @string.Join(", ", mapping.AzureDevOpsRepoNames)
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">-</span>
+                                    }
+                                </td>
+                                <td>@(mapping.Capability ?? "-")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_previewData.Count > 20)
+            {
+                <div class="preview-footer">
+                    Showing 20 of @_previewData.Count mappings
+                </div>
+            }
+
+            <div class="import-actions">
+                <button class="btn btn-outline" @onclick="() => _currentStep = 2">
+                    <i class="bi bi-arrow-left"></i> Back to Mapping
+                </button>
+                <button class="btn btn-primary btn-lg" @onclick="ExecuteImport" disabled="@(_importing || _previewData.Count == 0)">
+                    @if (_importing)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Importing...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-download"></i>
+                        <span>Import @_previewData.Count Mappings</span>
+                    }
+                </button>
+            </div>
+        </section>
+    }
+
+    @if (_importComplete)
+    {
+        <!-- Step 4: Complete -->
+        <section class="import-section success-section">
+            <div class="success-content">
+                <i class="bi bi-check-circle-fill success-icon"></i>
+                <h2>Import Complete!</h2>
+                <p>Successfully imported @_importedCount application name mappings.</p>
+                <div class="success-actions">
+                    <button class="btn btn-outline" @onclick="ResetImport">
+                        <i class="bi bi-arrow-repeat"></i> Import Another File
+                    </button>
+                    <a href="/repositories" class="btn btn-primary">
+                        <i class="bi bi-arrow-right"></i> View Repositories
+                    </a>
+                </div>
+            </div>
+        </section>
+    }
+
+    <!-- Current Mappings -->
+    @if (_existingMappings.Count > 0 && !_importComplete)
+    {
+        <section class="import-section existing-section">
+            <div class="section-header">
+                <h2>Current Mappings</h2>
+                <span class="import-count">@_existingMappings.Count mappings</span>
+            </div>
+            <p class="section-description">
+                You have existing mappings. New imports will update records by ServiceNow app name.
+            </p>
+
+            <div class="existing-mappings-preview">
+                <table class="preview-table compact">
+                    <thead>
+                        <tr>
+                            <th>ServiceNow App</th>
+                            <th>SharePoint Folder</th>
+                            <th>Azure DevOps Repos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var mapping in _existingMappings.Take(10))
+                        {
+                            <tr>
+                                <td>@mapping.ServiceNowAppName</td>
+                                <td>@(mapping.SharePointFolderName ?? "-")</td>
+                                <td>@(mapping.AzureDevOpsRepoNames.Count > 0 ? string.Join(", ", mapping.AzureDevOpsRepoNames.Take(3)) : "-")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (_existingMappings.Count > 10)
+                {
+                    <div class="preview-footer">
+                        ... and @(_existingMappings.Count - 10) more
+                    </div>
+                }
+            </div>
+
+            <button class="btn btn-outline btn-sm" @onclick="ClearExistingData">
+                <i class="bi bi-trash"></i> Clear All Mappings
+            </button>
+        </section>
+    }
+</div>
+
+@code {
+    private IBrowserFile? _csvFile;
+    private List<string> _detectedColumns = [];
+    private List<Dictionary<string, string>> _csvRows = [];
+    private string? _uploadError;
+
+    private int _currentStep = 1;
+    private AppNameMappingConfig? _savedConfig;
+    private Dictionary<string, string?> _currentMapping = new();
+
+    private List<AppNameMapping> _previewData = [];
+    private List<AppNameMapping> _existingMappings = [];
+    private List<ParseIssue> _parseErrors = [];
+    private List<ParseIssue> _parseWarnings = [];
+    private int _totalRows;
+
+    private bool _importing;
+    private bool _importComplete;
+    private int _importedCount;
+
+    private readonly List<MappingField> _mappingFields =
+    [
+        new("ServiceNowAppNameColumn", "ServiceNow App Name", true, "The canonical application name"),
+        new("SharePointFolderNameColumn", "SharePoint Folder Name", false, "Folder name in SharePoint (if different)"),
+        new("AzureDevOpsRepoNameColumn", "Azure DevOps Repository", false, "Comma-separated if multiple repos"),
+        new("AlternativeNamesColumn", "Alternative Names", false, "Other names/aliases"),
+        new("CapabilityColumn", "Capability", false, "Business area or capability"),
+        new("NotesColumn", "Notes", false, "Additional notes")
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _savedConfig = await DataService.GetAppNameMappingConfigAsync();
+        _existingMappings = (await DataService.GetAppNameMappingsAsync()).ToList();
+
+        if (_savedConfig != null)
+        {
+            LoadConfigFromSaved(_savedConfig);
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        _uploadError = null;
+        _csvFile = e.File;
+
+        if (_csvFile.Size > 10 * 1024 * 1024) // 10MB limit
+        {
+            _uploadError = "File too large. Maximum size is 10MB.";
+            _csvFile = null;
+            return;
+        }
+
+        await ParseCsvFile();
+    }
+
+    private async Task ParseCsvFile()
+    {
+        if (_csvFile == null) return;
+
+        try
+        {
+            using var stream = _csvFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            var content = await reader.ReadToEndAsync();
+            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            if (lines.Length == 0)
+            {
+                _uploadError = "CSV file is empty.";
+                return;
+            }
+
+            _detectedColumns = ParseCsvLine(lines[0]).ToList();
+
+            if (_detectedColumns.Count == 0)
+            {
+                _uploadError = "Could not detect columns in CSV header.";
+                return;
+            }
+
+            _csvRows.Clear();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var values = ParseCsvLine(lines[i]);
+                if (values.Count > 0)
+                {
+                    var row = new Dictionary<string, string>();
+                    for (int j = 0; j < Math.Min(_detectedColumns.Count, values.Count); j++)
+                    {
+                        row[_detectedColumns[j]] = values[j];
+                    }
+                    _csvRows.Add(row);
+                }
+            }
+
+            _totalRows = _csvRows.Count;
+            _currentStep = 2;
+
+            if (_savedConfig != null)
+            {
+                LoadConfigFromSaved(_savedConfig);
+            }
+            else
+            {
+                AutoDetectMapping();
+            }
+        }
+        catch (Exception ex)
+        {
+            _uploadError = $"Error parsing CSV: {ex.Message}";
+        }
+    }
+
+    private List<string> ParseCsvLine(string line)
+    {
+        var values = new List<string>();
+        var current = new StringBuilder();
+        bool inQuotes = false;
+
+        foreach (char c in line)
+        {
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+            }
+            else if (c == ',' && !inQuotes)
+            {
+                values.Add(current.ToString().Trim());
+                current.Clear();
+            }
+            else if (c != '\r')
+            {
+                current.Append(c);
+            }
+        }
+
+        values.Add(current.ToString().Trim());
+        return values;
+    }
+
+    private void LoadConfigFromSaved(AppNameMappingConfig config)
+    {
+        _currentMapping["ServiceNowAppNameColumn"] = config.ServiceNowAppNameColumn;
+        _currentMapping["SharePointFolderNameColumn"] = config.SharePointFolderNameColumn;
+        _currentMapping["AzureDevOpsRepoNameColumn"] = config.AzureDevOpsRepoNameColumn;
+        _currentMapping["AlternativeNamesColumn"] = config.AlternativeNamesColumn;
+        _currentMapping["CapabilityColumn"] = config.CapabilityColumn;
+        _currentMapping["NotesColumn"] = config.NotesColumn;
+    }
+
+    private void AutoDetectMapping()
+    {
+        var patterns = new Dictionary<string, string[]>
+        {
+            ["ServiceNowAppNameColumn"] = ["servicenow", "app_name", "application_name", "app name", "application", "name"],
+            ["SharePointFolderNameColumn"] = ["sharepoint", "folder", "sp_folder", "sharepoint_folder", "folder_name"],
+            ["AzureDevOpsRepoNameColumn"] = ["repo", "repository", "ado_repo", "azure_devops", "devops", "repo_name"],
+            ["CapabilityColumn"] = ["capability", "business_area", "category", "offering"],
+            ["NotesColumn"] = ["notes", "comments", "description"]
+        };
+
+        foreach (var (field, candidatePatterns) in patterns)
+        {
+            foreach (var pattern in candidatePatterns)
+            {
+                var match = _detectedColumns.FirstOrDefault(c =>
+                    c.Contains(pattern, StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    _currentMapping[field] = match;
+                    break;
+                }
+            }
+        }
+    }
+
+    private string? GetMappingValue(string propertyName)
+    {
+        return _currentMapping.TryGetValue(propertyName, out var value) ? value : null;
+    }
+
+    private void SetMappingValue(string propertyName, string? value)
+    {
+        _currentMapping[propertyName] = value;
+    }
+
+    private string GetSampleValue(string columnName)
+    {
+        if (_csvRows.Count == 0) return "";
+        if (_csvRows[0].TryGetValue(columnName, out var value))
+        {
+            return value.Length > 40 ? value[..40] + "..." : value;
+        }
+        return "";
+    }
+
+    private bool HasRequiredMappings()
+    {
+        return !string.IsNullOrEmpty(GetMappingValue("ServiceNowAppNameColumn"));
+    }
+
+    private async Task SaveConfig()
+    {
+        var config = new AppNameMappingConfig
+        {
+            ServiceNowAppNameColumn = GetMappingValue("ServiceNowAppNameColumn"),
+            SharePointFolderNameColumn = GetMappingValue("SharePointFolderNameColumn"),
+            AzureDevOpsRepoNameColumn = GetMappingValue("AzureDevOpsRepoNameColumn"),
+            AlternativeNamesColumn = GetMappingValue("AlternativeNamesColumn"),
+            CapabilityColumn = GetMappingValue("CapabilityColumn"),
+            NotesColumn = GetMappingValue("NotesColumn")
+        };
+
+        await DataService.SaveAppNameMappingConfigAsync(config);
+        _savedConfig = config;
+    }
+
+    private void ClearMapping()
+    {
+        _currentMapping.Clear();
+    }
+
+    private void GeneratePreview()
+    {
+        _previewData.Clear();
+        _parseErrors.Clear();
+        _parseWarnings.Clear();
+
+        var serviceNowCol = GetMappingValue("ServiceNowAppNameColumn");
+        var sharePointCol = GetMappingValue("SharePointFolderNameColumn");
+        var repoCol = GetMappingValue("AzureDevOpsRepoNameColumn");
+        var altNamesCol = GetMappingValue("AlternativeNamesColumn");
+        var capabilityCol = GetMappingValue("CapabilityColumn");
+        var notesCol = GetMappingValue("NotesColumn");
+
+        if (string.IsNullOrEmpty(serviceNowCol))
+        {
+            return;
+        }
+
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < _csvRows.Count; i++)
+        {
+            var row = _csvRows[i];
+            var rowNum = i + 2;
+
+            var serviceNowName = GetCsvValue(row, serviceNowCol);
+
+            if (string.IsNullOrWhiteSpace(serviceNowName))
+            {
+                _parseErrors.Add(new ParseIssue(rowNum, "Missing ServiceNow App Name"));
+                continue;
+            }
+
+            if (seenNames.Contains(serviceNowName))
+            {
+                _parseWarnings.Add(new ParseIssue(rowNum, $"Duplicate app name: {serviceNowName}"));
+                continue;
+            }
+            seenNames.Add(serviceNowName);
+
+            // Parse repo names (may be comma-separated)
+            var repoNames = new List<string>();
+            var repoValue = GetCsvValue(row, repoCol);
+            if (!string.IsNullOrWhiteSpace(repoValue))
+            {
+                repoNames = repoValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(r => r.Trim())
+                    .Where(r => !string.IsNullOrWhiteSpace(r))
+                    .ToList();
+            }
+
+            // Parse alternative names
+            var altNames = new List<string>();
+            var altValue = GetCsvValue(row, altNamesCol);
+            if (!string.IsNullOrWhiteSpace(altValue))
+            {
+                altNames = altValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(a => a.Trim())
+                    .Where(a => !string.IsNullOrWhiteSpace(a))
+                    .ToList();
+            }
+
+            var mapping = new AppNameMapping
+            {
+                Id = Guid.NewGuid().ToString(),
+                ServiceNowAppName = serviceNowName,
+                SharePointFolderName = GetCsvValue(row, sharePointCol),
+                AzureDevOpsRepoNames = repoNames,
+                AlternativeNames = altNames,
+                Capability = GetCsvValue(row, capabilityCol),
+                Notes = GetCsvValue(row, notesCol),
+                RawCsvValues = row,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            _previewData.Add(mapping);
+        }
+
+        _currentStep = 3;
+    }
+
+    private string? GetCsvValue(Dictionary<string, string> row, string? columnName)
+    {
+        if (string.IsNullOrEmpty(columnName)) return null;
+        return row.TryGetValue(columnName, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+    }
+
+    private async Task ExecuteImport()
+    {
+        if (_previewData.Count == 0) return;
+
+        _importing = true;
+        StateHasChanged();
+
+        try
+        {
+            await DataService.StoreAppNameMappingsAsync(_previewData);
+            _importedCount = _previewData.Count;
+            _importComplete = true;
+            _existingMappings = (await DataService.GetAppNameMappingsAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            _uploadError = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+
+    private void ClearFile()
+    {
+        _csvFile = null;
+        _detectedColumns.Clear();
+        _csvRows.Clear();
+        _previewData.Clear();
+        _parseErrors.Clear();
+        _parseWarnings.Clear();
+        _currentStep = 1;
+        _uploadError = null;
+    }
+
+    private void ResetImport()
+    {
+        ClearFile();
+        _importComplete = false;
+        _importedCount = 0;
+    }
+
+    private async Task ClearExistingData()
+    {
+        await DataService.ClearAppNameMappingsAsync();
+        _existingMappings.Clear();
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+
+    private record MappingField(string PropertyName, string DisplayName, bool IsRequired, string? Description = null);
+    private record ParseIssue(int RowNumber, string Message);
+}
