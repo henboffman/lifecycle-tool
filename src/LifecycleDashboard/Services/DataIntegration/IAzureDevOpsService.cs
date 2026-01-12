@@ -129,6 +129,7 @@ public enum PrimaryStack
     Blazor,
     NodeJs,
     Python,
+    R,
     Java,
     Mixed
 }

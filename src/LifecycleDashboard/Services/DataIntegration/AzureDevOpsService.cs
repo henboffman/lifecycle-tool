@@ -223,17 +223,29 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             // Detect project files
             var csprojFiles = files.Where(f => f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)).ToList();
             var packageJsonFiles = files.Where(f => f.EndsWith("package.json", StringComparison.OrdinalIgnoreCase)).ToList();
-            var requirementsTxt = files.Any(f => f.EndsWith("requirements.txt", StringComparison.OrdinalIgnoreCase));
+            var requirementsTxtFiles = files.Where(f => f.EndsWith("requirements.txt", StringComparison.OrdinalIgnoreCase)).ToList();
             var pomXml = files.Any(f => f.EndsWith("pom.xml", StringComparison.OrdinalIgnoreCase));
 
-            result = result with { ProjectFiles = [..csprojFiles, ..packageJsonFiles] };
+            // R language detection
+            var rFiles = files.Where(f => f.EndsWith(".R", StringComparison.OrdinalIgnoreCase)).ToList();
+            var rmdFiles = files.Where(f => f.EndsWith(".Rmd", StringComparison.OrdinalIgnoreCase)).ToList();
+            var descriptionFile = files.Any(f => f.EndsWith("/DESCRIPTION", StringComparison.OrdinalIgnoreCase) ||
+                                                  f.Equals("DESCRIPTION", StringComparison.OrdinalIgnoreCase));
+
+            // Python detection (additional patterns)
+            var pyFiles = files.Where(f => f.EndsWith(".py", StringComparison.OrdinalIgnoreCase)).ToList();
+            var setupPy = files.Any(f => f.EndsWith("setup.py", StringComparison.OrdinalIgnoreCase));
+            var pyprojectToml = files.Any(f => f.EndsWith("pyproject.toml", StringComparison.OrdinalIgnoreCase));
+
+            result = result with { ProjectFiles = [..csprojFiles, ..packageJsonFiles, ..requirementsTxtFiles, ..rFiles.Take(3)] };
 
             // Detect languages
             var languages = new List<string>();
             if (csprojFiles.Count != 0) languages.Add("C#");
             if (packageJsonFiles.Count != 0) languages.AddRange(["JavaScript", "TypeScript"]);
-            if (requirementsTxt) languages.Add("Python");
+            if (requirementsTxtFiles.Count != 0 || pyFiles.Count != 0 || setupPy || pyprojectToml) languages.Add("Python");
             if (pomXml) languages.Add("Java");
+            if (rFiles.Count != 0 || rmdFiles.Count != 0 || descriptionFile) languages.Add("R");
             result = result with { Languages = languages };
 
             // Parse .csproj files for framework info
@@ -330,6 +342,28 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                 if (packageJsonContent != null)
                 {
                     packages.AddRange(ParseNpmPackages(packageJsonContent, packageJson));
+                }
+            }
+
+            // Parse requirements.txt for Python pip packages
+            foreach (var requirementsTxt in files.Where(f => f.EndsWith("requirements.txt", StringComparison.OrdinalIgnoreCase)))
+            {
+                var requirementsTxtContent = await GetFileContentAsync(baseUrl, auth, project, repositoryId, requirementsTxt);
+                if (requirementsTxtContent != null)
+                {
+                    packages.AddRange(ParsePipPackages(requirementsTxtContent, requirementsTxt));
+                }
+            }
+
+            // Parse R DESCRIPTION files for R packages
+            foreach (var descriptionFile in files.Where(f =>
+                f.EndsWith("/DESCRIPTION", StringComparison.OrdinalIgnoreCase) ||
+                f.Equals("DESCRIPTION", StringComparison.OrdinalIgnoreCase)))
+            {
+                var descriptionContent = await GetFileContentAsync(baseUrl, auth, project, repositoryId, descriptionFile);
+                if (descriptionContent != null)
+                {
+                    packages.AddRange(ParseRPackages(descriptionContent, descriptionFile));
                 }
             }
 
@@ -843,6 +877,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
         if (result.Frameworks.Contains(".NET Core") || result.Frameworks.Contains("ASP.NET Core")) return PrimaryStack.DotNetCore;
         if (result.Frameworks.Contains(".NET Framework")) return PrimaryStack.DotNetFramework;
         if (result.Languages.Contains("Python")) return PrimaryStack.Python;
+        if (result.Languages.Contains("R")) return PrimaryStack.R;
         if (result.Languages.Contains("Java")) return PrimaryStack.Java;
         if (result.Languages.Contains("JavaScript") || result.Languages.Contains("TypeScript")) return PrimaryStack.NodeJs;
         if (result.Frameworks.Count > 2) return PrimaryStack.Mixed;
@@ -910,6 +945,142 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             AddPackages("devDependencies", true);
         }
         catch { }
+
+        return packages;
+    }
+
+    private static List<PackageReference> ParsePipPackages(string content, string sourceFile)
+    {
+        var packages = new List<PackageReference>();
+
+        foreach (var line in content.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmedLine = line.Trim();
+
+            // Skip comments and empty lines
+            if (string.IsNullOrWhiteSpace(trimmedLine) || trimmedLine.StartsWith('#'))
+                continue;
+
+            // Skip options (lines starting with -)
+            if (trimmedLine.StartsWith('-'))
+                continue;
+
+            // Parse package name and version
+            // Formats: package==1.0.0, package>=1.0.0, package<=1.0.0, package~=1.0.0, package!=1.0.0, package
+            var match = PipPackageRegex().Match(trimmedLine);
+            if (match.Success)
+            {
+                packages.Add(new PackageReference
+                {
+                    Name = match.Groups[1].Value,
+                    Version = match.Groups[2].Success ? match.Groups[2].Value : null,
+                    PackageManager = "pip",
+                    SourceFile = sourceFile
+                });
+            }
+        }
+
+        return packages;
+    }
+
+    private static List<PackageReference> ParseRPackages(string content, string sourceFile)
+    {
+        var packages = new List<PackageReference>();
+
+        // Parse R DESCRIPTION file format
+        // Looking for Imports:, Depends:, and Suggests: fields
+        var lines = content.Split('\n');
+        var inPackageSection = false;
+        var currentSection = "";
+
+        foreach (var line in lines)
+        {
+            var trimmedLine = line.TrimEnd();
+
+            // Check for section headers
+            if (trimmedLine.StartsWith("Imports:", StringComparison.OrdinalIgnoreCase))
+            {
+                inPackageSection = true;
+                currentSection = "Imports";
+                // Extract packages on same line after colon
+                var afterColon = trimmedLine[8..].Trim();
+                if (!string.IsNullOrEmpty(afterColon))
+                {
+                    packages.AddRange(ParseRPackageList(afterColon, sourceFile, false));
+                }
+                continue;
+            }
+            if (trimmedLine.StartsWith("Depends:", StringComparison.OrdinalIgnoreCase))
+            {
+                inPackageSection = true;
+                currentSection = "Depends";
+                var afterColon = trimmedLine[8..].Trim();
+                if (!string.IsNullOrEmpty(afterColon))
+                {
+                    packages.AddRange(ParseRPackageList(afterColon, sourceFile, false));
+                }
+                continue;
+            }
+            if (trimmedLine.StartsWith("Suggests:", StringComparison.OrdinalIgnoreCase))
+            {
+                inPackageSection = true;
+                currentSection = "Suggests";
+                var afterColon = trimmedLine[9..].Trim();
+                if (!string.IsNullOrEmpty(afterColon))
+                {
+                    packages.AddRange(ParseRPackageList(afterColon, sourceFile, true));
+                }
+                continue;
+            }
+
+            // If we hit a new field, stop parsing packages
+            if (!trimmedLine.StartsWith(' ') && !trimmedLine.StartsWith('\t') && trimmedLine.Contains(':'))
+            {
+                inPackageSection = false;
+                continue;
+            }
+
+            // If we're in a package section and the line is indented, parse it
+            if (inPackageSection && (line.StartsWith(' ') || line.StartsWith('\t')))
+            {
+                var isDev = currentSection == "Suggests";
+                packages.AddRange(ParseRPackageList(trimmedLine, sourceFile, isDev));
+            }
+        }
+
+        return packages;
+    }
+
+    private static List<PackageReference> ParseRPackageList(string packageList, string sourceFile, bool isDev)
+    {
+        var packages = new List<PackageReference>();
+
+        // R packages can be comma-separated with optional version constraints
+        // Format: package (>= 1.0.0), package2, package3 (>= 2.0)
+        foreach (var packageSpec in packageList.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = packageSpec.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.Equals("R", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var match = RPackageRegex().Match(trimmed);
+            if (match.Success)
+            {
+                var name = match.Groups[1].Value.Trim();
+                // Skip R itself as it's not a package
+                if (name.Equals("R", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                packages.Add(new PackageReference
+                {
+                    Name = name,
+                    Version = match.Groups[2].Success ? match.Groups[2].Value.Trim() : null,
+                    PackageManager = "CRAN",
+                    SourceFile = sourceFile,
+                    IsDevelopmentDependency = isDev
+                });
+            }
+        }
 
         return packages;
     }
@@ -1001,6 +1172,14 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
     [GeneratedRegex(@"(AccountKey)=[^;]+;", RegexOptions.IgnoreCase)]
     private static partial Regex AccountKeyRegex();
+
+    // Pip requirements.txt format: package[extras]==version, package>=version, package, etc.
+    [GeneratedRegex(@"^([a-zA-Z0-9][\w.-]*)\s*(?:\[[^\]]*\])?\s*(?:([<>=!~]+\s*[\d.]+(?:,\s*[<>=!~]+\s*[\d.]+)*))?", RegexOptions.IgnoreCase)]
+    private static partial Regex PipPackageRegex();
+
+    // R DESCRIPTION file package format: package (>= 1.0.0) or just package
+    [GeneratedRegex(@"^([a-zA-Z][\w.]*)\s*(?:\(([^)]+)\))?", RegexOptions.IgnoreCase)]
+    private static partial Regex RPackageRegex();
 
     #endregion
 }
