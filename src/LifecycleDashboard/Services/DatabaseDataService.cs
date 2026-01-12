@@ -620,21 +620,83 @@ public class DatabaseDataService : IMockDataService
     {
         await using var context = await _contextFactory.CreateDbContextAsync();
 
+        // Track added entities by ServiceNowId to handle duplicates in the same batch
+        var addedEntities = new Dictionary<string, ImportedServiceNowApplicationEntity>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var app in applications)
         {
-            var existing = await context.ImportedServiceNowApplications.FirstOrDefaultAsync(a => a.ServiceNowId == app.ServiceNowId);
+            // Truncate strings to their max lengths to prevent database errors
+            var truncatedApp = TruncateServiceNowAppStrings(app);
+
+            // Check if we already added this ServiceNowId in this batch
+            if (addedEntities.TryGetValue(truncatedApp.ServiceNowId, out var alreadyAdded))
+            {
+                // Update the already-added entity instead of adding a duplicate
+                truncatedApp.ToEntity(alreadyAdded);
+                continue;
+            }
+
+            // Check if entity exists in database
+            var existing = await context.ImportedServiceNowApplications
+                .FirstOrDefaultAsync(a => a.ServiceNowId == truncatedApp.ServiceNowId);
+
             if (existing != null)
             {
-                app.ToEntity(existing);
+                truncatedApp.ToEntity(existing);
             }
             else
             {
-                context.ImportedServiceNowApplications.Add(app.ToEntity());
+                var newEntity = truncatedApp.ToEntity();
+                context.ImportedServiceNowApplications.Add(newEntity);
+                addedEntities[truncatedApp.ServiceNowId] = newEntity;
             }
         }
 
         await context.SaveChangesAsync();
         _logger.LogInformation("Stored {Count} imported ServiceNow applications to database", applications.Count());
+    }
+
+    /// <summary>
+    /// Truncates string fields to their maximum database lengths to prevent EF Core save errors.
+    /// </summary>
+    private static ImportedServiceNowApplication TruncateServiceNowAppStrings(ImportedServiceNowApplication app)
+    {
+        return app with
+        {
+            ServiceNowId = Truncate(app.ServiceNowId, 100),
+            Name = Truncate(app.Name, 200),
+            Description = Truncate(app.Description, 4000),
+            ShortDescription = Truncate(app.ShortDescription, 500),
+            Capability = Truncate(app.Capability, 100),
+            Status = Truncate(app.Status, 50),
+            OwnerId = Truncate(app.OwnerId, 100),
+            OwnerName = Truncate(app.OwnerName, 200),
+            ProductManagerId = Truncate(app.ProductManagerId, 100),
+            ProductManagerName = Truncate(app.ProductManagerName, 200),
+            BusinessOwnerId = Truncate(app.BusinessOwnerId, 100),
+            BusinessOwnerName = Truncate(app.BusinessOwnerName, 200),
+            FunctionalArchitectId = Truncate(app.FunctionalArchitectId, 100),
+            FunctionalArchitectName = Truncate(app.FunctionalArchitectName, 200),
+            TechnicalArchitectId = Truncate(app.TechnicalArchitectId, 100),
+            TechnicalArchitectName = Truncate(app.TechnicalArchitectName, 200),
+            TechnicalLeadId = Truncate(app.TechnicalLeadId, 100),
+            TechnicalLeadName = Truncate(app.TechnicalLeadName, 200),
+            ApplicationType = Truncate(app.ApplicationType, 50),
+            ArchitectureType = Truncate(app.ArchitectureType, 100),
+            UserBase = Truncate(app.UserBase, 100),
+            Importance = Truncate(app.Importance, 50),
+            RepositoryUrl = Truncate(app.RepositoryUrl, 500),
+            DocumentationUrl = Truncate(app.DocumentationUrl, 500),
+            Environment = Truncate(app.Environment, 100),
+            Criticality = Truncate(app.Criticality, 50),
+            SupportGroup = Truncate(app.SupportGroup, 200)
+        };
+    }
+
+    private static string? Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     public async Task ClearServiceNowApplicationsAsync()
@@ -653,29 +715,38 @@ public class DatabaseDataService : IMockDataService
             return 0;
 
         int count = 0;
+        var processedServiceNowIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var importedEntity in importedApps)
         {
             var imported = importedEntity.ToModel();
 
+            // Skip duplicates in the imported data
+            if (!processedServiceNowIds.Add(imported.ServiceNowId))
+            {
+                _logger.LogWarning("Skipping duplicate ServiceNowId: {ServiceNowId}", imported.ServiceNowId);
+                continue;
+            }
+
             // Check if app already exists by ServiceNow ID
             var existing = await context.Applications
                 .FirstOrDefaultAsync(a => a.ServiceNowId == imported.ServiceNowId);
 
+            // Truncate fields to match database column limits
             var app = new Application
             {
                 Id = existing?.Id ?? Guid.NewGuid().ToString(),
-                Name = imported.Name,
-                Description = imported.Description,
-                ShortDescription = imported.ShortDescription,
-                Capability = imported.Capability ?? "Uncategorized",
+                Name = Truncate(imported.Name, 200),
+                Description = Truncate(imported.Description, 2000),
+                ShortDescription = Truncate(imported.ShortDescription, 500),
+                Capability = Truncate(imported.Capability, 100) ?? "Uncategorized",
                 ApplicationType = ParseAppType(imported.ApplicationType),
                 ArchitectureType = ParseArchitectureType(imported.ArchitectureType),
-                UserBaseEstimate = imported.UserBase,
-                Importance = imported.Importance,
-                ServiceNowId = imported.ServiceNowId,
-                RepositoryUrl = imported.RepositoryUrl,
-                DocumentationUrl = imported.DocumentationUrl,
+                UserBaseEstimate = Truncate(imported.UserBase, 100),
+                Importance = Truncate(imported.Importance, 50),
+                ServiceNowId = Truncate(imported.ServiceNowId, 100),
+                RepositoryUrl = Truncate(imported.RepositoryUrl, 500),
+                DocumentationUrl = Truncate(imported.DocumentationUrl, 500),
                 IsMockData = false, // Imported data is real, not mock
                 HealthScore = existing?.HealthScore ?? 70,
                 LastSyncDate = DateTimeOffset.UtcNow,

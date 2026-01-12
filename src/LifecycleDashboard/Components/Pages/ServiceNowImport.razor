@@ -730,7 +730,14 @@
         }
         catch (Exception ex)
         {
-            _uploadError = $"Import failed: {ex.Message}";
+            // Get the innermost exception for better error details
+            var innerEx = ex;
+            while (innerEx.InnerException != null)
+                innerEx = innerEx.InnerException;
+
+            _uploadError = innerEx == ex
+                ? $"Import failed: {ex.Message}"
+                : $"Import failed: {ex.Message} - Inner: {innerEx.Message}";
         }
         finally
         {
