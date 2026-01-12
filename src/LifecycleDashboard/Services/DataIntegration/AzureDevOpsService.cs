@@ -787,6 +787,9 @@ public partial class AzureDevOpsService : IAzureDevOpsService
         if (!branchesToTry.Contains("master", StringComparer.OrdinalIgnoreCase))
             branchesToTry.Add("master");
 
+        _logger.LogInformation("Branch fallback for repo {RepositoryId}: will try [{Branches}] (defaultBranch param: {DefaultBranch})",
+            repositoryId, string.Join(", ", branchesToTry), defaultBranch ?? "(null)");
+
         foreach (var branch in branchesToTry)
         {
             var url = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/items?$top=8000&recursionLevel=Full&versionDescriptor.version={Uri.EscapeDataString(branch)}&versionDescriptor.versionType=branch&api-version=7.1";
@@ -796,14 +799,17 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogDebug("Successfully fetched items from repo {RepositoryId} using branch {Branch}", repositoryId, branch);
+                _logger.LogInformation("Successfully fetched items from repo {RepositoryId} using branch {Branch}", repositoryId, branch);
                 return (response, branch);
             }
 
-            _logger.LogDebug("Failed to fetch items from repo {RepositoryId} branch {Branch}: {Status}", repositoryId, branch, response.StatusCode);
+            var statusCode = (int)response.StatusCode;
+            _logger.LogDebug("Failed to fetch items from repo {RepositoryId} branch {Branch}: {StatusCode} {Status}",
+                repositoryId, branch, statusCode, response.StatusCode);
         }
 
-        _logger.LogWarning("Could not fetch items from repo {RepositoryId} - tried branches: {Branches}", repositoryId, string.Join(", ", branchesToTry));
+        _logger.LogWarning("Could not fetch items from repo {RepositoryId} - tried branches: [{Branches}]. Repo may be empty or inaccessible.",
+            repositoryId, string.Join(", ", branchesToTry));
         return (null, null);
     }
 

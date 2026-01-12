@@ -465,6 +465,69 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
     }
 
     /// <inheritdoc />
+    public async Task RecordManualImportAsync(
+        DataSourceType dataSource,
+        int recordsProcessed,
+        int recordsCreated,
+        int recordsUpdated,
+        bool success,
+        string? errorMessage = null,
+        string? triggeredBy = null,
+        string? description = null)
+    {
+        var startTime = DateTimeOffset.UtcNow;
+        var jobId = Guid.NewGuid().ToString();
+
+        var job = new SyncJobInfo
+        {
+            Id = jobId,
+            DataSource = dataSource,
+            StartTime = startTime,
+            EndTime = startTime, // Manual imports are instant from tracking perspective
+            Status = success ? SyncJobStatus.Completed : SyncJobStatus.Failed,
+            RecordsProcessed = recordsProcessed,
+            RecordsCreated = recordsCreated,
+            RecordsUpdated = recordsUpdated,
+            ErrorCount = success ? 0 : 1,
+            ErrorMessage = errorMessage,
+            TriggeredBy = triggeredBy ?? "Manual Import"
+        };
+
+        // Add to in-memory history
+        await EnsureJobHistoryLoadedAsync();
+        _syncJobHistory.Insert(0, job);
+
+        // Persist to database
+        await PersistJobAsync(job);
+
+        // Log audit event
+        if (success)
+        {
+            _logger.LogInformation(
+                "Manual import recorded for {DataSource}: {RecordsProcessed} processed, {RecordsCreated} created, {RecordsUpdated} updated. {Description}",
+                dataSource, recordsProcessed, recordsCreated, recordsUpdated, description ?? "");
+            await _auditService.LogSyncCompletedAsync(
+                $"{dataSource} (Manual Import)",
+                jobId,
+                recordsProcessed,
+                recordsCreated,
+                recordsUpdated,
+                TimeSpan.Zero);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Manual import failed for {DataSource}: {ErrorMessage}. {Description}",
+                dataSource, errorMessage, description ?? "");
+            await _auditService.LogSyncFailedAsync(
+                $"{dataSource} (Manual Import)",
+                jobId,
+                errorMessage ?? "Unknown error",
+                TimeSpan.Zero);
+        }
+    }
+
+    /// <inheritdoc />
     public SyncConfiguration GetConfiguration() => _configuration;
 
     /// <inheritdoc />
@@ -584,9 +647,23 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                     SyncedBy = "DataSyncOrchestrator"
                 };
 
+                // Skip disabled repos - they may not be accessible
+                if (repo.IsDisabled)
+                {
+                    _logger.LogInformation("Skipping disabled repo {RepoName} for tech stack/commits/packages detection", repo.Name);
+                    techStackSkip++;
+                    commitsSkip++;
+                    packagesSkip++;
+                    readmeSkip++;
+                    pipelineSkip++;
+                    syncedRepos.Add(syncedRepo);
+                    continue;
+                }
+
                 // Tech stack detection
                 try
                 {
+                    _logger.LogDebug("Detecting tech stack for {RepoName} (DefaultBranch: {DefaultBranch})", repo.Name, repo.DefaultBranch ?? "(null)");
                     var techStackResult = await _azureDevOpsService.DetectTechStackAsync(repo.Id, repo.DefaultBranch);
                     if (techStackResult.Success && techStackResult.Data != null)
                     {
@@ -605,7 +682,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                     else
                     {
                         techStackSkip++;
-                        _logger.LogDebug("No tech stack detected for {RepoName}: {Error}", repo.Name, techStackResult.ErrorMessage);
+                        _logger.LogInformation("No tech stack detected for {RepoName}: {Error}", repo.Name, techStackResult.ErrorMessage ?? "Unknown error");
                     }
                 }
                 catch (Exception ex)

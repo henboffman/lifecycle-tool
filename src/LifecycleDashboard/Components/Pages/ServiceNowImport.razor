@@ -1,7 +1,9 @@
 @page "/servicenow-import"
 @using LifecycleDashboard.Services
+@using DI = LifecycleDashboard.Services.DataIntegration
 @using System.Text
 @inject IMockDataService DataService
+@inject DI.IDataSyncOrchestrator SyncOrchestrator
 @inject IJSRuntime JS
 
 <PageTitle>ServiceNow Import - Lifecycle Dashboard</PageTitle>
@@ -727,6 +729,16 @@
             _importedCount = appCount;
             _importComplete = true;
             _existingImports = (await DataService.GetImportedServiceNowApplicationsAsync()).ToList();
+
+            // Record successful import in job history
+            await SyncOrchestrator.RecordManualImportAsync(
+                DI.DataSourceType.ServiceNow,
+                recordsProcessed: _previewData.Count,
+                recordsCreated: appCount,
+                recordsUpdated: 0,
+                success: true,
+                triggeredBy: "CSV Import",
+                description: $"Imported {_previewData.Count} applications from CSV file");
         }
         catch (Exception ex)
         {
@@ -735,9 +747,22 @@
             while (innerEx.InnerException != null)
                 innerEx = innerEx.InnerException;
 
-            _uploadError = innerEx == ex
+            var errorMsg = innerEx == ex
                 ? $"Import failed: {ex.Message}"
                 : $"Import failed: {ex.Message} - Inner: {innerEx.Message}";
+
+            _uploadError = errorMsg;
+
+            // Record failed import in job history
+            await SyncOrchestrator.RecordManualImportAsync(
+                DI.DataSourceType.ServiceNow,
+                recordsProcessed: _previewData.Count,
+                recordsCreated: 0,
+                recordsUpdated: 0,
+                success: false,
+                errorMessage: errorMsg,
+                triggeredBy: "CSV Import",
+                description: $"Failed to import {_previewData.Count} applications from CSV file");
         }
         finally
         {

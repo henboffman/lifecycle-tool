@@ -44,8 +44,12 @@
         <!-- Stats Summary -->
         <section class="stats-grid">
             <div class="stat-card">
-                <div class="stat-value">@_repositories.Count</div>
-                <div class="stat-label">Total Repositories</div>
+                <div class="stat-value">@_repositories.Count(r => !r.IsDisabled)</div>
+                <div class="stat-label">Enabled Repositories</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@_repositories.Count(r => r.IsDisabled)</div>
+                <div class="stat-label">Disabled Repositories</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">@_repositories.Count(r => !string.IsNullOrEmpty(r.PrimaryStack))</div>
@@ -55,10 +59,6 @@
                 <div class="stat-value">@_repositories.Count(r => r.HasReadme)</div>
                 <div class="stat-label">With README</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">@_repositories.Sum(r => r.NuGetPackageCount + r.NpmPackageCount)</div>
-                <div class="stat-label">Total Packages</div>
-            </div>
         </section>
 
         <!-- Filters -->
@@ -67,6 +67,11 @@
                 <i class="bi bi-search"></i>
                 <input type="text" placeholder="Search repositories..." @bind="_searchTerm" @bind:event="oninput" @bind:after="ApplyFilters" />
             </div>
+            <select class="filter-select" @bind="_statusFilter" @bind:after="ApplyFilters">
+                <option value="">All Repositories</option>
+                <option value="enabled">Enabled Only</option>
+                <option value="disabled">Disabled Only</option>
+            </select>
             <select class="filter-select" @bind="_stackFilter" @bind:after="ApplyFilters">
                 <option value="">All Tech Stacks</option>
                 @foreach (var stack in _uniqueStacks)
@@ -342,6 +347,7 @@
     private bool _loading = true;
 
     private string _searchTerm = "";
+    private string _statusFilter = "";
     private string _stackFilter = "";
     private string _hasReadmeFilter = "";
     private string _sortColumn = "Name";
@@ -389,6 +395,12 @@
                 r.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                 (r.PrimaryStack?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 r.Frameworks.Any(f => f.Contains(term, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (!string.IsNullOrEmpty(_statusFilter))
+        {
+            var showDisabled = _statusFilter == "disabled";
+            filtered = filtered.Where(r => r.IsDisabled == showDisabled);
         }
 
         if (!string.IsNullOrEmpty(_stackFilter))

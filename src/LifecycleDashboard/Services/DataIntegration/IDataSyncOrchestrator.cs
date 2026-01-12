@@ -57,6 +57,28 @@ public interface IDataSyncOrchestrator
     Task<bool> CancelSyncJobAsync(string jobId);
 
     /// <summary>
+    /// Records a manual import/upload operation in the sync job history.
+    /// Use this to track CSV imports and other manual data operations.
+    /// </summary>
+    /// <param name="dataSource">The data source type being imported.</param>
+    /// <param name="recordsProcessed">Total records processed.</param>
+    /// <param name="recordsCreated">Number of new records created.</param>
+    /// <param name="recordsUpdated">Number of existing records updated.</param>
+    /// <param name="success">Whether the import succeeded.</param>
+    /// <param name="errorMessage">Error message if failed.</param>
+    /// <param name="triggeredBy">Who triggered the import.</param>
+    /// <param name="description">Optional description of what was imported.</param>
+    Task RecordManualImportAsync(
+        DataSourceType dataSource,
+        int recordsProcessed,
+        int recordsCreated,
+        int recordsUpdated,
+        bool success,
+        string? errorMessage = null,
+        string? triggeredBy = null,
+        string? description = null);
+
+    /// <summary>
     /// Gets sync configuration.
     /// </summary>
     SyncConfiguration GetConfiguration();
