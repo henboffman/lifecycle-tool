@@ -4,14 +4,14 @@ using LifecycleDashboard.Services;
 using LifecycleDashboard.Services.DataIntegration;
 using Microsoft.EntityFrameworkCore;
 
-var builder = WebApplication.CreateBuilder(args);
-
 // Default to Development environment if not explicitly set
-// This ensures mock data mode is used unless Production is explicitly configured
+// This must be done BEFORE CreateBuilder so user secrets are loaded
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")))
 {
-    builder.Environment.EnvironmentName = "Development";
+    Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
 }
+
+var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
