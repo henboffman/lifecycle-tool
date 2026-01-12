@@ -2422,22 +2422,55 @@
     {
         if (_editingDataSource == null) return;
 
-        var prefix = SecretKeys.GetDataSourcePrefix(_editingDataSource.Id);
-
-        // Store sensitive values in secure storage (not in config object)
-        if (!string.IsNullOrEmpty(_dsFormApiKey))
+        // Store values in secure storage with the correct keys for each data source
+        // The data integration services read from these specific keys
+        switch (_editingDataSource.Type)
         {
-            await SecureStorage.StoreSecretAsync($"{prefix}apikey", _dsFormApiKey);
-            _dsHasApiKey = true;
+            case DataSourceType.AzureDevOps:
+                if (!string.IsNullOrEmpty(_dsFormOrganization))
+                    await SecureStorage.StoreSecretAsync(SecretKeys.AzureDevOpsOrganization, _dsFormOrganization);
+                if (!string.IsNullOrEmpty(_dsFormProject))
+                    await SecureStorage.StoreSecretAsync(SecretKeys.AzureDevOpsProject, _dsFormProject);
+                if (!string.IsNullOrEmpty(_dsFormApiKey))
+                {
+                    await SecureStorage.StoreSecretAsync(SecretKeys.AzureDevOpsPat, _dsFormApiKey);
+                    _dsHasApiKey = true;
+                }
+                break;
+
+            case DataSourceType.SharePoint:
+                if (!string.IsNullOrEmpty(_dsFormSiteUrl))
+                    await SecureStorage.StoreSecretAsync(SecretKeys.SharePointSiteUrl, _dsFormSiteUrl);
+                if (!string.IsNullOrEmpty(_dsFormApiKey))
+                {
+                    // For SharePoint, ApiKey field is used for Client ID
+                    await SecureStorage.StoreSecretAsync(SecretKeys.SharePointClientId, _dsFormApiKey);
+                    _dsHasApiKey = true;
+                }
+                if (!string.IsNullOrEmpty(_dsFormConnectionString))
+                {
+                    // For SharePoint, ConnectionString field is used for Client Secret
+                    await SecureStorage.StoreSecretAsync(SecretKeys.SharePointClientSecret, _dsFormConnectionString);
+                    _dsHasConnectionString = true;
+                }
+                break;
+
+            case DataSourceType.ServiceNow:
+                if (!string.IsNullOrEmpty(_dsFormInstance))
+                    await SecureStorage.StoreSecretAsync(SecretKeys.ServiceNowInstance, _dsFormInstance);
+                // ServiceNow uses username/password which could be mapped to other fields
+                break;
+
+            case DataSourceType.IisDatabase:
+                if (!string.IsNullOrEmpty(_dsFormConnectionString))
+                {
+                    await SecureStorage.StoreSecretAsync(SecretKeys.IisDatabaseConnectionString, _dsFormConnectionString);
+                    _dsHasConnectionString = true;
+                }
+                break;
         }
 
-        if (!string.IsNullOrEmpty(_dsFormConnectionString))
-        {
-            await SecureStorage.StoreSecretAsync($"{prefix}connectionstring", _dsFormConnectionString);
-            _dsHasConnectionString = true;
-        }
-
-        // Non-sensitive settings go to config object
+        // Non-sensitive settings also go to config object (for display purposes)
         var settings = new DataSourceConnectionSettings
         {
             Organization = _dsFormOrganization,
@@ -2446,7 +2479,7 @@
             ListName = _dsFormListName,
             Instance = _dsFormInstance,
             Table = _dsFormTable
-            // ApiKey and ConnectionString are now in secure storage
+            // ApiKey and ConnectionString are in secure storage
         };
 
         var updated = _editingDataSource with
