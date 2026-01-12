@@ -694,9 +694,10 @@ public partial class AzureDevOpsService : IAzureDevOpsService
         }
 
         var baseUrl = orgUrl.TrimEnd('/') + "/";
-        var auth = new AuthenticationHeaderValue(
-            "Basic",
-            Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($":{pat}")));
+        // Azure DevOps PAT auth: use any username (commonly empty or a placeholder) with PAT as password
+        // Format matching user's working Node.js code: "username:PAT"
+        var credentials = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($"pat:{pat}"));
+        var auth = new AuthenticationHeaderValue("Basic", credentials);
 
         return (true, null, baseUrl, auth);
     }
@@ -705,6 +706,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = auth;
+        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
         return await _httpClient.SendAsync(request);
     }
 
