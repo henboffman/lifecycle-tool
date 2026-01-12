@@ -58,6 +58,27 @@
     background: #fde68a;
 }
 
+/* Warning button for destructive actions */
+.btn-warning {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+    cursor: pointer;
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #f59e0b;
+    transition: all 0.15s ease;
+}
+
+.btn-warning:hover {
+    background: #fde68a;
+    border-color: #d97706;
+}
+
 .dev-mode-toggle input[type="checkbox"] {
     width: 1rem;
     height: 1rem;

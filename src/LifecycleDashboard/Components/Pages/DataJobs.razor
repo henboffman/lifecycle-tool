@@ -6,6 +6,7 @@
 @inject DataIntegration.ISharePointService SharePointService
 @inject DataIntegration.IServiceNowService ServiceNowService
 @inject DataIntegration.IIisDatabaseService IisDatabaseService
+@inject IMockDataService DataService
 @implements IDisposable
 
 <PageTitle>Data Jobs - Lifecycle Dashboard</PageTitle>
@@ -23,6 +24,9 @@
                     <span class="toggle-text">Dev Mode (10 repos)</span>
                 </label>
             </div>
+            <button class="btn btn-warning" @onclick="ClearRepoData" title="Clear cached repository data to force full re-sync">
+                <i class="bi bi-trash"></i> Reset Repo Cache
+            </button>
             <button class="btn btn-outline" @onclick="RefreshStatus">
                 <i class="bi bi-arrow-repeat"></i> Refresh Status
             </button>
@@ -385,6 +389,14 @@
             DevModeRepoLimit = _devModeEnabled ? 10 : 0
         };
         await SyncOrchestrator.SetConfigurationAsync(newConfig);
+    }
+
+    private async Task ClearRepoData()
+    {
+        await DataService.ClearSyncedRepositoriesAsync();
+        // Re-initialize to update counts
+        InitializeDataSources();
+        StateHasChanged();
     }
 
     private void OnProgressUpdated(object? sender, DataIntegration.SyncProgressEventArgs e)
