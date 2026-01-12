@@ -2441,22 +2441,52 @@
     private async Task ConfigureDataSource(DataSourceConfig ds)
     {
         _editingDataSource = ds;
-        var settings = ds.ConnectionSettings;
-        _dsFormOrganization = settings?.Organization ?? "";
-        _dsFormProject = settings?.Project ?? "";
-        _dsFormSiteUrl = settings?.SiteUrl ?? "";
-        _dsFormRootPath = settings?.RootPath ?? "Documents/general/Offerings";
-        _dsFormInstance = settings?.Instance ?? "";
-        _dsFormTable = settings?.Table ?? "";
 
-        // Load username for Azure DevOps (non-sensitive, can display)
-        if (ds.Type == DataSourceType.AzureDevOps)
+        // Load all non-sensitive values from secure storage (they persist across restarts)
+        // Fall back to in-memory settings if secure storage is empty
+        var settings = ds.ConnectionSettings;
+
+        switch (ds.Type)
         {
-            _dsFormUsername = await SecureStorage.GetSecretAsync(SecretKeys.AzureDevOpsUsername) ?? "";
-        }
-        else
-        {
-            _dsFormUsername = "";
+            case DataSourceType.AzureDevOps:
+                _dsFormOrganization = await SecureStorage.GetSecretAsync(SecretKeys.AzureDevOpsOrganization) ?? settings?.Organization ?? "";
+                _dsFormProject = await SecureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? settings?.Project ?? "";
+                _dsFormUsername = await SecureStorage.GetSecretAsync(SecretKeys.AzureDevOpsUsername) ?? "";
+                _dsFormSiteUrl = "";
+                _dsFormRootPath = "";
+                _dsFormInstance = "";
+                _dsFormTable = "";
+                break;
+
+            case DataSourceType.SharePoint:
+                _dsFormSiteUrl = await SecureStorage.GetSecretAsync(SecretKeys.SharePointSiteUrl) ?? settings?.SiteUrl ?? "";
+                _dsFormRootPath = await SecureStorage.GetSecretAsync(SecretKeys.SharePointRootPath) ?? settings?.RootPath ?? "Documents/general/Offerings";
+                _dsFormOrganization = "";
+                _dsFormProject = "";
+                _dsFormUsername = "";
+                _dsFormInstance = "";
+                _dsFormTable = "";
+                break;
+
+            case DataSourceType.ServiceNow:
+                _dsFormInstance = await SecureStorage.GetSecretAsync(SecretKeys.ServiceNowInstance) ?? settings?.Instance ?? "";
+                _dsFormUsername = await SecureStorage.GetSecretAsync(SecretKeys.ServiceNowUsername) ?? "";
+                _dsFormTable = settings?.Table ?? "";
+                _dsFormOrganization = "";
+                _dsFormProject = "";
+                _dsFormSiteUrl = "";
+                _dsFormRootPath = "";
+                break;
+
+            default:
+                _dsFormOrganization = settings?.Organization ?? "";
+                _dsFormProject = settings?.Project ?? "";
+                _dsFormSiteUrl = settings?.SiteUrl ?? "";
+                _dsFormRootPath = settings?.RootPath ?? "";
+                _dsFormInstance = settings?.Instance ?? "";
+                _dsFormTable = settings?.Table ?? "";
+                _dsFormUsername = "";
+                break;
         }
 
         // Check for existing credentials in secure storage (don't load actual values)

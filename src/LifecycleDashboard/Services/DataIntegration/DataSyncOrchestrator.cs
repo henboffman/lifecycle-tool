@@ -1,4 +1,6 @@
+using LifecycleDashboard.Data;
 using LifecycleDashboard.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace LifecycleDashboard.Services.DataIntegration;
@@ -16,12 +18,14 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
     private readonly IMockDataService _mockDataService;
     private readonly ISecureStorageService _secureStorage;
     private readonly IAuditService _auditService;
+    private readonly IDbContextFactory<LifecycleDbContext> _contextFactory;
     private readonly ILogger<DataSyncOrchestrator> _logger;
 
     private SyncConfiguration _configuration = new();
     private readonly List<SyncJobInfo> _syncJobHistory = [];
     private readonly List<DataConflict> _unresolvedConflicts = [];
     private readonly Dictionary<string, CancellationTokenSource> _runningJobs = [];
+    private bool _jobHistoryLoaded;
 
     public event EventHandler<SyncJobEventArgs>? SyncJobStarted;
     public event EventHandler<SyncJobEventArgs>? SyncJobCompleted;
@@ -37,6 +41,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         IMockDataService mockDataService,
         ISecureStorageService secureStorage,
         IAuditService auditService,
+        IDbContextFactory<LifecycleDbContext> contextFactory,
         ILogger<DataSyncOrchestrator> logger)
     {
         _azureDevOpsService = azureDevOpsService;
@@ -46,12 +51,69 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         _mockDataService = mockDataService;
         _secureStorage = secureStorage;
         _auditService = auditService;
+        _contextFactory = contextFactory;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Ensures job history is loaded from the database.
+    /// </summary>
+    private async Task EnsureJobHistoryLoadedAsync()
+    {
+        if (_jobHistoryLoaded) return;
+
+        try
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync();
+            var entities = await context.SyncJobs
+                .OrderByDescending(j => j.StartTime)
+                .Take(100) // Keep last 100 jobs
+                .ToListAsync();
+
+            _syncJobHistory.Clear();
+            _syncJobHistory.AddRange(entities.Select(e => e.ToModel()));
+            _jobHistoryLoaded = true;
+            _logger.LogInformation("Loaded {Count} sync jobs from database", _syncJobHistory.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load sync job history from database");
+            _jobHistoryLoaded = true; // Don't keep retrying
+        }
+    }
+
+    /// <summary>
+    /// Persists a sync job to the database.
+    /// </summary>
+    private async Task PersistJobAsync(SyncJobInfo job)
+    {
+        try
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync();
+            var existing = await context.SyncJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+
+            if (existing != null)
+            {
+                job.ToEntity(existing);
+            }
+            else
+            {
+                context.SyncJobs.Add(job.ToEntity());
+            }
+
+            await context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist sync job {JobId} to database", job.Id);
+        }
     }
 
     /// <inheritdoc />
     public async Task<List<DataSourceStatus>> GetDataSourceStatusesAsync()
     {
+        await EnsureJobHistoryLoadedAsync();
+
         var statuses = new List<DataSourceStatus>();
 
         // Test each data source in parallel
@@ -97,21 +159,23 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
     };
 
     /// <inheritdoc />
-    public Task<List<SyncJobInfo>> GetSyncJobHistoryAsync(int limit = 50)
+    public async Task<List<SyncJobInfo>> GetSyncJobHistoryAsync(int limit = 50)
     {
+        await EnsureJobHistoryLoadedAsync();
+
         var jobs = _syncJobHistory
             .OrderByDescending(j => j.StartTime)
             .Take(limit)
             .ToList();
 
-        return Task.FromResult(jobs);
+        return jobs;
     }
 
     /// <inheritdoc />
-    public Task<SyncJobInfo?> GetSyncJobAsync(string jobId)
+    public async Task<SyncJobInfo?> GetSyncJobAsync(string jobId)
     {
-        var job = _syncJobHistory.FirstOrDefault(j => j.Id == jobId);
-        return Task.FromResult(job);
+        await EnsureJobHistoryLoadedAsync();
+        return _syncJobHistory.FirstOrDefault(j => j.Id == jobId);
     }
 
     /// <inheritdoc />
@@ -132,6 +196,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
 
         _syncJobHistory.Add(job);
         _runningJobs[jobId] = cts;
+        await PersistJobAsync(job);
 
         // Raise started event
         SyncJobStarted?.Invoke(this, new SyncJobEventArgs { Job = job });
@@ -162,12 +227,13 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 ErrorMessage = result.ErrorMessage ?? result.Errors.FirstOrDefault()?.Message
             };
 
-            // Update in history
+            // Update in history and persist
             var index = _syncJobHistory.FindIndex(j => j.Id == jobId);
             if (index >= 0)
             {
                 _syncJobHistory[index] = job;
             }
+            await PersistJobAsync(job);
 
             // Run conflict detection if enabled
             if (result.Success && _configuration.RunConflictDetection)
@@ -211,6 +277,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
             {
                 _syncJobHistory[index] = job;
             }
+            await PersistJobAsync(job);
 
             await _auditService.LogSyncFailedAsync(dataSource.ToString(), jobId,
                 "Operation was cancelled", endTime - startTime);
@@ -234,6 +301,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
             {
                 _syncJobHistory[index] = job;
             }
+            await PersistJobAsync(job);
 
             await _auditService.LogSyncFailedAsync(dataSource.ToString(), jobId, ex.Message, endTime - startTime);
             SyncJobFailed?.Invoke(this, new SyncJobEventArgs { Job = job });
