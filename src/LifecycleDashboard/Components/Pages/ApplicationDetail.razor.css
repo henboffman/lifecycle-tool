@@ -323,6 +323,59 @@
     margin-top: 0.25rem;
 }
 
+/* Classification Grid */
+.classification-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+@media (max-width: 768px) {
+    .classification-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.classification-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+}
+
+.classification-item.full-width {
+    grid-column: 1 / -1;
+}
+
+.classification-label {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.classification-value {
+    font-weight: 500;
+}
+
+.classification-value.critical {
+    color: var(--color-critical);
+}
+
+.classification-value.high {
+    color: var(--color-at-risk);
+}
+
+.classification-value.warning {
+    color: var(--color-attention);
+}
+
+.classification-value.success {
+    color: var(--color-healthy);
+}
+
 /* Role List */
 .role-list {
     display: flex;

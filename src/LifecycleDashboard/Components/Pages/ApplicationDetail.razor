@@ -185,6 +185,40 @@ else
                         </div>
                     </div>
 
+                    <!-- Application Classification -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-card-checklist"></i> Application Classification</h2>
+                        <div class="classification-grid">
+                            <div class="classification-item">
+                                <span class="classification-label">Importance</span>
+                                <span class="classification-value @GetImportanceClass()">
+                                    @(string.IsNullOrEmpty(_application.Importance) ? "Not Set" : _application.Importance)
+                                </span>
+                            </div>
+                            <div class="classification-item">
+                                <span class="classification-label">Application Type</span>
+                                <span class="classification-value">@FormatAppType(_application.ApplicationType)</span>
+                            </div>
+                            <div class="classification-item">
+                                <span class="classification-label">Architecture</span>
+                                <span class="classification-value">@FormatArchitectureType(_application.ArchitectureType)</span>
+                            </div>
+                            <div class="classification-item">
+                                <span class="classification-label">User Base Estimate</span>
+                                <span class="classification-value">
+                                    @(string.IsNullOrEmpty(_application.UserBaseEstimate) ? "Not Set" : _application.UserBaseEstimate)
+                                </span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(_application.ShortDescription))
+                            {
+                                <div class="classification-item full-width">
+                                    <span class="classification-label">Short Description</span>
+                                    <span class="classification-value">@_application.ShortDescription</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
                     <!-- Role Assignments -->
                     <div class="content-section">
                         <h2><i class="bi bi-people"></i> Role Assignments</h2>
@@ -1131,6 +1165,37 @@ else
         if (doc.HasSupportDocumentation) count++;
         return count * 25;
     }
+
+    private string GetImportanceClass()
+    {
+        if (_application == null || string.IsNullOrEmpty(_application.Importance))
+            return "";
+        return _application.Importance.ToLowerInvariant() switch
+        {
+            "1 - critical" or "critical" => "critical",
+            "2 - high" or "high" => "high",
+            "3 - moderate" or "moderate" => "warning",
+            "4 - low" or "low" => "success",
+            _ => ""
+        };
+    }
+
+    private string FormatAppType(AppType appType) => appType switch
+    {
+        AppType.COTS => "COTS (Commercial Off-the-Shelf)",
+        AppType.Homegrown => "Homegrown (In-house)",
+        AppType.Hybrid => "Hybrid",
+        _ => "Unknown"
+    };
+
+    private string FormatArchitectureType(ArchitectureType archType) => archType switch
+    {
+        ArchitectureType.WebBased => "Web Based",
+        ArchitectureType.ClientServer => "Client Server",
+        ArchitectureType.DesktopApp => "Desktop Application",
+        ArchitectureType.Other => "Other",
+        _ => "Unknown"
+    };
 
     private string GetInitials(string name)
     {

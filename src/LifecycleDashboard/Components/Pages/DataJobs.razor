@@ -93,8 +93,31 @@
                             </div>
                         }
                     </div>
+                    <!-- Job Scope Section -->
+                    <div class="source-scope">
+                        <button class="scope-toggle" @onclick="() => ToggleScope(source.Name)">
+                            <i class="bi bi-@(_expandedScopes.Contains(source.Name) ? "chevron-up" : "chevron-down")"></i>
+                            What will run
+                        </button>
+                        @if (_expandedScopes.Contains(source.Name))
+                        {
+                            <div class="scope-details">
+                                @foreach (var op in GetScopeOperations(source.Name))
+                                {
+                                    <div class="scope-operation">
+                                        <i class="bi bi-@op.Icon"></i>
+                                        <div class="scope-op-content">
+                                            <span class="scope-op-name">@op.Name</span>
+                                            <span class="scope-op-desc">@op.Description</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+
                     <div class="source-footer">
-                        <button class="btn btn-sm btn-outline" @onclick='() => NavigateToConfig()'>Configure</button>
+                        <button class="btn btn-sm btn-outline" @onclick='() => NavigateToConfig(source.Name)'>Configure</button>
                         <button class="btn btn-sm btn-primary" @onclick="() => RunJob(source)" disabled="@(_runningSource == source.Name)">
                             @if (_runningSource == source.Name)
                             {
@@ -286,6 +309,7 @@
     private bool _isRunningAll;
     private string? _runningSource;
     private DataIntegration.SyncProgressEventArgs? _currentProgress;
+    private HashSet<string> _expandedScopes = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -582,10 +606,56 @@
         ApplyFilter();
     }
 
-    private void NavigateToConfig()
+    private void NavigateToConfig(string sourceName)
     {
-        Navigation.NavigateTo("/admin");
+        // Navigate to Admin page with tab and section specified
+        Navigation.NavigateTo($"/admin?tab=data-sources&source={Uri.EscapeDataString(sourceName)}");
     }
+
+    private void ToggleScope(string sourceName)
+    {
+        if (!_expandedScopes.Remove(sourceName))
+        {
+            _expandedScopes.Add(sourceName);
+        }
+    }
+
+    private List<ScopeOperation> GetScopeOperations(string sourceName) => sourceName switch
+    {
+        "Azure DevOps" =>
+        [
+            new("List Repositories", "Retrieve all repositories from configured Azure DevOps project", "git"),
+            new("Detect Tech Stacks", "Scan .csproj, package.json, requirements.txt, DESCRIPTION files", "code-slash"),
+            new("Extract Packages", "Parse NuGet, npm, pip, and R package references with versions", "box-seam"),
+            new("Analyze Commits", "Retrieve commit history for the past 365 days", "clock-history"),
+            new("Check Pipelines", "Get latest build/pipeline status for each repository", "gear"),
+            new("Scan README", "Check for README.md presence and basic quality", "file-text"),
+            new("Detect Dependencies", "Scan config files for database connections and external services", "diagram-3")
+        ],
+        "SharePoint" =>
+        [
+            new("Discover Folders", "Find application documentation folders in configured SharePoint site", "folder"),
+            new("Check Templates", "Verify presence of required documentation template folders", "file-check"),
+            new("Assess Completeness", "Calculate documentation completeness score per application", "pie-chart"),
+            new("Map to Applications", "Link SharePoint folders to application records", "link-45deg")
+        ],
+        "ServiceNow" =>
+        [
+            new("Import Applications", "Parse application CMDB records from CSV export", "upload"),
+            new("Import Role Assignments", "Parse role assignment data from CSV export", "people"),
+            new("Validate Users", "Cross-reference users against existing user records", "person-check"),
+            new("Detect Conflicts", "Identify mismatched or duplicate records", "exclamation-triangle"),
+            new("Update Applications", "Merge ServiceNow data into application records", "arrow-repeat")
+        ],
+        "IIS Database" =>
+        [
+            new("Query Usage Metrics", "Retrieve monthly request counts from IIS logs database", "graph-up"),
+            new("Calculate Trends", "Analyze 12-month usage trends per application", "bar-chart-line"),
+            new("Detect Inactive Apps", "Flag applications with zero or declining usage", "dash-circle"),
+            new("Update Health Scores", "Factor usage data into application health calculations", "heart-pulse")
+        ],
+        _ => []
+    };
 
     private void ShowJobDetails(JobExecution job)
     {
@@ -672,4 +742,6 @@
         public string Level { get; set; } = "";
         public string Message { get; set; } = "";
     }
+
+    private record ScopeOperation(string Name, string Description, string Icon);
 }

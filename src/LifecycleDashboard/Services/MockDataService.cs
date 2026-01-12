@@ -2901,6 +2901,157 @@ public class MockDataService : IMockDataService
         return Task.CompletedTask;
     }
 
+    public Task<int> CreateApplicationsFromServiceNowImportAsync()
+    {
+        int count = 0;
+        var apps = IsMockDataEnabled ? _mockApplications : _realApplications;
+
+        foreach (var imported in _importedServiceNowApps)
+        {
+            // Check if app already exists by ServiceNow ID
+            var existing = apps.FirstOrDefault(a => a.ServiceNowId == imported.ServiceNowId);
+            if (existing != null)
+            {
+                apps.Remove(existing);
+            }
+
+            var app = new Application
+            {
+                Id = existing?.Id ?? Guid.NewGuid().ToString(),
+                Name = imported.Name,
+                Description = imported.Description,
+                ShortDescription = imported.ShortDescription,
+                Capability = imported.Capability ?? "Uncategorized",
+                ApplicationType = ParseAppType(imported.ApplicationType),
+                ArchitectureType = ParseArchitectureType(imported.ArchitectureType),
+                UserBaseEstimate = imported.UserBase,
+                Importance = imported.Importance,
+                ServiceNowId = imported.ServiceNowId,
+                RepositoryUrl = imported.RepositoryUrl,
+                DocumentationUrl = imported.DocumentationUrl,
+                HealthScore = 70,
+                LastSyncDate = DateTimeOffset.UtcNow,
+                RoleAssignments = BuildRoleAssignments(imported)
+            };
+
+            apps.Add(app);
+            count++;
+        }
+        return Task.FromResult(count);
+    }
+
+    private static AppType ParseAppType(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return AppType.Unknown;
+        return value.ToUpperInvariant() switch
+        {
+            "COTS" => AppType.COTS,
+            "HOMEGROWN" or "CUSTOM" or "IN-HOUSE" => AppType.Homegrown,
+            "HYBRID" => AppType.Hybrid,
+            "SAAS" => AppType.SaaS,
+            "OPEN SOURCE" or "OPENSOURCE" => AppType.OpenSource,
+            _ => AppType.Unknown
+        };
+    }
+
+    private static ArchitectureType ParseArchitectureType(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return ArchitectureType.Unknown;
+        return value.ToUpperInvariant() switch
+        {
+            "WEB BASED" or "WEB-BASED" or "WEB" => ArchitectureType.WebBased,
+            "CLIENT SERVER" or "CLIENT-SERVER" or "CLIENT/SERVER" => ArchitectureType.ClientServer,
+            "DESKTOP APP" or "DESKTOP" => ArchitectureType.DesktopApp,
+            "MOBILE APP" or "MOBILE" => ArchitectureType.MobileApp,
+            "API" => ArchitectureType.API,
+            "BATCH PROCESS" or "BATCH" => ArchitectureType.BatchProcess,
+            "MICROSERVICES" => ArchitectureType.Microservices,
+            "MONOLITHIC" or "MONOLITH" => ArchitectureType.Monolithic,
+            "OTHER" => ArchitectureType.Other,
+            _ => ArchitectureType.Unknown
+        };
+    }
+
+    private static List<RoleAssignment> BuildRoleAssignments(ImportedServiceNowApplication imported)
+    {
+        var assignments = new List<RoleAssignment>();
+
+        if (!string.IsNullOrEmpty(imported.ProductManagerName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.ProductManagerId ?? Guid.NewGuid().ToString(),
+                UserName = imported.ProductManagerName,
+                UserEmail = GenerateEmailFromName(imported.ProductManagerName),
+                Role = ApplicationRole.ProductManager
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.BusinessOwnerName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.BusinessOwnerId ?? Guid.NewGuid().ToString(),
+                UserName = imported.BusinessOwnerName,
+                UserEmail = GenerateEmailFromName(imported.BusinessOwnerName),
+                Role = ApplicationRole.BusinessOwner
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.FunctionalArchitectName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.FunctionalArchitectId ?? Guid.NewGuid().ToString(),
+                UserName = imported.FunctionalArchitectName,
+                UserEmail = GenerateEmailFromName(imported.FunctionalArchitectName),
+                Role = ApplicationRole.FunctionalArchitect
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.TechnicalArchitectName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.TechnicalArchitectId ?? Guid.NewGuid().ToString(),
+                UserName = imported.TechnicalArchitectName,
+                UserEmail = GenerateEmailFromName(imported.TechnicalArchitectName),
+                Role = ApplicationRole.TechnicalArchitect
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.OwnerName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.OwnerId ?? Guid.NewGuid().ToString(),
+                UserName = imported.OwnerName,
+                UserEmail = GenerateEmailFromName(imported.OwnerName),
+                Role = ApplicationRole.Owner
+            });
+        }
+
+        if (!string.IsNullOrEmpty(imported.TechnicalLeadName))
+        {
+            assignments.Add(new RoleAssignment
+            {
+                UserId = imported.TechnicalLeadId ?? Guid.NewGuid().ToString(),
+                UserName = imported.TechnicalLeadName,
+                UserEmail = GenerateEmailFromName(imported.TechnicalLeadName),
+                Role = ApplicationRole.TechnicalLead
+            });
+        }
+
+        return assignments;
+    }
+
+    private static string GenerateEmailFromName(string name)
+    {
+        // Generate a placeholder email from the name (will be updated when synced with Entra ID)
+        var normalized = name.ToLowerInvariant().Replace(" ", ".").Replace(",", "");
+        return $"{normalized}@example.com";
+    }
+
     public Task<ServiceNowColumnMapping?> GetServiceNowColumnMappingAsync()
     {
         return Task.FromResult(_serviceNowColumnMapping);
@@ -3018,6 +3169,62 @@ public class MockDataService : IMockDataService
         });
 
         return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Capability Mappings
+
+    private readonly List<CapabilityMapping> _capabilityMappings = [];
+
+    public Task<IReadOnlyList<CapabilityMapping>> GetCapabilityMappingsAsync()
+    {
+        return Task.FromResult<IReadOnlyList<CapabilityMapping>>(
+            _capabilityMappings.OrderBy(m => m.Capability).ThenBy(m => m.ApplicationName).ToList());
+    }
+
+    public Task StoreCapabilityMappingsAsync(IEnumerable<CapabilityMapping> mappings)
+    {
+        foreach (var mapping in mappings)
+        {
+            var existingIndex = _capabilityMappings.FindIndex(m =>
+                m.ApplicationName.Equals(mapping.ApplicationName, StringComparison.OrdinalIgnoreCase));
+
+            if (existingIndex >= 0)
+            {
+                _capabilityMappings[existingIndex] = mapping with { UpdatedAt = DateTimeOffset.UtcNow };
+            }
+            else
+            {
+                _capabilityMappings.Add(mapping);
+            }
+        }
+
+        RecordAuditLogAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            EventType = "CapabilityMappingsImported",
+            Category = "DataImport",
+            Message = $"Imported {mappings.Count()} capability mappings",
+            UserId = "system",
+            UserName = "System",
+            EntityType = "CapabilityMapping"
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task ClearCapabilityMappingsAsync()
+    {
+        _capabilityMappings.Clear();
+        return Task.CompletedTask;
+    }
+
+    public Task<string?> GetCapabilityForApplicationAsync(string applicationName)
+    {
+        var mapping = _capabilityMappings.FirstOrDefault(m =>
+            m.ApplicationName.Equals(applicationName, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(mapping?.Capability);
     }
 
     #endregion

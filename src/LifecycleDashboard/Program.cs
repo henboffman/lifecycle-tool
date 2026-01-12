@@ -1,6 +1,8 @@
 using LifecycleDashboard.Components;
+using LifecycleDashboard.Data;
 using LifecycleDashboard.Services;
 using LifecycleDashboard.Services.DataIntegration;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,10 +20,27 @@ builder.Services.AddRazorComponents()
 // Add Data Protection for secure credential storage
 builder.Services.AddDataProtection();
 
+// Register database context (required for data persistence)
+var connectionString = builder.Configuration.GetConnectionString("LifecycleDb");
+if (string.IsNullOrEmpty(connectionString))
+{
+    throw new InvalidOperationException(
+        "Database connection string 'LifecycleDb' is required. " +
+        "Please configure it in appsettings.json or appsettings.Development.json. " +
+        "Run 'docker-compose up -d' to start the SQL Server container.");
+}
+
+// Use DbContextFactory for singleton services that need database access
+builder.Services.AddDbContextFactory<LifecycleDbContext>(options =>
+    options.UseSqlServer(connectionString));
+builder.Services.AddTransient<DatabaseSeeder>();
+
 // Register application services
 builder.Services.AddSingleton<IReleaseNotesService, ReleaseNotesService>();
 builder.Services.AddSingleton<IHealthScoringService, HealthScoringService>();
-builder.Services.AddSingleton<IMockDataService, MockDataService>();
+
+// Use database-backed data service for persistence
+builder.Services.AddSingleton<IMockDataService, DatabaseDataService>();
 
 // Register secure storage service
 builder.Services.AddSingleton<ISecureStorageService, SecureStorageService>();
@@ -43,6 +62,14 @@ builder.Services.AddSingleton<IIisDatabaseService, IisDatabaseService>();
 builder.Services.AddSingleton<IDataSyncOrchestrator, DataSyncOrchestrator>();
 
 var app = builder.Build();
+
+// Seed database with initial data if empty (development only)
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
+    await seeder.SeedAsync();
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

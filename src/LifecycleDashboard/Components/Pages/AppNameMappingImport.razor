@@ -9,11 +9,25 @@
 <div class="import-page">
     <header class="page-header">
         <div class="header-content">
-            <h1>Application Name Mapping</h1>
-            <p class="subtitle">Map ServiceNow application names to SharePoint folders and Azure DevOps repositories</p>
+            <h1>Application Mapping</h1>
+            <p class="subtitle">Import application name mappings and capability assignments</p>
         </div>
     </header>
 
+    <!-- Import Type Tabs -->
+    <div class="import-tabs">
+        <button class="tab-btn @(_activeTab == ImportTab.RepoMapping ? "active" : "")" @onclick="() => _activeTab = ImportTab.RepoMapping">
+            <i class="bi bi-git"></i>
+            Repository Mapping
+        </button>
+        <button class="tab-btn @(_activeTab == ImportTab.CapabilityMapping ? "active" : "")" @onclick="() => _activeTab = ImportTab.CapabilityMapping">
+            <i class="bi bi-diagram-3"></i>
+            Capability Mapping
+        </button>
+    </div>
+
+    @if (_activeTab == ImportTab.RepoMapping)
+    {
     <!-- Explanation -->
     <section class="info-section">
         <div class="info-content">
@@ -308,9 +322,260 @@
             </button>
         </section>
     }
+    } @* End of RepoMapping tab *@
+
+    @if (_activeTab == ImportTab.CapabilityMapping)
+    {
+        <!-- Capability Mapping Section -->
+        <section class="info-section">
+            <div class="info-content">
+                <i class="bi bi-info-circle"></i>
+                <div>
+                    <strong>Application : Capability Mapping</strong>
+                    <p>Upload a CSV to assign each application to a business capability. This is a 1:1 relationship using ServiceNow application names.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Capability Upload -->
+        <section class="import-section">
+            <div class="section-header">
+                <span class="step-number @(_capCurrentStep >= 1 ? "active" : "")">1</span>
+                <h2>Upload Capability CSV</h2>
+            </div>
+
+            <div class="upload-area @(_capCsvFile != null ? "has-file" : "")">
+                @if (_capCsvFile == null)
+                {
+                    <i class="bi bi-cloud-upload upload-icon"></i>
+                    <p>Upload a CSV file with application-to-capability mappings</p>
+                    <InputFile OnChange="HandleCapabilityFileSelected" accept=".csv" class="file-input" id="capCsvFileInput" />
+                    <label for="capCsvFileInput" class="btn btn-primary">Choose File</label>
+                    <p class="hint">Expected columns: Application Name, Capability</p>
+                }
+                else
+                {
+                    <i class="bi bi-file-earmark-check upload-icon success"></i>
+                    <p class="filename">@_capCsvFile.Name</p>
+                    <p class="file-info">@FormatFileSize(_capCsvFile.Size) - @_capDetectedColumns.Count columns detected</p>
+                    <button class="btn btn-outline" @onclick="ClearCapabilityFile">
+                        <i class="bi bi-x"></i> Remove
+                    </button>
+                }
+            </div>
+
+            @if (_capUploadError != null)
+            {
+                <div class="error-message">
+                    <i class="bi bi-exclamation-triangle"></i> @_capUploadError
+                </div>
+            }
+        </section>
+
+        @if (_capCurrentStep >= 2)
+        {
+            <!-- Capability Column Mapping -->
+            <section class="import-section">
+                <div class="section-header">
+                    <span class="step-number active">2</span>
+                    <h2>Map CSV Columns</h2>
+                </div>
+
+                <div class="mapping-grid">
+                    <div class="mapping-row @(string.IsNullOrEmpty(_capAppNameColumn) ? "missing-required" : "")">
+                        <label class="field-label">
+                            Application Name <span class="required-marker">*</span>
+                            <span class="field-hint">The ServiceNow application name</span>
+                        </label>
+                        <select class="mapping-select" @bind="_capAppNameColumn">
+                            <option value="">-- Select Column --</option>
+                            @foreach (var col in _capDetectedColumns)
+                            {
+                                <option value="@col">@col</option>
+                            }
+                        </select>
+                        @if (!string.IsNullOrEmpty(_capAppNameColumn))
+                        {
+                            <span class="sample-value">@GetCapabilitySampleValue(_capAppNameColumn)</span>
+                        }
+                    </div>
+                    <div class="mapping-row @(string.IsNullOrEmpty(_capCapabilityColumn) ? "missing-required" : "")">
+                        <label class="field-label">
+                            Capability <span class="required-marker">*</span>
+                            <span class="field-hint">The business capability</span>
+                        </label>
+                        <select class="mapping-select" @bind="_capCapabilityColumn">
+                            <option value="">-- Select Column --</option>
+                            @foreach (var col in _capDetectedColumns)
+                            {
+                                <option value="@col">@col</option>
+                            }
+                        </select>
+                        @if (!string.IsNullOrEmpty(_capCapabilityColumn))
+                        {
+                            <span class="sample-value">@GetCapabilitySampleValue(_capCapabilityColumn)</span>
+                        }
+                    </div>
+                </div>
+
+                <div class="mapping-actions">
+                    <button class="btn btn-primary" @onclick="GenerateCapabilityPreview" disabled="@(string.IsNullOrEmpty(_capAppNameColumn) || string.IsNullOrEmpty(_capCapabilityColumn))">
+                        <i class="bi bi-eye"></i> Preview Import
+                    </button>
+                </div>
+            </section>
+        }
+
+        @if (_capCurrentStep >= 3 && _capPreviewData.Count > 0)
+        {
+            <!-- Capability Preview -->
+            <section class="import-section">
+                <div class="section-header">
+                    <span class="step-number active">3</span>
+                    <h2>Preview Capability Mappings</h2>
+                </div>
+
+                <div class="preview-stats">
+                    <div class="stat">
+                        <span class="stat-value">@_capTotalRows</span>
+                        <span class="stat-label">Total Rows</span>
+                    </div>
+                    <div class="stat success">
+                        <span class="stat-value">@_capPreviewData.Count</span>
+                        <span class="stat-label">Valid</span>
+                    </div>
+                    <div class="stat warning">
+                        <span class="stat-value">@_capParseWarnings.Count</span>
+                        <span class="stat-label">Warnings</span>
+                    </div>
+                    <div class="stat error">
+                        <span class="stat-value">@_capParseErrors.Count</span>
+                        <span class="stat-label">Errors</span>
+                    </div>
+                </div>
+
+                @if (_capParseWarnings.Count > 0 || _capParseErrors.Count > 0)
+                {
+                    <div class="parse-issues">
+                        @foreach (var error in _capParseErrors.Take(5))
+                        {
+                            <div class="issue error">
+                                <i class="bi bi-x-circle"></i>
+                                <span>Row @error.RowNumber: @error.Message</span>
+                            </div>
+                        }
+                        @foreach (var warning in _capParseWarnings.Take(5))
+                        {
+                            <div class="issue warning">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                <span>Row @warning.RowNumber: @warning.Message</span>
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="preview-table-container">
+                    <table class="preview-table">
+                        <thead>
+                            <tr>
+                                <th>Application Name</th>
+                                <th>Capability</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var mapping in _capPreviewData.Take(20))
+                            {
+                                <tr>
+                                    <td class="primary-name">@mapping.ApplicationName</td>
+                                    <td>@mapping.Capability</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (_capPreviewData.Count > 20)
+                {
+                    <div class="preview-footer">
+                        Showing 20 of @_capPreviewData.Count mappings
+                    </div>
+                }
+
+                <div class="import-actions">
+                    <button class="btn btn-outline" @onclick="() => _capCurrentStep = 2">
+                        <i class="bi bi-arrow-left"></i> Back
+                    </button>
+                    <button class="btn btn-primary btn-lg" @onclick="ExecuteCapabilityImport" disabled="@(_capImporting || _capPreviewData.Count == 0)">
+                        @if (_capImporting)
+                        {
+                            <span class="spinner-sm"></span>
+                            <span>Importing...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-download"></i>
+                            <span>Import @_capPreviewData.Count Mappings</span>
+                        }
+                    </button>
+                </div>
+            </section>
+        }
+
+        @if (_capImportComplete)
+        {
+            <section class="import-section success-section">
+                <div class="success-content">
+                    <i class="bi bi-check-circle-fill success-icon"></i>
+                    <h2>Import Complete!</h2>
+                    <p>Successfully imported @_capImportedCount capability mappings.</p>
+                    <div class="success-actions">
+                        <button class="btn btn-outline" @onclick="ResetCapabilityImport">
+                            <i class="bi bi-arrow-repeat"></i> Import Another File
+                        </button>
+                        <a href="/applications" class="btn btn-primary">
+                            <i class="bi bi-arrow-right"></i> View Applications
+                        </a>
+                    </div>
+                </div>
+            </section>
+        }
+
+        <!-- Existing Capabilities -->
+        @if (_existingCapabilities.Count > 0 && !_capImportComplete)
+        {
+            <section class="import-section existing-section">
+                <div class="section-header">
+                    <h2>Current Capability Mappings</h2>
+                    <span class="import-count">@_existingCapabilities.Count capabilities</span>
+                </div>
+
+                <div class="capability-summary">
+                    @foreach (var group in _existingCapabilities.GroupBy(c => c.Capability).OrderBy(g => g.Key).Take(10))
+                    {
+                        <div class="capability-chip">
+                            <span class="cap-name">@group.Key</span>
+                            <span class="cap-count">@group.Count()</span>
+                        </div>
+                    }
+                    @if (_existingCapabilities.GroupBy(c => c.Capability).Count() > 10)
+                    {
+                        <span class="more-caps">+@(_existingCapabilities.GroupBy(c => c.Capability).Count() - 10) more</span>
+                    }
+                </div>
+
+                <button class="btn btn-outline btn-sm" @onclick="ClearCapabilityData">
+                    <i class="bi bi-trash"></i> Clear All Capability Mappings
+                </button>
+            </section>
+        }
+    }
 </div>
 
 @code {
+    // Tab state
+    private ImportTab _activeTab = ImportTab.RepoMapping;
+
+    // Repo Mapping state
     private IBrowserFile? _csvFile;
     private List<string> _detectedColumns = [];
     private List<Dictionary<string, string>> _csvRows = [];
@@ -330,6 +595,23 @@
     private bool _importComplete;
     private int _importedCount;
 
+    // Capability Mapping state
+    private IBrowserFile? _capCsvFile;
+    private List<string> _capDetectedColumns = [];
+    private List<Dictionary<string, string>> _capCsvRows = [];
+    private string? _capUploadError;
+    private int _capCurrentStep = 1;
+    private string? _capAppNameColumn;
+    private string? _capCapabilityColumn;
+    private List<CapabilityMapping> _capPreviewData = [];
+    private List<CapabilityMapping> _existingCapabilities = [];
+    private List<ParseIssue> _capParseErrors = [];
+    private List<ParseIssue> _capParseWarnings = [];
+    private int _capTotalRows;
+    private bool _capImporting;
+    private bool _capImportComplete;
+    private int _capImportedCount;
+
     private readonly List<MappingField> _mappingFields =
     [
         new("ServiceNowAppNameColumn", "ServiceNow App Name", true, "The canonical application name"),
@@ -344,6 +626,7 @@
     {
         _savedConfig = await DataService.GetAppNameMappingConfigAsync();
         _existingMappings = (await DataService.GetAppNameMappingsAsync()).ToList();
+        _existingCapabilities = (await DataService.GetCapabilityMappingsAsync()).ToList();
 
         if (_savedConfig != null)
         {
@@ -552,7 +835,10 @@
             return;
         }
 
-        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Track seen repo names - repos must be unique (can only map to one app)
+        var seenRepoNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Track apps to merge multiple repos into same app
+        var appMappings = new Dictionary<string, AppNameMapping>(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < _csvRows.Count; i++)
         {
@@ -567,13 +853,6 @@
                 continue;
             }
 
-            if (seenNames.Contains(serviceNowName))
-            {
-                _parseWarnings.Add(new ParseIssue(rowNum, $"Duplicate app name: {serviceNowName}"));
-                continue;
-            }
-            seenNames.Add(serviceNowName);
-
             // Parse repo names (may be comma-separated)
             var repoNames = new List<string>();
             var repoValue = GetCsvValue(row, repoCol);
@@ -583,6 +862,24 @@
                     .Select(r => r.Trim())
                     .Where(r => !string.IsNullOrWhiteSpace(r))
                     .ToList();
+            }
+
+            // Check for duplicate repo names - repos must be unique
+            var duplicateRepos = repoNames.Where(r => seenRepoNames.Contains(r)).ToList();
+            if (duplicateRepos.Count > 0)
+            {
+                foreach (var dupRepo in duplicateRepos)
+                {
+                    _parseWarnings.Add(new ParseIssue(rowNum, $"Duplicate repo (skipped): {dupRepo}"));
+                }
+                // Remove duplicates from this row's repos
+                repoNames = repoNames.Where(r => !seenRepoNames.Contains(r)).ToList();
+            }
+
+            // Add new repos to seen set
+            foreach (var repo in repoNames)
+            {
+                seenRepoNames.Add(repo);
             }
 
             // Parse alternative names
@@ -596,22 +893,56 @@
                     .ToList();
             }
 
-            var mapping = new AppNameMapping
+            // Check if we already have a mapping for this ServiceNow app
+            if (appMappings.TryGetValue(serviceNowName, out var existingMapping))
             {
-                Id = Guid.NewGuid().ToString(),
-                ServiceNowAppName = serviceNowName,
-                SharePointFolderName = GetCsvValue(row, sharePointCol),
-                AzureDevOpsRepoNames = repoNames,
-                AlternativeNames = altNames,
-                Capability = GetCsvValue(row, capabilityCol),
-                Notes = GetCsvValue(row, notesCol),
-                RawCsvValues = row,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
+                // Merge repos into existing mapping (multiple repos can map to same app)
+                existingMapping.AzureDevOpsRepoNames.AddRange(repoNames);
 
-            _previewData.Add(mapping);
+                // Merge alternative names
+                foreach (var altName in altNames)
+                {
+                    if (!existingMapping.AlternativeNames.Contains(altName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        existingMapping.AlternativeNames.Add(altName);
+                    }
+                }
+
+                // Update SharePoint folder and capability if not already set (using 'with' for immutable properties)
+                var newSharePointFolder = string.IsNullOrEmpty(existingMapping.SharePointFolderName)
+                    ? GetCsvValue(row, sharePointCol)
+                    : existingMapping.SharePointFolderName;
+                var newCapability = string.IsNullOrEmpty(existingMapping.Capability)
+                    ? GetCsvValue(row, capabilityCol)
+                    : existingMapping.Capability;
+
+                appMappings[serviceNowName] = existingMapping with
+                {
+                    SharePointFolderName = newSharePointFolder,
+                    Capability = newCapability
+                };
+            }
+            else
+            {
+                // Create new mapping
+                var mapping = new AppNameMapping
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    ServiceNowAppName = serviceNowName,
+                    SharePointFolderName = GetCsvValue(row, sharePointCol),
+                    AzureDevOpsRepoNames = repoNames,
+                    AlternativeNames = altNames,
+                    Capability = GetCsvValue(row, capabilityCol),
+                    Notes = GetCsvValue(row, notesCol),
+                    RawCsvValues = row,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+
+                appMappings[serviceNowName] = mapping;
+            }
         }
 
+        _previewData = appMappings.Values.ToList();
         _currentStep = 3;
     }
 
@@ -683,6 +1014,208 @@
         return $"{len:0.##} {sizes[order]}";
     }
 
+    // Capability Mapping Methods
+    private async Task HandleCapabilityFileSelected(InputFileChangeEventArgs e)
+    {
+        _capUploadError = null;
+        _capCsvFile = e.File;
+
+        if (_capCsvFile.Size > 10 * 1024 * 1024)
+        {
+            _capUploadError = "File too large. Maximum size is 10MB.";
+            _capCsvFile = null;
+            return;
+        }
+
+        await ParseCapabilityCsvFile();
+    }
+
+    private async Task ParseCapabilityCsvFile()
+    {
+        if (_capCsvFile == null) return;
+
+        try
+        {
+            using var stream = _capCsvFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            var content = await reader.ReadToEndAsync();
+            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            if (lines.Length == 0)
+            {
+                _capUploadError = "CSV file is empty.";
+                return;
+            }
+
+            _capDetectedColumns = ParseCsvLine(lines[0]).ToList();
+
+            if (_capDetectedColumns.Count == 0)
+            {
+                _capUploadError = "Could not detect columns in CSV header.";
+                return;
+            }
+
+            _capCsvRows.Clear();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var values = ParseCsvLine(lines[i]);
+                if (values.Count > 0)
+                {
+                    var row = new Dictionary<string, string>();
+                    for (int j = 0; j < Math.Min(_capDetectedColumns.Count, values.Count); j++)
+                    {
+                        row[_capDetectedColumns[j]] = values[j];
+                    }
+                    _capCsvRows.Add(row);
+                }
+            }
+
+            _capTotalRows = _capCsvRows.Count;
+            _capCurrentStep = 2;
+
+            // Auto-detect column mappings
+            AutoDetectCapabilityMapping();
+        }
+        catch (Exception ex)
+        {
+            _capUploadError = $"Error parsing CSV: {ex.Message}";
+        }
+    }
+
+    private void AutoDetectCapabilityMapping()
+    {
+        foreach (var col in _capDetectedColumns)
+        {
+            var colLower = col.ToLowerInvariant();
+            if (string.IsNullOrEmpty(_capAppNameColumn) &&
+                (colLower.Contains("app") || colLower.Contains("name") || colLower.Contains("application")))
+            {
+                _capAppNameColumn = col;
+            }
+            else if (string.IsNullOrEmpty(_capCapabilityColumn) &&
+                (colLower.Contains("capability") || colLower.Contains("category") || colLower.Contains("business") || colLower.Contains("offering")))
+            {
+                _capCapabilityColumn = col;
+            }
+        }
+    }
+
+    private string GetCapabilitySampleValue(string columnName)
+    {
+        if (_capCsvRows.Count == 0) return "";
+        if (_capCsvRows[0].TryGetValue(columnName, out var value))
+        {
+            return value.Length > 40 ? value[..40] + "..." : value;
+        }
+        return "";
+    }
+
+    private void GenerateCapabilityPreview()
+    {
+        _capPreviewData.Clear();
+        _capParseErrors.Clear();
+        _capParseWarnings.Clear();
+
+        if (string.IsNullOrEmpty(_capAppNameColumn) || string.IsNullOrEmpty(_capCapabilityColumn))
+        {
+            return;
+        }
+
+        var seenApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < _capCsvRows.Count; i++)
+        {
+            var row = _capCsvRows[i];
+            var rowNum = i + 2;
+
+            var appName = row.TryGetValue(_capAppNameColumn, out var appVal) ? appVal?.Trim() : null;
+            var capability = row.TryGetValue(_capCapabilityColumn, out var capVal) ? capVal?.Trim() : null;
+
+            if (string.IsNullOrWhiteSpace(appName))
+            {
+                _capParseErrors.Add(new ParseIssue(rowNum, "Missing Application Name"));
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(capability))
+            {
+                _capParseWarnings.Add(new ParseIssue(rowNum, $"Missing capability for: {appName}"));
+                continue;
+            }
+
+            if (seenApps.Contains(appName))
+            {
+                _capParseWarnings.Add(new ParseIssue(rowNum, $"Duplicate application (skipped): {appName}"));
+                continue;
+            }
+
+            seenApps.Add(appName);
+
+            _capPreviewData.Add(new CapabilityMapping
+            {
+                Id = Guid.NewGuid().ToString(),
+                ApplicationName = appName,
+                Capability = capability
+            });
+        }
+
+        _capCurrentStep = 3;
+    }
+
+    private async Task ExecuteCapabilityImport()
+    {
+        if (_capPreviewData.Count == 0) return;
+
+        _capImporting = true;
+        StateHasChanged();
+
+        try
+        {
+            await DataService.StoreCapabilityMappingsAsync(_capPreviewData);
+            _capImportedCount = _capPreviewData.Count;
+            _capImportComplete = true;
+            _existingCapabilities = (await DataService.GetCapabilityMappingsAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            _capUploadError = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            _capImporting = false;
+        }
+    }
+
+    private void ClearCapabilityFile()
+    {
+        _capCsvFile = null;
+        _capDetectedColumns.Clear();
+        _capCsvRows.Clear();
+        _capPreviewData.Clear();
+        _capParseErrors.Clear();
+        _capParseWarnings.Clear();
+        _capCurrentStep = 1;
+        _capUploadError = null;
+        _capAppNameColumn = null;
+        _capCapabilityColumn = null;
+    }
+
+    private void ResetCapabilityImport()
+    {
+        ClearCapabilityFile();
+        _capImportComplete = false;
+        _capImportedCount = 0;
+    }
+
+    private async Task ClearCapabilityData()
+    {
+        await DataService.ClearCapabilityMappingsAsync();
+        _existingCapabilities.Clear();
+    }
+
     private record MappingField(string PropertyName, string DisplayName, bool IsRequired, string? Description = null);
     private record ParseIssue(int RowNumber, string Message);
+
+    private enum ImportTab { RepoMapping, CapabilityMapping }
 }
