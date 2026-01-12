@@ -34,6 +34,7 @@ public static class EntityMappers
             RepositoryUrl = entity.RepositoryUrl,
             DocumentationUrl = entity.DocumentationUrl,
             ServiceNowId = entity.ServiceNowId,
+            IsMockData = entity.IsMockData,
             HealthScore = entity.HealthScore,
             LastActivityDate = entity.LastActivityDate,
             LastSyncDate = entity.LastSyncDate,
@@ -67,6 +68,7 @@ public static class EntityMappers
         entity.RepositoryUrl = model.RepositoryUrl;
         entity.DocumentationUrl = model.DocumentationUrl;
         entity.ServiceNowId = model.ServiceNowId;
+        entity.IsMockData = model.IsMockData;
         entity.HealthScore = model.HealthScore;
         entity.LastActivityDate = model.LastActivityDate;
         entity.LastSyncDate = model.LastSyncDate;
@@ -438,6 +440,160 @@ public static class EntityMappers
         entity.TypicalRolesJson = JsonSerializer.Serialize(model.TypicalRoles, JsonOptions);
         entity.LastUpdated = model.LastUpdated;
         entity.LastUpdatedBy = model.LastUpdatedBy;
+        return entity;
+    }
+
+    #endregion
+
+    #region SyncedRepository
+
+    public static SyncedRepository ToModel(this SyncedRepositoryEntity entity)
+    {
+        return new SyncedRepository
+        {
+            Id = entity.Id,
+            Name = entity.Name,
+            Url = entity.Url,
+            CloneUrl = entity.CloneUrl,
+            DefaultBranch = entity.DefaultBranch,
+            ProjectName = entity.ProjectName,
+            SizeBytes = entity.SizeBytes,
+            IsDisabled = entity.IsDisabled,
+            SyncedAt = entity.SyncedAt,
+            SyncedBy = entity.SyncedBy,
+            PrimaryStack = entity.PrimaryStack,
+            Frameworks = JsonSerializer.Deserialize<List<string>>(entity.FrameworksJson, JsonOptions) ?? [],
+            Languages = JsonSerializer.Deserialize<List<string>>(entity.LanguagesJson, JsonOptions) ?? [],
+            TargetFramework = entity.TargetFramework,
+            DetectedPattern = entity.DetectedPattern,
+            TotalCommits = entity.TotalCommits,
+            LastCommitDate = entity.LastCommitDate,
+            Contributors = JsonSerializer.Deserialize<List<string>>(entity.ContributorsJson, JsonOptions) ?? [],
+            NuGetPackageCount = entity.NuGetPackageCount,
+            NpmPackageCount = entity.NpmPackageCount,
+            Packages = JsonSerializer.Deserialize<List<SyncedPackageReference>>(entity.PackagesJson, JsonOptions) ?? [],
+            LastBuildStatus = entity.LastBuildStatus,
+            LastBuildResult = entity.LastBuildResult,
+            LastBuildDate = entity.LastBuildDate,
+            HasReadme = entity.HasReadme,
+            ReadmeQualityScore = entity.ReadmeQualityScore,
+            LinkedApplicationId = entity.LinkedApplicationId,
+            LinkedApplicationName = entity.LinkedApplicationName
+        };
+    }
+
+    public static SyncedRepositoryEntity ToEntity(this SyncedRepository model, SyncedRepositoryEntity? existing = null)
+    {
+        var entity = existing ?? new SyncedRepositoryEntity { Id = model.Id, CreatedAt = DateTimeOffset.UtcNow };
+        entity.Name = model.Name;
+        entity.Url = model.Url;
+        entity.CloneUrl = model.CloneUrl;
+        entity.DefaultBranch = model.DefaultBranch;
+        entity.ProjectName = model.ProjectName;
+        entity.SizeBytes = model.SizeBytes;
+        entity.IsDisabled = model.IsDisabled;
+        entity.SyncedAt = model.SyncedAt;
+        entity.SyncedBy = model.SyncedBy;
+        entity.PrimaryStack = model.PrimaryStack;
+        entity.FrameworksJson = JsonSerializer.Serialize(model.Frameworks, JsonOptions);
+        entity.LanguagesJson = JsonSerializer.Serialize(model.Languages, JsonOptions);
+        entity.TargetFramework = model.TargetFramework;
+        entity.DetectedPattern = model.DetectedPattern;
+        entity.TotalCommits = model.TotalCommits;
+        entity.LastCommitDate = model.LastCommitDate;
+        entity.ContributorsJson = JsonSerializer.Serialize(model.Contributors, JsonOptions);
+        entity.NuGetPackageCount = model.NuGetPackageCount;
+        entity.NpmPackageCount = model.NpmPackageCount;
+        entity.PackagesJson = JsonSerializer.Serialize(model.Packages, JsonOptions);
+        entity.LastBuildStatus = model.LastBuildStatus;
+        entity.LastBuildResult = model.LastBuildResult;
+        entity.LastBuildDate = model.LastBuildDate;
+        entity.HasReadme = model.HasReadme;
+        entity.ReadmeQualityScore = model.ReadmeQualityScore;
+        entity.LinkedApplicationId = model.LinkedApplicationId;
+        entity.LinkedApplicationName = model.LinkedApplicationName;
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        return entity;
+    }
+
+    #endregion
+
+    #region ImportedServiceNowApplication
+
+    public static ImportedServiceNowApplication ToModel(this ImportedServiceNowApplicationEntity entity)
+    {
+        return new ImportedServiceNowApplication
+        {
+            Id = entity.Id,
+            ServiceNowId = entity.ServiceNowId,
+            Name = entity.Name,
+            Description = entity.Description,
+            ShortDescription = entity.ShortDescription,
+            Capability = entity.Capability,
+            Status = entity.Status,
+            OwnerId = entity.OwnerId,
+            OwnerName = entity.OwnerName,
+            ProductManagerId = entity.ProductManagerId,
+            ProductManagerName = entity.ProductManagerName,
+            BusinessOwnerId = entity.BusinessOwnerId,
+            BusinessOwnerName = entity.BusinessOwnerName,
+            FunctionalArchitectId = entity.FunctionalArchitectId,
+            FunctionalArchitectName = entity.FunctionalArchitectName,
+            TechnicalArchitectId = entity.TechnicalArchitectId,
+            TechnicalArchitectName = entity.TechnicalArchitectName,
+            TechnicalLeadId = entity.TechnicalLeadId,
+            TechnicalLeadName = entity.TechnicalLeadName,
+            ApplicationType = entity.ApplicationType,
+            ArchitectureType = entity.ArchitectureType,
+            UserBase = entity.UserBase,
+            Importance = entity.Importance,
+            RepositoryUrl = entity.RepositoryUrl,
+            DocumentationUrl = entity.DocumentationUrl,
+            Environment = entity.Environment,
+            Criticality = entity.Criticality,
+            SupportGroup = entity.SupportGroup,
+            ImportedAt = entity.ImportedAt,
+            RawCsvValues = JsonSerializer.Deserialize<Dictionary<string, string>>(entity.RawCsvValuesJson, JsonOptions) ?? [],
+            LinkedRepositoryId = entity.LinkedRepositoryId,
+            LinkedRepositoryName = entity.LinkedRepositoryName
+        };
+    }
+
+    public static ImportedServiceNowApplicationEntity ToEntity(this ImportedServiceNowApplication model, ImportedServiceNowApplicationEntity? existing = null)
+    {
+        var entity = existing ?? new ImportedServiceNowApplicationEntity { Id = model.Id, CreatedAt = DateTimeOffset.UtcNow };
+        entity.ServiceNowId = model.ServiceNowId;
+        entity.Name = model.Name;
+        entity.Description = model.Description;
+        entity.ShortDescription = model.ShortDescription;
+        entity.Capability = model.Capability;
+        entity.Status = model.Status;
+        entity.OwnerId = model.OwnerId;
+        entity.OwnerName = model.OwnerName;
+        entity.ProductManagerId = model.ProductManagerId;
+        entity.ProductManagerName = model.ProductManagerName;
+        entity.BusinessOwnerId = model.BusinessOwnerId;
+        entity.BusinessOwnerName = model.BusinessOwnerName;
+        entity.FunctionalArchitectId = model.FunctionalArchitectId;
+        entity.FunctionalArchitectName = model.FunctionalArchitectName;
+        entity.TechnicalArchitectId = model.TechnicalArchitectId;
+        entity.TechnicalArchitectName = model.TechnicalArchitectName;
+        entity.TechnicalLeadId = model.TechnicalLeadId;
+        entity.TechnicalLeadName = model.TechnicalLeadName;
+        entity.ApplicationType = model.ApplicationType;
+        entity.ArchitectureType = model.ArchitectureType;
+        entity.UserBase = model.UserBase;
+        entity.Importance = model.Importance;
+        entity.RepositoryUrl = model.RepositoryUrl;
+        entity.DocumentationUrl = model.DocumentationUrl;
+        entity.Environment = model.Environment;
+        entity.Criticality = model.Criticality;
+        entity.SupportGroup = model.SupportGroup;
+        entity.ImportedAt = model.ImportedAt;
+        entity.RawCsvValuesJson = JsonSerializer.Serialize(model.RawCsvValues, JsonOptions);
+        entity.LinkedRepositoryId = model.LinkedRepositoryId;
+        entity.LinkedRepositoryName = model.LinkedRepositoryName;
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
         return entity;
     }
 

@@ -621,6 +621,80 @@
     font-size: 0.8rem;
 }
 
+/* Step Results Table */
+.step-results {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e5e7eb;
+}
+
+.step-results h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem 0;
+    color: #374151;
+}
+
+.step-results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.step-results-table th {
+    background: #f9fafb;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.step-results-table th.text-right {
+    text-align: right;
+}
+
+.step-results-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: middle;
+}
+
+.step-results-table td.text-right {
+    text-align: right;
+    font-family: monospace;
+}
+
+.step-results-table tr:last-child td {
+    border-bottom: none;
+}
+
+.step-results-table tr.step-warning {
+    background: rgba(234, 179, 8, 0.05);
+}
+
+.step-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+}
+
+.step-status.success {
+    color: #22c55e;
+}
+
+.step-status.warning {
+    color: #eab308;
+}
+
+.step-status.skipped {
+    color: #9ca3af;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .page-header {
@@ -651,5 +725,14 @@
 
     .detail-grid {
         grid-template-columns: 1fr;
+    }
+
+    .step-results-table {
+        font-size: 0.75rem;
+    }
+
+    .step-results-table th,
+    .step-results-table td {
+        padding: 0.35rem 0.5rem;
     }
 }

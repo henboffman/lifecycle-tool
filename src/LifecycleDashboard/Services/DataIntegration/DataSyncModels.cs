@@ -41,6 +41,9 @@ public record DataSyncResult
     /// <summary>Data conflicts detected during sync.</summary>
     public List<DataConflict> ConflictsDetected { get; init; } = [];
 
+    /// <summary>Detailed results for each sync step (for debugging/reporting).</summary>
+    public List<SyncStepResult> StepResults { get; init; } = [];
+
     /// <summary>Creates a successful result.</summary>
     public static DataSyncResult Succeeded(DataSourceType dataSource, DateTimeOffset startTime, int processed, int created, int updated, int unchanged = 0)
     {
@@ -408,4 +411,34 @@ public enum DataSourceType
 
     /// <summary>IIS database for usage metrics.</summary>
     IisDatabase
+}
+
+/// <summary>
+/// Result of an individual sync step (e.g., tech stack detection, commit history, etc.)
+/// </summary>
+public record SyncStepResult
+{
+    /// <summary>Name of the sync step.</summary>
+    public required string StepName { get; init; }
+
+    /// <summary>Whether this step succeeded.</summary>
+    public bool Success { get; init; }
+
+    /// <summary>Number of items successfully processed.</summary>
+    public int SuccessCount { get; init; }
+
+    /// <summary>Number of items that failed.</summary>
+    public int FailCount { get; init; }
+
+    /// <summary>Number of items skipped (e.g., no data available).</summary>
+    public int SkipCount { get; init; }
+
+    /// <summary>Error message if the step failed.</summary>
+    public string? ErrorMessage { get; init; }
+
+    /// <summary>Duration of this step.</summary>
+    public TimeSpan Duration { get; init; }
+
+    /// <summary>Additional details about this step.</summary>
+    public Dictionary<string, object> Details { get; init; } = [];
 }

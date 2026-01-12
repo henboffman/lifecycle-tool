@@ -21,10 +21,6 @@ public class DatabaseDataService : IMockDataService
     private SystemSettings _systemSettings = new();
     private readonly List<DataSourceConfig> _dataSourceConfigs = [];
 
-    // In-memory storage for data that doesn't have entities yet
-    private readonly List<ImportedServiceNowApplication> _importedServiceNowApps = [];
-    private readonly List<SyncedRepository> _syncedRepositories = [];
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -100,7 +96,16 @@ public class DatabaseDataService : IMockDataService
     public async Task<IReadOnlyList<Application>> GetApplicationsAsync()
     {
         await using var context = await _contextFactory.CreateDbContextAsync();
-        var entities = await context.Applications.AsNoTracking().ToListAsync();
+
+        // Filter based on mock mode setting
+        var query = context.Applications.AsNoTracking();
+        if (!IsMockDataEnabled)
+        {
+            // Live mode: exclude mock data
+            query = query.Where(a => !a.IsMockData);
+        }
+
+        var entities = await query.ToListAsync();
         return entities.Select(e => e.ToModel()).ToList();
     }
 
@@ -558,69 +563,101 @@ public class DatabaseDataService : IMockDataService
 
     #region Synced Repositories
 
-    public Task<IReadOnlyList<SyncedRepository>> GetSyncedRepositoriesAsync()
+    public async Task<IReadOnlyList<SyncedRepository>> GetSyncedRepositoriesAsync()
     {
-        return Task.FromResult<IReadOnlyList<SyncedRepository>>(_syncedRepositories.ToList());
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.SyncedRepositories.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
     }
 
-    public Task StoreSyncedRepositoriesAsync(IEnumerable<SyncedRepository> repositories)
+    public async Task StoreSyncedRepositoriesAsync(IEnumerable<SyncedRepository> repositories)
     {
-        _syncedRepositories.Clear();
-        _syncedRepositories.AddRange(repositories);
-        return Task.CompletedTask;
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        foreach (var repo in repositories)
+        {
+            var existing = await context.SyncedRepositories.FirstOrDefaultAsync(r => r.Id == repo.Id);
+            if (existing != null)
+            {
+                repo.ToEntity(existing);
+            }
+            else
+            {
+                context.SyncedRepositories.Add(repo.ToEntity());
+            }
+        }
+
+        await context.SaveChangesAsync();
+        _logger.LogInformation("Stored {Count} synced repositories to database", repositories.Count());
     }
 
-    public Task<SyncedRepository?> GetSyncedRepositoryAsync(string repositoryId)
+    public async Task<SyncedRepository?> GetSyncedRepositoryAsync(string repositoryId)
     {
-        var repo = _syncedRepositories.FirstOrDefault(r => r.Id == repositoryId);
-        return Task.FromResult(repo);
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.SyncedRepositories.AsNoTracking().FirstOrDefaultAsync(r => r.Id == repositoryId);
+        return entity?.ToModel();
     }
 
-    public Task ClearSyncedRepositoriesAsync()
+    public async Task ClearSyncedRepositoriesAsync()
     {
-        _syncedRepositories.Clear();
-        return Task.CompletedTask;
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        context.SyncedRepositories.RemoveRange(context.SyncedRepositories);
+        await context.SaveChangesAsync();
     }
 
     #endregion
 
     #region ServiceNow Applications
 
-    public Task<IReadOnlyList<ImportedServiceNowApplication>> GetImportedServiceNowApplicationsAsync()
+    public async Task<IReadOnlyList<ImportedServiceNowApplication>> GetImportedServiceNowApplicationsAsync()
     {
-        return Task.FromResult<IReadOnlyList<ImportedServiceNowApplication>>(_importedServiceNowApps.ToList());
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.ImportedServiceNowApplications.AsNoTracking().ToListAsync();
+        return entities.Select(e => e.ToModel()).ToList();
     }
 
-    public Task StoreServiceNowApplicationsAsync(IEnumerable<ImportedServiceNowApplication> applications)
+    public async Task StoreServiceNowApplicationsAsync(IEnumerable<ImportedServiceNowApplication> applications)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
         foreach (var app in applications)
         {
-            var existing = _importedServiceNowApps.FirstOrDefault(a => a.ServiceNowId == app.ServiceNowId);
+            var existing = await context.ImportedServiceNowApplications.FirstOrDefaultAsync(a => a.ServiceNowId == app.ServiceNowId);
             if (existing != null)
             {
-                _importedServiceNowApps.Remove(existing);
+                app.ToEntity(existing);
             }
-            _importedServiceNowApps.Add(app);
+            else
+            {
+                context.ImportedServiceNowApplications.Add(app.ToEntity());
+            }
         }
-        return Task.CompletedTask;
+
+        await context.SaveChangesAsync();
+        _logger.LogInformation("Stored {Count} imported ServiceNow applications to database", applications.Count());
     }
 
-    public Task ClearServiceNowApplicationsAsync()
+    public async Task ClearServiceNowApplicationsAsync()
     {
-        _importedServiceNowApps.Clear();
-        return Task.CompletedTask;
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        await context.ImportedServiceNowApplications.ExecuteDeleteAsync();
+        _logger.LogInformation("Cleared all imported ServiceNow applications from database");
     }
 
     public async Task<int> CreateApplicationsFromServiceNowImportAsync()
     {
-        if (_importedServiceNowApps.Count == 0)
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var importedApps = await context.ImportedServiceNowApplications.AsNoTracking().ToListAsync();
+
+        if (importedApps.Count == 0)
             return 0;
 
-        await using var context = await _contextFactory.CreateDbContextAsync();
         int count = 0;
 
-        foreach (var imported in _importedServiceNowApps)
+        foreach (var importedEntity in importedApps)
         {
+            var imported = importedEntity.ToModel();
+
             // Check if app already exists by ServiceNow ID
             var existing = await context.Applications
                 .FirstOrDefaultAsync(a => a.ServiceNowId == imported.ServiceNowId);
@@ -639,7 +676,8 @@ public class DatabaseDataService : IMockDataService
                 ServiceNowId = imported.ServiceNowId,
                 RepositoryUrl = imported.RepositoryUrl,
                 DocumentationUrl = imported.DocumentationUrl,
-                HealthScore = existing != null ? context.Entry(existing).Property<int>("HealthScore").CurrentValue : 70,
+                IsMockData = false, // Imported data is real, not mock
+                HealthScore = existing?.HealthScore ?? 70,
                 LastSyncDate = DateTimeOffset.UtcNow,
                 RoleAssignments = BuildRoleAssignments(imported)
             };

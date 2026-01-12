@@ -270,6 +270,49 @@
                         </div>
                     }
 
+                    @if (_selectedJob.StepResults.Count > 0)
+                    {
+                        <div class="step-results">
+                            <h4>Sync Step Results</h4>
+                            <table class="step-results-table">
+                                <thead>
+                                    <tr>
+                                        <th>Step</th>
+                                        <th>Status</th>
+                                        <th class="text-right">Success</th>
+                                        <th class="text-right">Failed</th>
+                                        <th class="text-right">Skipped</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var step in _selectedJob.StepResults)
+                                    {
+                                        <tr class="@(step.Success ? "" : "step-warning")">
+                                            <td>@step.StepName</td>
+                                            <td>
+                                                @if (step.Success)
+                                                {
+                                                    <span class="step-status success"><i class="bi bi-check-circle-fill"></i></span>
+                                                }
+                                                else if (step.FailCount > 0)
+                                                {
+                                                    <span class="step-status warning"><i class="bi bi-exclamation-triangle-fill"></i></span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="step-status skipped"><i class="bi bi-dash-circle"></i></span>
+                                                }
+                                            </td>
+                                            <td class="text-right">@step.SuccessCount</td>
+                                            <td class="text-right">@step.FailCount</td>
+                                            <td class="text-right">@step.SkipCount</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
                     @if (_selectedJob.Logs.Count > 0)
                     {
                         <div class="job-logs">
@@ -575,7 +618,8 @@
                     Timestamp = DateTimeOffset.UtcNow,
                     Level = "ERROR",
                     Message = e.Message
-                }).ToList()
+                }).ToList(),
+                StepResults = result.StepResults
             };
 
             // Update source status
@@ -734,6 +778,7 @@
         public string Status { get; set; } = "";
         public string Message { get; set; } = "";
         public List<LogEntry> Logs { get; set; } = [];
+        public List<DataIntegration.SyncStepResult> StepResults { get; set; } = [];
     }
 
     private class LogEntry

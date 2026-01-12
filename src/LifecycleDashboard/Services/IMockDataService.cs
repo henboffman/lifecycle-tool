@@ -462,7 +462,7 @@ public record AuditLogFilter
 /// </summary>
 public record SystemSettings
 {
-    public bool MockDataEnabled { get; init; } = true;
+    public bool MockDataEnabled { get; init; } = false;
     public bool DevModeSidebarEnabled { get; init; } = true;
     public bool AiRecommendationsEnabled { get; init; } = false;
     public string ApplicationVersion { get; init; } = "1.0.0-dev";

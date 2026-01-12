@@ -326,6 +326,7 @@ public class MockDataService : IMockDataService
                 RepositoryUrl = $"https://dev.azure.com/company/project/_git/{appNames[i].ToLower().Replace(" ", "-")}",
                 DocumentationUrl = $"https://sharepoint.company.com/docs/{capability.ToLower().Replace(" ", "-")}/{appNames[i].ToLower().Replace(" ", "-")}",
                 ServiceNowId = $"SN-{random.Next(10000, 99999)}",
+                IsMockData = true, // This is mock/seed data
                 HealthScore = healthScore,
                 LastActivityDate = DateTimeOffset.UtcNow.AddDays(-random.Next(1, 400)),
                 LastSyncDate = DateTimeOffset.UtcNow.AddHours(-random.Next(1, 48)),

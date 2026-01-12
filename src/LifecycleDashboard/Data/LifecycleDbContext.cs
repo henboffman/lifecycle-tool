@@ -23,6 +23,8 @@ public class LifecycleDbContext : DbContext
     public DbSet<SyncJobEntity> SyncJobs => Set<SyncJobEntity>();
     public DbSet<DiscoveredSharePointFolderEntity> SharePointFolders => Set<DiscoveredSharePointFolderEntity>();
     public DbSet<TaskDocumentationEntity> TaskDocumentation => Set<TaskDocumentationEntity>();
+    public DbSet<SyncedRepositoryEntity> SyncedRepositories => Set<SyncedRepositoryEntity>();
+    public DbSet<ImportedServiceNowApplicationEntity> ImportedServiceNowApplications => Set<ImportedServiceNowApplicationEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -176,6 +178,70 @@ public class LifecycleDbContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(4000).IsRequired();
             entity.Property(e => e.LastUpdatedBy).HasMaxLength(200);
             entity.HasIndex(e => e.TaskType).IsUnique();
+        });
+
+        // SyncedRepository (Azure DevOps sync results)
+        modelBuilder.Entity<SyncedRepositoryEntity>(entity =>
+        {
+            entity.ToTable("SyncedRepositories");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Url).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.CloneUrl).HasMaxLength(500);
+            entity.Property(e => e.DefaultBranch).HasMaxLength(100);
+            entity.Property(e => e.ProjectName).HasMaxLength(200);
+            entity.Property(e => e.SyncedBy).HasMaxLength(200);
+            entity.Property(e => e.PrimaryStack).HasMaxLength(100);
+            entity.Property(e => e.TargetFramework).HasMaxLength(100);
+            entity.Property(e => e.DetectedPattern).HasMaxLength(500);
+            entity.Property(e => e.LastBuildStatus).HasMaxLength(50);
+            entity.Property(e => e.LastBuildResult).HasMaxLength(50);
+            entity.Property(e => e.LinkedApplicationId).HasMaxLength(100);
+            entity.Property(e => e.LinkedApplicationName).HasMaxLength(200);
+            entity.HasIndex(e => e.Name);
+            entity.HasIndex(e => e.PrimaryStack);
+            entity.HasIndex(e => e.LinkedApplicationId);
+            entity.HasIndex(e => e.SyncedAt);
+        });
+
+        // ImportedServiceNowApplication (ServiceNow CSV import results)
+        modelBuilder.Entity<ImportedServiceNowApplicationEntity>(entity =>
+        {
+            entity.ToTable("ImportedServiceNowApplications");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ServiceNowId).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(4000);
+            entity.Property(e => e.ShortDescription).HasMaxLength(500);
+            entity.Property(e => e.Capability).HasMaxLength(100);
+            entity.Property(e => e.Status).HasMaxLength(50);
+            entity.Property(e => e.OwnerId).HasMaxLength(100);
+            entity.Property(e => e.OwnerName).HasMaxLength(200);
+            entity.Property(e => e.ProductManagerId).HasMaxLength(100);
+            entity.Property(e => e.ProductManagerName).HasMaxLength(200);
+            entity.Property(e => e.BusinessOwnerId).HasMaxLength(100);
+            entity.Property(e => e.BusinessOwnerName).HasMaxLength(200);
+            entity.Property(e => e.FunctionalArchitectId).HasMaxLength(100);
+            entity.Property(e => e.FunctionalArchitectName).HasMaxLength(200);
+            entity.Property(e => e.TechnicalArchitectId).HasMaxLength(100);
+            entity.Property(e => e.TechnicalArchitectName).HasMaxLength(200);
+            entity.Property(e => e.TechnicalLeadId).HasMaxLength(100);
+            entity.Property(e => e.TechnicalLeadName).HasMaxLength(200);
+            entity.Property(e => e.ApplicationType).HasMaxLength(50);
+            entity.Property(e => e.ArchitectureType).HasMaxLength(100);
+            entity.Property(e => e.UserBase).HasMaxLength(100);
+            entity.Property(e => e.Importance).HasMaxLength(50);
+            entity.Property(e => e.RepositoryUrl).HasMaxLength(500);
+            entity.Property(e => e.DocumentationUrl).HasMaxLength(500);
+            entity.Property(e => e.Environment).HasMaxLength(100);
+            entity.Property(e => e.Criticality).HasMaxLength(50);
+            entity.Property(e => e.SupportGroup).HasMaxLength(200);
+            entity.Property(e => e.LinkedRepositoryId).HasMaxLength(100);
+            entity.Property(e => e.LinkedRepositoryName).HasMaxLength(200);
+            entity.HasIndex(e => e.ServiceNowId).IsUnique();
+            entity.HasIndex(e => e.Name);
+            entity.HasIndex(e => e.Capability);
+            entity.HasIndex(e => e.ImportedAt);
         });
     }
 }

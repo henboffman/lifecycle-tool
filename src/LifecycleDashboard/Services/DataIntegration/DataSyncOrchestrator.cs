@@ -427,6 +427,14 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         var startTime = DateTimeOffset.UtcNow;
         var errors = new List<SyncError>();
         var syncedRepos = new List<SyncedRepository>();
+        var stepResults = new List<SyncStepResult>();
+
+        // Step counters for detailed reporting
+        int techStackSuccess = 0, techStackFail = 0, techStackSkip = 0;
+        int commitsSuccess = 0, commitsFail = 0, commitsSkip = 0;
+        int packagesSuccess = 0, packagesFail = 0, packagesSkip = 0;
+        int readmeSuccess = 0, readmeFail = 0, readmeSkip = 0;
+        int pipelineSuccess = 0, pipelineFail = 0, pipelineSkip = 0;
 
         _logger.LogInformation("Starting Azure DevOps sync...");
 
@@ -450,23 +458,42 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
             cancellationToken.ThrowIfCancellationRequested();
 
             // Step 1: Get all repositories from Azure DevOps
+            var fetchStart = DateTimeOffset.UtcNow;
             _logger.LogInformation("Fetching repositories from Azure DevOps...");
             ReportProgress("Fetching repositories", 0, 0, message: "Retrieving repository list from Azure DevOps...");
 
             var reposResult = await _azureDevOpsService.GetRepositoriesAsync();
 
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Fetch Repository List",
+                Success = reposResult.Success,
+                SuccessCount = reposResult.Success ? (reposResult.Data?.Count ?? 0) : 0,
+                FailCount = reposResult.Success ? 0 : 1,
+                ErrorMessage = reposResult.ErrorMessage,
+                Duration = DateTimeOffset.UtcNow - fetchStart
+            });
+
             if (!reposResult.Success)
             {
                 _logger.LogError("Failed to get repositories: {Error}", reposResult.ErrorMessage);
-                return DataSyncResult.Failed(DataSourceType.AzureDevOps, startTime,
-                    reposResult.ErrorMessage ?? "Failed to get repositories");
+                return new DataSyncResult
+                {
+                    Success = false,
+                    DataSource = DataSourceType.AzureDevOps,
+                    StartTime = startTime,
+                    EndTime = DateTimeOffset.UtcNow,
+                    ErrorMessage = reposResult.ErrorMessage ?? "Failed to get repositories",
+                    StepResults = stepResults
+                };
             }
 
             var repos = reposResult.Data ?? [];
             _logger.LogInformation("Found {Count} repositories in Azure DevOps", repos.Count);
             ReportProgress("Processing repositories", 0, repos.Count, message: $"Found {repos.Count} repositories");
 
-            // Step 2: Convert each repo to a SyncedRepository and store it
+            // Step 2: Process each repository
+            var processStart = DateTimeOffset.UtcNow;
             var processedCount = 0;
             foreach (var repo in repos)
             {
@@ -489,10 +516,9 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                     SyncedBy = "DataSyncOrchestrator"
                 };
 
-                // Try to get additional details (tech stack, commits, etc.) - but don't fail the whole sync if one repo fails
+                // Tech stack detection
                 try
                 {
-                    // Get tech stack
                     var techStackResult = await _azureDevOpsService.DetectTechStackAsync(repo.Id);
                     if (techStackResult.Success && techStackResult.Data != null)
                     {
@@ -504,9 +530,25 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                             TargetFramework = techStackResult.Data.TargetFramework,
                             DetectedPattern = techStackResult.Data.DetectedPattern
                         };
+                        techStackSuccess++;
+                        _logger.LogDebug("Tech stack for {RepoName}: {Stack}, Frameworks: {Frameworks}",
+                            repo.Name, techStackResult.Data.PrimaryStack, string.Join(", ", techStackResult.Data.Frameworks));
                     }
+                    else
+                    {
+                        techStackSkip++;
+                        _logger.LogDebug("No tech stack detected for {RepoName}: {Error}", repo.Name, techStackResult.ErrorMessage);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    techStackFail++;
+                    _logger.LogWarning(ex, "Tech stack detection failed for {RepoName}", repo.Name);
+                }
 
-                    // Get commit history
+                // Commit history
+                try
+                {
                     var commitsResult = await _azureDevOpsService.GetCommitHistoryAsync(repo.Id, 365);
                     if (commitsResult.Success && commitsResult.Data != null)
                     {
@@ -516,9 +558,22 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                             LastCommitDate = commitsResult.Data.LastCommitDate,
                             Contributors = commitsResult.Data.Contributors
                         };
+                        commitsSuccess++;
                     }
+                    else
+                    {
+                        commitsSkip++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    commitsFail++;
+                    _logger.LogWarning(ex, "Commit history failed for {RepoName}", repo.Name);
+                }
 
-                    // Get packages
+                // Packages
+                try
+                {
                     var packagesResult = await _azureDevOpsService.GetPackagesAsync(repo.Id);
                     if (packagesResult.Success && packagesResult.Data != null)
                     {
@@ -535,9 +590,22 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                                 IsDevelopmentDependency = p.IsDevelopmentDependency
                             }).ToList()
                         };
+                        packagesSuccess++;
                     }
+                    else
+                    {
+                        packagesSkip++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    packagesFail++;
+                    _logger.LogWarning(ex, "Package detection failed for {RepoName}", repo.Name);
+                }
 
-                    // Get README status
+                // README status
+                try
+                {
                     var readmeResult = await _azureDevOpsService.GetReadmeStatusAsync(repo.Id);
                     if (readmeResult.Success && readmeResult.Data != null)
                     {
@@ -546,9 +614,22 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                             HasReadme = readmeResult.Data.Exists,
                             ReadmeQualityScore = readmeResult.Data.QualityScore
                         };
+                        readmeSuccess++;
                     }
+                    else
+                    {
+                        readmeSkip++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    readmeFail++;
+                    _logger.LogWarning(ex, "README check failed for {RepoName}", repo.Name);
+                }
 
-                    // Get pipeline/build status
+                // Pipeline/build status
+                try
+                {
                     var pipelineResult = await _azureDevOpsService.GetPipelineStatusAsync(repo.Id);
                     if (pipelineResult.Success && pipelineResult.Data != null)
                     {
@@ -558,22 +639,97 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                             LastBuildResult = pipelineResult.Data.Result.ToString(),
                             LastBuildDate = pipelineResult.Data.FinishTime ?? pipelineResult.Data.StartTime
                         };
+                        pipelineSuccess++;
+                    }
+                    else
+                    {
+                        pipelineSkip++;
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to get additional details for repo {RepoName}, continuing with basic info", repo.Name);
-                    errors.Add(new SyncError { Message = $"Partial sync for {repo.Name}: {ex.Message}" });
+                    pipelineFail++;
+                    _logger.LogWarning(ex, "Pipeline check failed for {RepoName}", repo.Name);
                 }
 
                 syncedRepos.Add(syncedRepo);
             }
 
+            var processEnd = DateTimeOffset.UtcNow;
+
+            // Add step results for each sync step
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Tech Stack Detection",
+                Success = techStackFail == 0,
+                SuccessCount = techStackSuccess,
+                FailCount = techStackFail,
+                SkipCount = techStackSkip,
+                Duration = processEnd - processStart,
+                Details = new Dictionary<string, object>
+                {
+                    ["DetectionRate"] = repos.Count > 0 ? $"{(techStackSuccess * 100.0 / repos.Count):F1}%" : "N/A"
+                }
+            });
+
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Commit History",
+                Success = commitsFail == 0,
+                SuccessCount = commitsSuccess,
+                FailCount = commitsFail,
+                SkipCount = commitsSkip,
+                Duration = processEnd - processStart
+            });
+
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Package Detection",
+                Success = packagesFail == 0,
+                SuccessCount = packagesSuccess,
+                FailCount = packagesFail,
+                SkipCount = packagesSkip,
+                Duration = processEnd - processStart
+            });
+
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "README Check",
+                Success = readmeFail == 0,
+                SuccessCount = readmeSuccess,
+                FailCount = readmeFail,
+                SkipCount = readmeSkip,
+                Duration = processEnd - processStart
+            });
+
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Pipeline Status",
+                Success = pipelineFail == 0,
+                SuccessCount = pipelineSuccess,
+                FailCount = pipelineFail,
+                SkipCount = pipelineSkip,
+                Duration = processEnd - processStart
+            });
+
             // Step 3: Store all synced repositories
+            var storeStart = DateTimeOffset.UtcNow;
             _logger.LogInformation("Storing {Count} synced repositories...", syncedRepos.Count);
             await _mockDataService.StoreSyncedRepositoriesAsync(syncedRepos);
 
-            _logger.LogInformation("Azure DevOps sync completed. Processed {Count} repositories.", syncedRepos.Count);
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Store to Database",
+                Success = true,
+                SuccessCount = syncedRepos.Count,
+                Duration = DateTimeOffset.UtcNow - storeStart
+            });
+
+            _logger.LogInformation("Azure DevOps sync completed. Processed {Count} repositories. " +
+                "Tech Stack: {TechStackSuccess}/{Total}, Commits: {CommitsSuccess}/{Total}, " +
+                "Packages: {PackagesSuccess}/{Total}, README: {ReadmeSuccess}/{Total}, Pipeline: {PipelineSuccess}/{Total}",
+                syncedRepos.Count, techStackSuccess, repos.Count, commitsSuccess, repos.Count,
+                packagesSuccess, repos.Count, readmeSuccess, repos.Count, pipelineSuccess, repos.Count);
 
             return new DataSyncResult
             {
@@ -583,18 +739,35 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 RecordsCreated = syncedRepos.Count,
                 Errors = errors,
                 StartTime = startTime,
-                EndTime = DateTimeOffset.UtcNow
+                EndTime = DateTimeOffset.UtcNow,
+                StepResults = stepResults
             };
         }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("Azure DevOps sync was cancelled");
-            return DataSyncResult.Failed(DataSourceType.AzureDevOps, startTime, "Sync was cancelled");
+            return new DataSyncResult
+            {
+                Success = false,
+                DataSource = DataSourceType.AzureDevOps,
+                StartTime = startTime,
+                EndTime = DateTimeOffset.UtcNow,
+                ErrorMessage = "Sync was cancelled",
+                StepResults = stepResults
+            };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Azure DevOps sync failed");
-            return DataSyncResult.Failed(DataSourceType.AzureDevOps, startTime, ex.Message);
+            return new DataSyncResult
+            {
+                Success = false,
+                DataSource = DataSourceType.AzureDevOps,
+                StartTime = startTime,
+                EndTime = DateTimeOffset.UtcNow,
+                ErrorMessage = ex.Message,
+                StepResults = stepResults
+            };
         }
     }
 

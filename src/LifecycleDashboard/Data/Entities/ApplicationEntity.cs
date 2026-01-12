@@ -15,6 +15,7 @@ public class ApplicationEntity
     public string? RepositoryUrl { get; set; }
     public string? DocumentationUrl { get; set; }
     public string? ServiceNowId { get; set; }
+    public bool IsMockData { get; set; }
     public int HealthScore { get; set; }
     public DateTimeOffset? LastActivityDate { get; set; }
     public DateTimeOffset LastSyncDate { get; set; }

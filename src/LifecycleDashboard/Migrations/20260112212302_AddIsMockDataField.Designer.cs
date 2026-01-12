@@ -4,6 +4,7 @@ using LifecycleDashboard.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LifecycleDashboard.Migrations
 {
     [DbContext(typeof(LifecycleDbContext))]
-    partial class LifecycleDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260112212302_AddIsMockDataField")]
+    partial class AddIsMockDataField
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -340,156 +343,6 @@ namespace LifecycleDashboard.Migrations
                     b.ToTable("SharePointFolders", (string)null);
                 });
 
-            modelBuilder.Entity("LifecycleDashboard.Data.Entities.ImportedServiceNowApplicationEntity", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ApplicationType")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("ArchitectureType")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("BusinessOwnerId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("BusinessOwnerName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Capability")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("Criticality")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
-
-                    b.Property<string>("DocumentationUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("Environment")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("FunctionalArchitectId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("FunctionalArchitectName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Importance")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<DateTimeOffset>("ImportedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("LinkedRepositoryId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("LinkedRepositoryName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("OwnerId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("OwnerName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("ProductManagerId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("ProductManagerName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("RawCsvValuesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("RepositoryUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("ServiceNowId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("ShortDescription")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("Status")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("SupportGroup")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("TechnicalArchitectId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("TechnicalArchitectName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("TechnicalLeadId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("TechnicalLeadName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("UserBase")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Capability");
-
-                    b.HasIndex("ImportedAt");
-
-                    b.HasIndex("Name");
-
-                    b.HasIndex("ServiceNowId")
-                        .IsUnique();
-
-                    b.ToTable("ImportedServiceNowApplications", (string)null);
-                });
-
             modelBuilder.Entity("LifecycleDashboard.Data.Entities.LifecycleTaskEntity", b =>
                 {
                     b.Property<string>("Id")
@@ -710,130 +563,6 @@ namespace LifecycleDashboard.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("SyncJobs", (string)null);
-                });
-
-            modelBuilder.Entity("LifecycleDashboard.Data.Entities.SyncedRepositoryEntity", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("CloneUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("ContributorsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("DefaultBranch")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("DetectedPattern")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("FrameworksJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("HasReadme")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDisabled")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("LanguagesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTimeOffset?>("LastBuildDate")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("LastBuildResult")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("LastBuildStatus")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<DateTimeOffset?>("LastCommitDate")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("LinkedApplicationId")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("LinkedApplicationName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int>("NpmPackageCount")
-                        .HasColumnType("int");
-
-                    b.Property<int>("NuGetPackageCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("PackagesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("PrimaryStack")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("ProjectName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int?>("ReadmeQualityScore")
-                        .HasColumnType("int");
-
-                    b.Property<long?>("SizeBytes")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTimeOffset>("SyncedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("SyncedBy")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("TargetFramework")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int?>("TotalCommits")
-                        .HasColumnType("int");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("Url")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LinkedApplicationId");
-
-                    b.HasIndex("Name");
-
-                    b.HasIndex("PrimaryStack");
-
-                    b.HasIndex("SyncedAt");
-
-                    b.ToTable("SyncedRepositories", (string)null);
                 });
 
             modelBuilder.Entity("LifecycleDashboard.Data.Entities.TaskDocumentationEntity", b =>

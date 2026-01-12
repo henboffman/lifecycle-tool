@@ -66,6 +66,11 @@ public record Application
     public string? ServiceNowId { get; init; }
 
     /// <summary>
+    /// Indicates if this is mock/seed data (vs real imported data).
+    /// </summary>
+    public bool IsMockData { get; init; }
+
+    /// <summary>
     /// Current health score (0-100).
     /// </summary>
     public int HealthScore { get; init; }
