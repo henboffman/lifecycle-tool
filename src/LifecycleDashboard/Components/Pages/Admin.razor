@@ -1234,6 +1234,10 @@
                                     <label>Project</label>
                                     <input type="text" class="form-input" @bind="_dsFormProject" placeholder="e.g., MyProject" />
                                 </div>
+                                <div class="form-group">
+                                    <label>Username</label>
+                                    <input type="text" class="form-input" @bind="_dsFormUsername" placeholder="e.g., mac" />
+                                </div>
                                 <div class="form-group wide">
                                     <label>Personal Access Token (PAT)</label>
                                     @if (_dsHasApiKey && !_dsEditApiKey)
@@ -1532,6 +1536,7 @@
     // Data Source form fields
     private string _dsFormOrganization = "";
     private string _dsFormProject = "";
+    private string _dsFormUsername = "";
     private string _dsFormApiKey = "";
     private string _dsFormSiteUrl = "";
     private string _dsFormListName = "";
@@ -2406,10 +2411,22 @@
         _dsFormInstance = settings?.Instance ?? "";
         _dsFormTable = settings?.Table ?? "";
 
+        // Load username for Azure DevOps (non-sensitive, can display)
+        if (ds.Type == DataSourceType.AzureDevOps)
+        {
+            _dsFormUsername = await SecureStorage.GetSecretAsync(SecretKeys.AzureDevOpsUsername) ?? "";
+        }
+        else
+        {
+            _dsFormUsername = "";
+        }
+
         // Check for existing credentials in secure storage (don't load actual values)
         var prefix = SecretKeys.GetDataSourcePrefix(ds.Id);
-        _dsHasApiKey = await SecureStorage.HasSecretAsync($"{prefix}apikey");
-        _dsHasConnectionString = await SecureStorage.HasSecretAsync($"{prefix}connectionstring");
+        _dsHasApiKey = await SecureStorage.HasSecretAsync($"{prefix}apikey") ||
+                       (ds.Type == DataSourceType.AzureDevOps && await SecureStorage.HasSecretAsync(SecretKeys.AzureDevOpsPat));
+        _dsHasConnectionString = await SecureStorage.HasSecretAsync($"{prefix}connectionstring") ||
+                                 (ds.Type == DataSourceType.IisDatabase && await SecureStorage.HasSecretAsync(SecretKeys.IisDatabaseConnectionString));
         _dsFormApiKey = "";
         _dsFormConnectionString = "";
         _dsEditApiKey = false;
@@ -2431,6 +2448,8 @@
                     await SecureStorage.StoreSecretAsync(SecretKeys.AzureDevOpsOrganization, _dsFormOrganization);
                 if (!string.IsNullOrEmpty(_dsFormProject))
                     await SecureStorage.StoreSecretAsync(SecretKeys.AzureDevOpsProject, _dsFormProject);
+                if (!string.IsNullOrEmpty(_dsFormUsername))
+                    await SecureStorage.StoreSecretAsync(SecretKeys.AzureDevOpsUsername, _dsFormUsername);
                 if (!string.IsNullOrEmpty(_dsFormApiKey))
                 {
                     await SecureStorage.StoreSecretAsync(SecretKeys.AzureDevOpsPat, _dsFormApiKey);

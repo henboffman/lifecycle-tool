@@ -693,10 +693,15 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             return (false, "Azure DevOps PAT not configured", null, null);
         }
 
+        var username = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsUsername);
+        if (string.IsNullOrEmpty(username))
+        {
+            return (false, "Azure DevOps username not configured", null, null);
+        }
+
         var baseUrl = orgUrl.TrimEnd('/') + "/";
-        // Azure DevOps PAT auth: use any username (commonly empty or a placeholder) with PAT as password
-        // Format matching user's working Node.js code: "username:PAT"
-        var credentials = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($"pat:{pat}"));
+        // Azure DevOps PAT auth: username:PAT format
+        var credentials = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($"{username}:{pat}"));
         var auth = new AuthenticationHeaderValue("Basic", credentials);
 
         return (true, null, baseUrl, auth);

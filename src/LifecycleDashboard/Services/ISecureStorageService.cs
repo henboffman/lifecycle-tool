@@ -57,6 +57,7 @@ public static class SecretKeys
     // Azure DevOps
     public const string AzureDevOpsOrganization = "lifecycle:datasource:azuredevops:organization";
     public const string AzureDevOpsProject = "lifecycle:datasource:azuredevops:project";
+    public const string AzureDevOpsUsername = "lifecycle:datasource:azuredevops:username";
     public const string AzureDevOpsPat = "lifecycle:datasource:azuredevops:pat";
 
     // SharePoint
