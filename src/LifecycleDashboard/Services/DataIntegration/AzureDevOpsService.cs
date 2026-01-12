@@ -96,7 +96,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
+            var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
             var response = await SendRequestAsync($"{baseUrl}{project}/_apis/git/repositories?api-version=7.1", auth);
 
             if (!response.IsSuccessStatusCode)
@@ -163,7 +163,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
+            var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
 
             // Get the file tree
             var itemsResponse = await SendRequestAsync(
@@ -264,7 +264,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
+            var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
             var packages = new List<PackageReference>();
 
             // Get the file tree
@@ -343,7 +343,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
+            var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
             var sinceDate = DateTimeOffset.UtcNow.AddDays(-daysBefore).ToString("o");
 
             var response = await SendRequestAsync(
@@ -406,7 +406,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
+            var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
 
             // Try to get README.md
             var readmeResponse = await SendRequestAsync(
@@ -458,7 +458,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
+            var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
 
             // Get builds for this repository
             var response = await SendRequestAsync(
@@ -527,7 +527,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var project = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "";
+            var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
             var dependencies = new List<SystemDependency>();
 
             // Get file tree
