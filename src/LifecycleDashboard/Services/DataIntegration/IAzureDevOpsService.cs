@@ -65,6 +65,14 @@ public interface IAzureDevOpsService
     /// Syncs all repository data across all configured applications.
     /// </summary>
     Task<DataSyncResult> SyncAllRepositoriesAsync();
+
+    /// <summary>
+    /// Gets security alerts (CodeQL/Advanced Security) for a repository.
+    /// Uses the Azure DevOps Advanced Security API.
+    /// </summary>
+    /// <param name="repositoryId">Repository ID</param>
+    /// <param name="projectName">Project name (needed for Advanced Security API)</param>
+    Task<DataSyncResult<SecurityAlertSummary>> GetSecurityAlertsAsync(string repositoryId, string projectName);
 }
 
 /// <summary>
@@ -307,4 +315,46 @@ public record SystemDependency
 
     /// <summary>Database/resource name (if parseable).</summary>
     public string? Database { get; init; }
+}
+
+/// <summary>
+/// Summary of security alerts from Azure DevOps Advanced Security.
+/// </summary>
+public record SecurityAlertSummary
+{
+    /// <summary>Repository ID.</summary>
+    public string? RepositoryId { get; init; }
+
+    /// <summary>Whether Advanced Security is enabled for this repository.</summary>
+    public bool AdvancedSecurityEnabled { get; init; }
+
+    /// <summary>When the last security scan was performed.</summary>
+    public DateTimeOffset? LastScanDate { get; init; }
+
+    // Open vulnerability counts by severity
+    public int OpenCritical { get; init; }
+    public int OpenHigh { get; init; }
+    public int OpenMedium { get; init; }
+    public int OpenLow { get; init; }
+
+    // Closed vulnerability counts by severity
+    public int ClosedCritical { get; init; }
+    public int ClosedHigh { get; init; }
+    public int ClosedMedium { get; init; }
+    public int ClosedLow { get; init; }
+
+    /// <summary>Number of exposed secrets detected.</summary>
+    public int ExposedSecrets { get; init; }
+
+    /// <summary>Number of dependency alerts (vulnerable dependencies).</summary>
+    public int DependencyAlerts { get; init; }
+
+    /// <summary>Total open vulnerabilities.</summary>
+    public int TotalOpen => OpenCritical + OpenHigh + OpenMedium + OpenLow;
+
+    /// <summary>Total closed vulnerabilities.</summary>
+    public int TotalClosed => ClosedCritical + ClosedHigh + ClosedMedium + ClosedLow;
+
+    /// <summary>Whether there are any critical or high severity open vulnerabilities.</summary>
+    public bool HasCriticalIssues => OpenCritical > 0 || OpenHigh > 0 || ExposedSecrets > 0;
 }

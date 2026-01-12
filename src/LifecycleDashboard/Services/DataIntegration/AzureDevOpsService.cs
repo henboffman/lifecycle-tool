@@ -765,6 +765,149 @@ public partial class AzureDevOpsService : IAzureDevOpsService
         }
     }
 
+    /// <inheritdoc />
+    public async Task<DataSyncResult<SecurityAlertSummary>> GetSecurityAlertsAsync(string repositoryId, string projectName)
+    {
+        var startTime = DateTimeOffset.UtcNow;
+
+        try
+        {
+            var (configured, error, baseUrl, auth) = await GetConfigurationAsync();
+            if (!configured || baseUrl == null || auth == null)
+            {
+                return DataSyncResult<SecurityAlertSummary>.Failed(
+                    DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
+            }
+
+            var organization = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsOrganization) ?? "";
+
+            // Advanced Security API base URL is different from regular DevOps API
+            // Format: https://advsec.dev.azure.com/{organization}/{project}/_apis/alert/repositories/{repositoryId}/alerts
+            var advSecBaseUrl = $"https://advsec.dev.azure.com/{Uri.EscapeDataString(organization)}/";
+            var alertsUrl = $"{advSecBaseUrl}{Uri.EscapeDataString(projectName)}/_apis/alert/repositories/{repositoryId}/alerts?api-version=7.2-preview.1";
+
+            _logger.LogDebug("Fetching security alerts from: {Url}", alertsUrl);
+
+            var response = await SendRequestAsync(alertsUrl, auth);
+
+            // If we get a 404, Advanced Security might not be enabled
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogDebug("Advanced Security not enabled or no alerts for repository {RepositoryId}", repositoryId);
+                return DataSyncResult<SecurityAlertSummary>.Succeeded(
+                    DataSourceType.AzureDevOps,
+                    new SecurityAlertSummary
+                    {
+                        RepositoryId = repositoryId,
+                        AdvancedSecurityEnabled = false
+                    });
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Failed to get security alerts for repo {RepositoryId}: {Status} - {Content}",
+                    repositoryId, response.StatusCode, errorContent);
+                return DataSyncResult<SecurityAlertSummary>.Failed(
+                    DataSourceType.AzureDevOps, startTime, $"API returned {response.StatusCode}");
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            var jsonDoc = JsonDocument.Parse(content);
+
+            // Parse alerts and count by severity and state
+            int openCritical = 0, openHigh = 0, openMedium = 0, openLow = 0;
+            int closedCritical = 0, closedHigh = 0, closedMedium = 0, closedLow = 0;
+            int exposedSecrets = 0, dependencyAlerts = 0;
+            DateTimeOffset? lastScanDate = null;
+
+            if (jsonDoc.RootElement.TryGetProperty("value", out var alertsArray))
+            {
+                foreach (var alert in alertsArray.EnumerateArray())
+                {
+                    var state = alert.TryGetProperty("state", out var stateEl) ? stateEl.GetString()?.ToLowerInvariant() : "unknown";
+                    var severity = alert.TryGetProperty("severity", out var sevEl) ? sevEl.GetString()?.ToLowerInvariant() : "unknown";
+                    var alertType = alert.TryGetProperty("alertType", out var typeEl) ? typeEl.GetString()?.ToLowerInvariant() : "unknown";
+
+                    // Track last scan/update date
+                    if (alert.TryGetProperty("lastSeenDate", out var lastSeenEl) &&
+                        DateTimeOffset.TryParse(lastSeenEl.GetString(), out var lastSeen))
+                    {
+                        if (!lastScanDate.HasValue || lastSeen > lastScanDate)
+                            lastScanDate = lastSeen;
+                    }
+
+                    // Check alert type for secrets and dependencies
+                    if (alertType == "secret" || alertType == "secretscanning")
+                    {
+                        if (state == "active" || state == "open")
+                            exposedSecrets++;
+                        continue;
+                    }
+
+                    if (alertType == "dependency" || alertType == "dependencyscanning")
+                    {
+                        if (state == "active" || state == "open")
+                            dependencyAlerts++;
+                        // Still count as vulnerability by severity
+                    }
+
+                    // Count by severity and state
+                    var isOpen = state == "active" || state == "open" || state == "new";
+                    var isClosed = state == "fixed" || state == "closed" || state == "dismissed";
+
+                    if (isOpen)
+                    {
+                        switch (severity)
+                        {
+                            case "critical": openCritical++; break;
+                            case "high": openHigh++; break;
+                            case "medium": openMedium++; break;
+                            case "low": openLow++; break;
+                        }
+                    }
+                    else if (isClosed)
+                    {
+                        switch (severity)
+                        {
+                            case "critical": closedCritical++; break;
+                            case "high": closedHigh++; break;
+                            case "medium": closedMedium++; break;
+                            case "low": closedLow++; break;
+                        }
+                    }
+                }
+            }
+
+            var summary = new SecurityAlertSummary
+            {
+                RepositoryId = repositoryId,
+                AdvancedSecurityEnabled = true,
+                LastScanDate = lastScanDate,
+                OpenCritical = openCritical,
+                OpenHigh = openHigh,
+                OpenMedium = openMedium,
+                OpenLow = openLow,
+                ClosedCritical = closedCritical,
+                ClosedHigh = closedHigh,
+                ClosedMedium = closedMedium,
+                ClosedLow = closedLow,
+                ExposedSecrets = exposedSecrets,
+                DependencyAlerts = dependencyAlerts
+            };
+
+            _logger.LogInformation("Security alerts for repo {RepositoryId}: {OpenTotal} open ({Critical} critical, {High} high), {Secrets} secrets, {Dependencies} dependency alerts",
+                repositoryId, summary.TotalOpen, openCritical, openHigh, exposedSecrets, dependencyAlerts);
+
+            return DataSyncResult<SecurityAlertSummary>.Succeeded(DataSourceType.AzureDevOps, summary);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting security alerts for repository {RepositoryId}", repositoryId);
+            return DataSyncResult<SecurityAlertSummary>.Failed(DataSourceType.AzureDevOps, startTime, ex.Message);
+        }
+    }
+
     #region Private Helpers
 
     /// <summary>

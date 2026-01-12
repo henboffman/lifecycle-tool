@@ -566,6 +566,8 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
         int packagesSuccess = 0, packagesFail = 0, packagesSkip = 0;
         int readmeSuccess = 0, readmeFail = 0, readmeSkip = 0;
         int pipelineSuccess = 0, pipelineFail = 0, pipelineSkip = 0;
+        int securitySuccess = 0, securityFail = 0, securitySkip = 0;
+        int incrementalSkip = 0;
 
         _logger.LogInformation("Starting Azure DevOps sync...");
 
@@ -622,6 +624,13 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
             var repos = reposResult.Data ?? [];
             _logger.LogInformation("Found {Count} repositories in Azure DevOps", repos.Count);
 
+            // Load existing synced repositories for incremental sync
+            var existingRepos = await _mockDataService.GetSyncedRepositoriesAsync();
+            var existingRepoDict = existingRepos.ToDictionary(r => r.Id, r => r);
+            var today = DateTimeOffset.UtcNow.Date;
+
+            _logger.LogInformation("Loaded {Count} existing synced repositories for incremental comparison", existingRepos.Count);
+
             // Apply dev mode repo limit if configured
             var reposToProcess = repos;
             if (_configuration.DevModeRepoLimit > 0 && repos.Count > _configuration.DevModeRepoLimit)
@@ -642,6 +651,11 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 _logger.LogInformation("Processing repository: {RepoName} ({Current}/{Total})", repo.Name, processedCount, reposToProcess.Count);
                 ReportProgress("Processing repositories", processedCount, repos.Count, repo.Name);
 
+                // Check for incremental sync - if we have recent data, only fetch security data
+                var existingRepo = existingRepoDict.GetValueOrDefault(repo.Id);
+                var hasRecentData = existingRepo != null && existingRepo.SyncedAt.Date == today;
+                var needsSecurityOnly = hasRecentData && !existingRepo!.AdvancedSecurityEnabled && existingRepo.LastSecurityScanDate == null;
+
                 var syncedRepo = new SyncedRepository
                 {
                     Id = repo.Id,
@@ -656,20 +670,59 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                     SyncedBy = "DataSyncOrchestrator"
                 };
 
-                // Skip disabled repos - they may not be accessible
-                if (repo.IsDisabled)
+                // If we have recent data, carry it forward and only fetch missing parts (security)
+                if (hasRecentData)
                 {
-                    _logger.LogInformation("Skipping disabled repo {RepoName} for tech stack/commits/packages detection", repo.Name);
+                    syncedRepo = existingRepo! with
+                    {
+                        SyncedAt = DateTimeOffset.UtcNow,
+                        SyncedBy = "DataSyncOrchestrator"
+                    };
+
+                    if (!needsSecurityOnly)
+                    {
+                        // All data is recent including security, just update timestamps
+                        _logger.LogDebug("Skipping full sync for {RepoName} - synced today, security data present", repo.Name);
+                        incrementalSkip++;
+                        techStackSkip++;
+                        commitsSkip++;
+                        packagesSkip++;
+                        readmeSkip++;
+                        pipelineSkip++;
+                        securitySkip++;
+                        syncedRepos.Add(syncedRepo);
+                        continue;
+                    }
+
+                    _logger.LogInformation("Incremental sync for {RepoName} - only fetching security data (other data synced today)", repo.Name);
+                    incrementalSkip++;
                     techStackSkip++;
                     commitsSkip++;
                     packagesSkip++;
                     readmeSkip++;
                     pipelineSkip++;
+                    // Don't skip security - fetch it below
+                }
+
+                // Skip disabled repos - they may not be accessible
+                if (repo.IsDisabled)
+                {
+                    _logger.LogInformation("Skipping disabled repo {RepoName} for tech stack/commits/packages/security detection", repo.Name);
+                    techStackSkip++;
+                    commitsSkip++;
+                    packagesSkip++;
+                    readmeSkip++;
+                    pipelineSkip++;
+                    securitySkip++;
                     syncedRepos.Add(syncedRepo);
                     continue;
                 }
 
+                // If incremental sync (security only), skip to security section
+                var skipToSecurity = hasRecentData && needsSecurityOnly;
+
                 // Tech stack detection
+                if (!skipToSecurity)
                 try
                 {
                     _logger.LogDebug("Detecting tech stack for {RepoName} (DefaultBranch: {DefaultBranch})", repo.Name, repo.DefaultBranch ?? "(null)");
@@ -701,6 +754,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 }
 
                 // Commit history
+                if (!skipToSecurity)
                 try
                 {
                     var commitsResult = await _azureDevOpsService.GetCommitHistoryAsync(repo.Id, 365);
@@ -726,6 +780,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 }
 
                 // Packages
+                if (!skipToSecurity)
                 try
                 {
                     var packagesResult = await _azureDevOpsService.GetPackagesAsync(repo.Id, repo.DefaultBranch);
@@ -758,6 +813,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 }
 
                 // README status
+                if (!skipToSecurity)
                 try
                 {
                     var readmeResult = await _azureDevOpsService.GetReadmeStatusAsync(repo.Id, repo.DefaultBranch);
@@ -782,6 +838,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 }
 
                 // Pipeline/build status
+                if (!skipToSecurity)
                 try
                 {
                     var pipelineResult = await _azureDevOpsService.GetPipelineStatusAsync(repo.Id);
@@ -804,6 +861,40 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 {
                     pipelineFail++;
                     _logger.LogWarning(ex, "Pipeline check failed for {RepoName}", repo.Name);
+                }
+
+                // Security alerts (CodeQL/Advanced Security)
+                try
+                {
+                    var securityResult = await _azureDevOpsService.GetSecurityAlertsAsync(repo.Id, repo.ProjectName ?? "");
+                    if (securityResult.Success && securityResult.Data != null)
+                    {
+                        syncedRepo = syncedRepo with
+                        {
+                            AdvancedSecurityEnabled = securityResult.Data.AdvancedSecurityEnabled,
+                            LastSecurityScanDate = securityResult.Data.LastScanDate,
+                            OpenCriticalVulnerabilities = securityResult.Data.OpenCritical,
+                            OpenHighVulnerabilities = securityResult.Data.OpenHigh,
+                            OpenMediumVulnerabilities = securityResult.Data.OpenMedium,
+                            OpenLowVulnerabilities = securityResult.Data.OpenLow,
+                            ClosedCriticalVulnerabilities = securityResult.Data.ClosedCritical,
+                            ClosedHighVulnerabilities = securityResult.Data.ClosedHigh,
+                            ClosedMediumVulnerabilities = securityResult.Data.ClosedMedium,
+                            ClosedLowVulnerabilities = securityResult.Data.ClosedLow,
+                            ExposedSecretsCount = securityResult.Data.ExposedSecrets,
+                            DependencyAlertCount = securityResult.Data.DependencyAlerts
+                        };
+                        securitySuccess++;
+                    }
+                    else
+                    {
+                        securitySkip++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    securityFail++;
+                    _logger.LogWarning(ex, "Security alert fetch failed for {RepoName}", repo.Name);
                 }
 
                 syncedRepos.Add(syncedRepo);
@@ -866,6 +957,16 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 Duration = processEnd - processStart
             });
 
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Security Alerts (CodeQL)",
+                Success = securityFail == 0,
+                SuccessCount = securitySuccess,
+                FailCount = securityFail,
+                SkipCount = securitySkip,
+                Duration = processEnd - processStart
+            });
+
             // Step 3: Store all synced repositories
             var storeStart = DateTimeOffset.UtcNow;
             _logger.LogInformation("Storing {Count} synced repositories...", syncedRepos.Count);
@@ -879,11 +980,13 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 Duration = DateTimeOffset.UtcNow - storeStart
             });
 
-            _logger.LogInformation("Azure DevOps sync completed. Processed {Count} repositories. " +
+            _logger.LogInformation("Azure DevOps sync completed. Processed {Count} repositories (incremental skipped: {IncrementalSkip}). " +
                 "Tech Stack: {TechStackSuccess}/{Total}, Commits: {CommitsSuccess}/{Total}, " +
-                "Packages: {PackagesSuccess}/{Total}, README: {ReadmeSuccess}/{Total}, Pipeline: {PipelineSuccess}/{Total}",
-                syncedRepos.Count, techStackSuccess, repos.Count, commitsSuccess, repos.Count,
-                packagesSuccess, repos.Count, readmeSuccess, repos.Count, pipelineSuccess, repos.Count);
+                "Packages: {PackagesSuccess}/{Total}, README: {ReadmeSuccess}/{Total}, Pipeline: {PipelineSuccess}/{Total}, " +
+                "Security: {SecuritySuccess}/{Total}",
+                syncedRepos.Count, incrementalSkip, techStackSuccess, repos.Count, commitsSuccess, repos.Count,
+                packagesSuccess, repos.Count, readmeSuccess, repos.Count, pipelineSuccess, repos.Count,
+                securitySuccess, repos.Count);
 
             return new DataSyncResult
             {

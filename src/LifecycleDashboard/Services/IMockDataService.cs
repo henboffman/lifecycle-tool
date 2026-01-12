@@ -593,6 +593,26 @@ public record SyncedRepository
     public bool HasReadme { get; init; }
     public int? ReadmeQualityScore { get; init; }
 
+    // Security / CodeQL (Advanced Security)
+    public bool AdvancedSecurityEnabled { get; init; }
+    public DateTimeOffset? LastSecurityScanDate { get; init; }
+    public int OpenCriticalVulnerabilities { get; init; }
+    public int OpenHighVulnerabilities { get; init; }
+    public int OpenMediumVulnerabilities { get; init; }
+    public int OpenLowVulnerabilities { get; init; }
+    public int ClosedCriticalVulnerabilities { get; init; }
+    public int ClosedHighVulnerabilities { get; init; }
+    public int ClosedMediumVulnerabilities { get; init; }
+    public int ClosedLowVulnerabilities { get; init; }
+    public int ExposedSecretsCount { get; init; }
+    public int DependencyAlertCount { get; init; }
+
+    /// <summary>Total open vulnerabilities across all severities.</summary>
+    public int TotalOpenVulnerabilities => OpenCriticalVulnerabilities + OpenHighVulnerabilities + OpenMediumVulnerabilities + OpenLowVulnerabilities;
+
+    /// <summary>Total closed vulnerabilities across all severities.</summary>
+    public int TotalClosedVulnerabilities => ClosedCriticalVulnerabilities + ClosedHighVulnerabilities + ClosedMediumVulnerabilities + ClosedLowVulnerabilities;
+
     // Linked application (if mapped)
     public string? LinkedApplicationId { get; init; }
     public string? LinkedApplicationName { get; init; }

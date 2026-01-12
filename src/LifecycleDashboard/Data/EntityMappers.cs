@@ -477,6 +477,18 @@ public static class EntityMappers
             LastBuildDate = entity.LastBuildDate,
             HasReadme = entity.HasReadme,
             ReadmeQualityScore = entity.ReadmeQualityScore,
+            AdvancedSecurityEnabled = entity.AdvancedSecurityEnabled,
+            LastSecurityScanDate = entity.LastSecurityScanDate,
+            OpenCriticalVulnerabilities = entity.OpenCriticalVulnerabilities,
+            OpenHighVulnerabilities = entity.OpenHighVulnerabilities,
+            OpenMediumVulnerabilities = entity.OpenMediumVulnerabilities,
+            OpenLowVulnerabilities = entity.OpenLowVulnerabilities,
+            ClosedCriticalVulnerabilities = entity.ClosedCriticalVulnerabilities,
+            ClosedHighVulnerabilities = entity.ClosedHighVulnerabilities,
+            ClosedMediumVulnerabilities = entity.ClosedMediumVulnerabilities,
+            ClosedLowVulnerabilities = entity.ClosedLowVulnerabilities,
+            ExposedSecretsCount = entity.ExposedSecretsCount,
+            DependencyAlertCount = entity.DependencyAlertCount,
             LinkedApplicationId = entity.LinkedApplicationId,
             LinkedApplicationName = entity.LinkedApplicationName
         };
@@ -510,6 +522,18 @@ public static class EntityMappers
         entity.LastBuildDate = model.LastBuildDate;
         entity.HasReadme = model.HasReadme;
         entity.ReadmeQualityScore = model.ReadmeQualityScore;
+        entity.AdvancedSecurityEnabled = model.AdvancedSecurityEnabled;
+        entity.LastSecurityScanDate = model.LastSecurityScanDate;
+        entity.OpenCriticalVulnerabilities = model.OpenCriticalVulnerabilities;
+        entity.OpenHighVulnerabilities = model.OpenHighVulnerabilities;
+        entity.OpenMediumVulnerabilities = model.OpenMediumVulnerabilities;
+        entity.OpenLowVulnerabilities = model.OpenLowVulnerabilities;
+        entity.ClosedCriticalVulnerabilities = model.ClosedCriticalVulnerabilities;
+        entity.ClosedHighVulnerabilities = model.ClosedHighVulnerabilities;
+        entity.ClosedMediumVulnerabilities = model.ClosedMediumVulnerabilities;
+        entity.ClosedLowVulnerabilities = model.ClosedLowVulnerabilities;
+        entity.ExposedSecretsCount = model.ExposedSecretsCount;
+        entity.DependencyAlertCount = model.DependencyAlertCount;
         entity.LinkedApplicationId = model.LinkedApplicationId;
         entity.LinkedApplicationName = model.LinkedApplicationName;
         entity.UpdatedAt = DateTimeOffset.UtcNow;

@@ -40,6 +40,20 @@ public class SyncedRepositoryEntity
     public bool HasReadme { get; set; }
     public int? ReadmeQualityScore { get; set; }
 
+    // Security / CodeQL (Advanced Security)
+    public bool AdvancedSecurityEnabled { get; set; }
+    public DateTimeOffset? LastSecurityScanDate { get; set; }
+    public int OpenCriticalVulnerabilities { get; set; }
+    public int OpenHighVulnerabilities { get; set; }
+    public int OpenMediumVulnerabilities { get; set; }
+    public int OpenLowVulnerabilities { get; set; }
+    public int ClosedCriticalVulnerabilities { get; set; }
+    public int ClosedHighVulnerabilities { get; set; }
+    public int ClosedMediumVulnerabilities { get; set; }
+    public int ClosedLowVulnerabilities { get; set; }
+    public int ExposedSecretsCount { get; set; }
+    public int DependencyAlertCount { get; set; }
+
     // Linked application
     public string? LinkedApplicationId { get; set; }
     public string? LinkedApplicationName { get; set; }
