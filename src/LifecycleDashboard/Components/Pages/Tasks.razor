@@ -5,15 +5,29 @@
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
 
-<PageTitle>My Tasks - Lifecycle Dashboard</PageTitle>
+<PageTitle>@(_taskScope == TaskScope.MyTasks ? "My Tasks" : "All Tasks") - Lifecycle Dashboard</PageTitle>
 
 <div class="tasks-page">
     <header class="page-header">
         <div class="header-content">
-            <h1>My Tasks</h1>
+            <h1>@(_taskScope == TaskScope.MyTasks ? "My Tasks" : "All Tasks")</h1>
             <p class="subtitle">@GetTaskSummaryText()</p>
         </div>
         <div class="header-actions">
+            <div class="scope-toggle" role="tablist" aria-label="Task scope">
+                <button class="view-btn @(_taskScope == TaskScope.MyTasks ? "active" : "")"
+                        role="tab"
+                        aria-selected="@(_taskScope == TaskScope.MyTasks)"
+                        @onclick="() => SetTaskScope(TaskScope.MyTasks)">
+                    <i class="bi bi-person" aria-hidden="true"></i> My Tasks
+                </button>
+                <button class="view-btn @(_taskScope == TaskScope.AllTasks ? "active" : "")"
+                        role="tab"
+                        aria-selected="@(_taskScope == TaskScope.AllTasks)"
+                        @onclick="() => SetTaskScope(TaskScope.AllTasks)">
+                    <i class="bi bi-people" aria-hidden="true"></i> All Tasks
+                </button>
+            </div>
             <div class="view-toggle" role="tablist" aria-label="View type">
                 <button class="view-btn @(_viewMode == ViewMode.List ? "active" : "")"
                         role="tab"
@@ -341,13 +355,39 @@
         Calendar
     }
 
+    private enum TaskScope
+    {
+        MyTasks,
+        AllTasks
+    }
+
+    private TaskScope _taskScope = TaskScope.MyTasks;
+    private User? _currentUser;
+
     protected override async Task OnInitializedAsync()
     {
-        var currentUser = await DataService.GetCurrentUserAsync();
-        _allTasks = (await DataService.GetTasksForUserAsync(currentUser.Id)).ToList();
+        _currentUser = await DataService.GetCurrentUserAsync();
         _availableUsers = (await DataService.GetUsersAsync()).ToList();
+        await LoadTasksAsync();
+        _isLoading = false;
+    }
+
+    private async Task LoadTasksAsync()
+    {
+        _allTasks = _taskScope == TaskScope.MyTasks
+            ? (await DataService.GetTasksForUserAsync(_currentUser!.Id)).ToList()
+            : (await DataService.GetAllTasksAsync()).ToList();
         CategorizeTasks();
         ApplyFilters();
+    }
+
+    private async Task SetTaskScope(TaskScope scope)
+    {
+        if (_taskScope == scope) return;
+        _taskScope = scope;
+        _isLoading = true;
+        StateHasChanged();
+        await LoadTasksAsync();
         _isLoading = false;
     }
 
@@ -412,9 +452,10 @@
     {
         var active = _allTasks.Count(t => t.Status != Models.TaskStatus.Completed);
         var overdue = _overdueTasks.Count;
+        var prefix = _taskScope == TaskScope.AllTasks ? "System-wide: " : "";
         if (overdue > 0)
-            return $"{active} active tasks, {overdue} overdue";
-        return $"{active} active tasks";
+            return $"{prefix}{active} active tasks, {overdue} overdue";
+        return $"{prefix}{active} active tasks";
     }
 
     private static string GetTaskTypeLabel(TaskType type) => type switch
@@ -470,11 +511,15 @@
 
     private string GetEmptyStateMessage() => _currentFilter switch
     {
-        TaskFilterType.Overdue => "Great job! You have no overdue tasks.",
+        TaskFilterType.Overdue => _taskScope == TaskScope.AllTasks
+            ? "No overdue tasks in the system."
+            : "Great job! You have no overdue tasks.",
         TaskFilterType.DueThisWeek => "No tasks due this week.",
         TaskFilterType.Upcoming => "No upcoming tasks scheduled.",
         TaskFilterType.Completed => "No completed tasks yet.",
-        _ => "No tasks assigned to you."
+        _ => _taskScope == TaskScope.AllTasks
+            ? "No tasks in the system. Generate tasks from Admin > Task Settings."
+            : "No tasks assigned to you."
     };
 
     private void SetViewMode(ViewMode mode) => _viewMode = mode;
