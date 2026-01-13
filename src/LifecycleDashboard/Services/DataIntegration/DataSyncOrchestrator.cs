@@ -880,7 +880,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 try
                 {
                     _logger.LogDebug("Fetching security alerts for {RepoName} (Project: {Project})", repo.Name, repo.ProjectName ?? "(null)");
-                    var securityResult = await _azureDevOpsService.GetSecurityAlertsAsync(repo.Id, repo.ProjectName ?? "");
+                    var securityResult = await _azureDevOpsService.GetSecurityAlertsAsync(repo.Name, repo.ProjectName ?? "");
 
                     if (securityResult.Success && securityResult.Data != null)
                     {

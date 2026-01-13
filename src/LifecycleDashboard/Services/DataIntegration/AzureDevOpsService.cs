@@ -766,7 +766,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     }
 
     /// <inheritdoc />
-    public async Task<DataSyncResult<SecurityAlertSummary>> GetSecurityAlertsAsync(string repositoryId, string projectName)
+    public async Task<DataSyncResult<SecurityAlertSummary>> GetSecurityAlertsAsync(string repositoryName, string projectName)
     {
         var startTime = DateTimeOffset.UtcNow;
 
@@ -779,12 +779,19 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     DataSourceType.AzureDevOps, startTime, error ?? "Not configured");
             }
 
-            var organization = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsOrganization) ?? "";
+            var organizationValue = await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsOrganization) ?? "";
+            var organization = organizationValue;
+
+            // Handle dev.azure.com URL format - extract org name from URL
+            if (organizationValue.Contains("dev.azure.com"))
+            {
+                organization = organizationValue.TrimEnd('/').Split('/').Last();
+            }
 
             // Advanced Security API base URL is different from regular DevOps API
-            // Format: https://advsec.dev.azure.com/{organization}/{project}/_apis/alert/repositories/{repositoryId}/alerts
+            // Format: https://advsec.dev.azure.com/{organization}/{project}/_apis/alert/repositories/{repositoryName}/alerts
             var advSecBaseUrl = $"https://advsec.dev.azure.com/{Uri.EscapeDataString(organization)}/";
-            var alertsUrl = $"{advSecBaseUrl}{Uri.EscapeDataString(projectName)}/_apis/alert/repositories/{repositoryId}/alerts?api-version=7.2-preview.1";
+            var alertsUrl = $"{advSecBaseUrl}{Uri.EscapeDataString(projectName)}/_apis/alert/repositories/{Uri.EscapeDataString(repositoryName)}/alerts?top=2000";
 
             _logger.LogDebug("Fetching security alerts from: {Url}", alertsUrl);
 
@@ -793,12 +800,12 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             // If we get a 404, Advanced Security might not be enabled
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                _logger.LogDebug("Advanced Security not enabled or no alerts for repository {RepositoryId}", repositoryId);
+                _logger.LogDebug("Advanced Security not enabled or no alerts for repository {RepositoryName}", repositoryName);
                 return DataSyncResult<SecurityAlertSummary>.Succeeded(
                     DataSourceType.AzureDevOps,
                     new SecurityAlertSummary
                     {
-                        RepositoryId = repositoryId,
+                        RepositoryId = repositoryName,
                         AdvancedSecurityEnabled = false
                     });
             }
@@ -806,8 +813,8 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("Failed to get security alerts for repo {RepositoryId}: {Status} - {Content}",
-                    repositoryId, response.StatusCode, errorContent);
+                _logger.LogWarning("Failed to get security alerts for repo {RepositoryName}: {Status} - {Content}",
+                    repositoryName, response.StatusCode, errorContent);
                 return DataSyncResult<SecurityAlertSummary>.Failed(
                     DataSourceType.AzureDevOps, startTime, $"API returned {response.StatusCode}");
             }
@@ -881,7 +888,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
 
             var summary = new SecurityAlertSummary
             {
-                RepositoryId = repositoryId,
+                RepositoryId = repositoryName,
                 AdvancedSecurityEnabled = true,
                 LastScanDate = lastScanDate,
                 OpenCritical = openCritical,
@@ -896,14 +903,14 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                 DependencyAlerts = dependencyAlerts
             };
 
-            _logger.LogInformation("Security alerts for repo {RepositoryId}: {OpenTotal} open ({Critical} critical, {High} high), {Secrets} secrets, {Dependencies} dependency alerts",
-                repositoryId, summary.TotalOpen, openCritical, openHigh, exposedSecrets, dependencyAlerts);
+            _logger.LogInformation("Security alerts for repo {RepositoryName}: {OpenTotal} open ({Critical} critical, {High} high), {Secrets} secrets, {Dependencies} dependency alerts",
+                repositoryName, summary.TotalOpen, openCritical, openHigh, exposedSecrets, dependencyAlerts);
 
             return DataSyncResult<SecurityAlertSummary>.Succeeded(DataSourceType.AzureDevOps, summary);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting security alerts for repository {RepositoryId}", repositoryId);
+            _logger.LogError(ex, "Error getting security alerts for repository {RepositoryName}", repositoryName);
             return DataSyncResult<SecurityAlertSummary>.Failed(DataSourceType.AzureDevOps, startTime, ex.Message);
         }
     }

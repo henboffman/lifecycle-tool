@@ -70,9 +70,9 @@ public interface IAzureDevOpsService
     /// Gets security alerts (CodeQL/Advanced Security) for a repository.
     /// Uses the Azure DevOps Advanced Security API.
     /// </summary>
-    /// <param name="repositoryId">Repository ID</param>
+    /// <param name="repositoryName">Repository name</param>
     /// <param name="projectName">Project name (needed for Advanced Security API)</param>
-    Task<DataSyncResult<SecurityAlertSummary>> GetSecurityAlertsAsync(string repositoryId, string projectName);
+    Task<DataSyncResult<SecurityAlertSummary>> GetSecurityAlertsAsync(string repositoryName, string projectName);
 }
 
 /// <summary>
