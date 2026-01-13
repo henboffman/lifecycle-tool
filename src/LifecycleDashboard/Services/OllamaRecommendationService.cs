@@ -76,7 +76,7 @@ public class OllamaRecommendationService : IAiRecommendationService
 
     public async Task<AiServiceStatus> GetServiceStatusAsync()
     {
-        var provider = await _secureStorage.GetSecretAsync(SecretKeys.AiProvider) ?? "ollama";
+        var provider = await GetConfigValueAsync(SecretKeys.AiProvider, "AiProvider") ?? "ollama";
 
         if (provider.Equals("azureopenai", StringComparison.OrdinalIgnoreCase))
         {
@@ -132,12 +132,12 @@ public class OllamaRecommendationService : IAiRecommendationService
 
     private async Task<AiServiceStatus> GetAzureOpenAiStatusAsync()
     {
-        // Load config with appsettings fallback
-        var endpoint = await GetConfigValueAsync(SecretKeys.AzureOpenAiEndpoint, "AzureOpenAI:Endpoint");
-        var deployment = await GetConfigValueAsync(SecretKeys.AzureOpenAiDeployment, "AzureOpenAI:DeploymentName");
-        var apiKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiKey, "AzureOpenAI:ApiKey");
-        var apimKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiApimSubscriptionKey, "AzureOpenAI:ApimSubscriptionKey");
-        var useAzureAdStr = await GetConfigValueAsync(SecretKeys.AzureOpenAiUseAzureAd, "AzureOpenAI:UseAzureAD");
+        // Load config with appsettings fallback (matching self-organizer paths)
+        var endpoint = await GetConfigValueAsync(SecretKeys.AzureOpenAiEndpoint, "LlmSettings:AzureOpenAI:Endpoint");
+        var deployment = await GetConfigValueAsync(SecretKeys.AzureOpenAiDeployment, "LlmSettings:AzureOpenAI:DeploymentName");
+        var apiKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiKey, "LlmSettings:AzureOpenAI:ApiKey");
+        var apimKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiApimSubscriptionKey, "LlmSettings:AzureOpenAI:ApimSubscriptionKey");
+        var useAzureAdStr = await GetConfigValueAsync(SecretKeys.AzureOpenAiUseAzureAd, "LlmSettings:AzureOpenAI:UseAzureAD");
         var useAzureAd = useAzureAdStr?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(deployment))
@@ -154,9 +154,9 @@ public class OllamaRecommendationService : IAiRecommendationService
         // Check authentication based on UseAzureAD setting
         if (useAzureAd)
         {
-            var tenantId = await GetConfigValueAsync(SecretKeys.AzureOpenAiTenantId, "AzureOpenAI:TenantId");
-            var clientId = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientId, "AzureOpenAI:ClientId");
-            var clientSecret = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientSecret, "AzureOpenAI:ClientSecret");
+            var tenantId = await GetConfigValueAsync(SecretKeys.AzureOpenAiTenantId, "LlmSettings:AzureOpenAI:TenantId");
+            var clientId = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientId, "LlmSettings:AzureOpenAI:ClientId");
+            var clientSecret = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientSecret, "LlmSettings:AzureOpenAI:ClientSecret");
 
             var hasAzureAdConfig = !string.IsNullOrWhiteSpace(tenantId) &&
                                    !string.IsNullOrWhiteSpace(clientId) &&
@@ -205,7 +205,9 @@ public class OllamaRecommendationService : IAiRecommendationService
     public async Task<AiConnectionTestResult> TestConnectionAsync()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var provider = await _secureStorage.GetSecretAsync(SecretKeys.AiProvider) ?? "ollama";
+        var provider = await GetConfigValueAsync(SecretKeys.AiProvider, "AiProvider") ?? "ollama";
+
+        _logger.LogInformation("TestConnection: Provider = {Provider}", provider);
 
         if (provider.Equals("azureopenai", StringComparison.OrdinalIgnoreCase))
         {
@@ -298,18 +300,18 @@ public class OllamaRecommendationService : IAiRecommendationService
     {
         var checks = new Dictionary<string, bool>();
 
-        // Load all configuration (SecureStorage first, then appsettings fallback)
-        var endpoint = await GetConfigValueAsync(SecretKeys.AzureOpenAiEndpoint, "AzureOpenAI:Endpoint");
-        var deployment = await GetConfigValueAsync(SecretKeys.AzureOpenAiDeployment, "AzureOpenAI:DeploymentName");
-        var apiKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiKey, "AzureOpenAI:ApiKey");
-        var apiVersion = await GetConfigValueAsync(SecretKeys.AzureOpenAiApiVersion, "AzureOpenAI:ApiVersion") ?? DefaultAzureApiVersion;
-        var apimKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiApimSubscriptionKey, "AzureOpenAI:ApimSubscriptionKey");
-        var useAzureAdStr = await GetConfigValueAsync(SecretKeys.AzureOpenAiUseAzureAd, "AzureOpenAI:UseAzureAD");
+        // Load all configuration (SecureStorage first, then appsettings fallback - matching self-organizer paths)
+        var endpoint = await GetConfigValueAsync(SecretKeys.AzureOpenAiEndpoint, "LlmSettings:AzureOpenAI:Endpoint");
+        var deployment = await GetConfigValueAsync(SecretKeys.AzureOpenAiDeployment, "LlmSettings:AzureOpenAI:DeploymentName");
+        var apiKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiKey, "LlmSettings:AzureOpenAI:ApiKey");
+        var apiVersion = await GetConfigValueAsync(SecretKeys.AzureOpenAiApiVersion, "LlmSettings:AzureOpenAI:ApiVersion") ?? DefaultAzureApiVersion;
+        var apimKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiApimSubscriptionKey, "LlmSettings:AzureOpenAI:ApimSubscriptionKey");
+        var useAzureAdStr = await GetConfigValueAsync(SecretKeys.AzureOpenAiUseAzureAd, "LlmSettings:AzureOpenAI:UseAzureAD");
         var useAzureAd = useAzureAdStr?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
 
         _logger.LogInformation("Test config sources - APIM key from: {Source}, length: {Length}",
             !string.IsNullOrWhiteSpace(await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey)) ? "SecureStorage" :
-            !string.IsNullOrWhiteSpace(_configuration.GetValue<string>("AzureOpenAI:ApimSubscriptionKey")) ? "appsettings" : "none",
+            !string.IsNullOrWhiteSpace(_configuration.GetValue<string>("LlmSettings:AzureOpenAI:ApimSubscriptionKey")) ? "appsettings" : "none",
             apimKey?.Length ?? 0);
 
         // Record configuration checks
@@ -341,9 +343,9 @@ public class OllamaRecommendationService : IAiRecommendationService
 
         if (useAzureAd)
         {
-            var tenantId = await GetConfigValueAsync(SecretKeys.AzureOpenAiTenantId, "AzureOpenAI:TenantId");
-            var clientId = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientId, "AzureOpenAI:ClientId");
-            var clientSecret = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientSecret, "AzureOpenAI:ClientSecret");
+            var tenantId = await GetConfigValueAsync(SecretKeys.AzureOpenAiTenantId, "LlmSettings:AzureOpenAI:TenantId");
+            var clientId = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientId, "LlmSettings:AzureOpenAI:ClientId");
+            var clientSecret = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientSecret, "LlmSettings:AzureOpenAI:ClientSecret");
 
             checks["Tenant ID configured"] = !string.IsNullOrWhiteSpace(tenantId);
             checks["Client ID configured"] = !string.IsNullOrWhiteSpace(clientId);
@@ -420,7 +422,7 @@ public class OllamaRecommendationService : IAiRecommendationService
             {
                 Messages = messages,
                 Temperature = 0.1,
-                MaxTokens = 10
+                MaxCompletionTokens = 10
             };
 
             var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
@@ -804,7 +806,7 @@ Be concise and actionable.";
 
     private async Task<string?> CallAiAsync(string prompt, string? systemPrompt = null)
     {
-        var provider = await _secureStorage.GetSecretAsync(SecretKeys.AiProvider) ?? "ollama";
+        var provider = await GetConfigValueAsync(SecretKeys.AiProvider, "AiProvider") ?? "ollama";
 
         if (provider.Equals("azureopenai", StringComparison.OrdinalIgnoreCase))
         {
@@ -856,12 +858,12 @@ Be concise and actionable.";
         try
         {
             // Load config with appsettings fallback (matching self-organizer pattern)
-            var endpoint = await GetConfigValueAsync(SecretKeys.AzureOpenAiEndpoint, "AzureOpenAI:Endpoint");
-            var deployment = await GetConfigValueAsync(SecretKeys.AzureOpenAiDeployment, "AzureOpenAI:DeploymentName");
-            var apiKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiKey, "AzureOpenAI:ApiKey");
-            var apiVersion = await GetConfigValueAsync(SecretKeys.AzureOpenAiApiVersion, "AzureOpenAI:ApiVersion") ?? DefaultAzureApiVersion;
-            var apimKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiApimSubscriptionKey, "AzureOpenAI:ApimSubscriptionKey");
-            var useAzureAdStr = await GetConfigValueAsync(SecretKeys.AzureOpenAiUseAzureAd, "AzureOpenAI:UseAzureAD");
+            var endpoint = await GetConfigValueAsync(SecretKeys.AzureOpenAiEndpoint, "LlmSettings:AzureOpenAI:Endpoint");
+            var deployment = await GetConfigValueAsync(SecretKeys.AzureOpenAiDeployment, "LlmSettings:AzureOpenAI:DeploymentName");
+            var apiKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiKey, "LlmSettings:AzureOpenAI:ApiKey");
+            var apiVersion = await GetConfigValueAsync(SecretKeys.AzureOpenAiApiVersion, "LlmSettings:AzureOpenAI:ApiVersion") ?? DefaultAzureApiVersion;
+            var apimKey = await GetConfigValueAsync(SecretKeys.AzureOpenAiApimSubscriptionKey, "LlmSettings:AzureOpenAI:ApimSubscriptionKey");
+            var useAzureAdStr = await GetConfigValueAsync(SecretKeys.AzureOpenAiUseAzureAd, "LlmSettings:AzureOpenAI:UseAzureAD");
             var useAzureAd = useAzureAdStr?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
 
             _logger.LogInformation("Azure OpenAI config - Endpoint: {Endpoint}, Deployment: {Deployment}, ApiVersion: {ApiVersion}, UseAzureAD: {UseAzureAD}, HasApiKey: {HasApiKey}, HasApimKey: {HasApimKey}",
@@ -879,9 +881,9 @@ Be concise and actionable.";
 
             if (useAzureAd)
             {
-                var tenantId = await GetConfigValueAsync(SecretKeys.AzureOpenAiTenantId, "AzureOpenAI:TenantId");
-                var clientId = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientId, "AzureOpenAI:ClientId");
-                var clientSecret = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientSecret, "AzureOpenAI:ClientSecret");
+                var tenantId = await GetConfigValueAsync(SecretKeys.AzureOpenAiTenantId, "LlmSettings:AzureOpenAI:TenantId");
+                var clientId = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientId, "LlmSettings:AzureOpenAI:ClientId");
+                var clientSecret = await GetConfigValueAsync(SecretKeys.AzureOpenAiClientSecret, "LlmSettings:AzureOpenAI:ClientSecret");
 
                 _logger.LogInformation("Azure AD auth - TenantId: {TenantId}, ClientId: {ClientId}, HasSecret: {HasSecret}",
                     tenantId, clientId, !string.IsNullOrWhiteSpace(clientSecret));
@@ -925,7 +927,7 @@ Be concise and actionable.";
             {
                 Messages = messages,
                 Temperature = 0.7,
-                MaxTokens = 2000
+                MaxCompletionTokens = 2000
             };
 
             var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
@@ -1334,8 +1336,8 @@ Be concise and focus on actionable insights.";
         [JsonPropertyName("temperature")]
         public double Temperature { get; set; } = 0.7;
 
-        [JsonPropertyName("max_tokens")]
-        public int MaxTokens { get; set; } = 2000;
+        [JsonPropertyName("max_completion_tokens")]
+        public int MaxCompletionTokens { get; set; } = 2000;
     }
 
     private class OpenAIChatMessage
