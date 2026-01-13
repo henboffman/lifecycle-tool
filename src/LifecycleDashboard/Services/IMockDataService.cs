@@ -422,6 +422,68 @@ public interface IMockDataService
     /// Tests a data source connection.
     /// </summary>
     Task<DataSourceTestResult> TestDataSourceConnectionAsync(string dataSourceId);
+
+    // ServiceNow Incidents
+
+    /// <summary>
+    /// Gets all imported ServiceNow incidents.
+    /// </summary>
+    Task<IReadOnlyList<ServiceNowIncident>> GetServiceNowIncidentsAsync();
+
+    /// <summary>
+    /// Gets ServiceNow incidents for a specific application.
+    /// </summary>
+    Task<IReadOnlyList<ServiceNowIncident>> GetIncidentsForApplicationAsync(string applicationId);
+
+    /// <summary>
+    /// Gets a specific incident by ID.
+    /// </summary>
+    Task<ServiceNowIncident?> GetServiceNowIncidentAsync(string incidentId);
+
+    /// <summary>
+    /// Gets a specific incident by incident number.
+    /// </summary>
+    Task<ServiceNowIncident?> GetServiceNowIncidentByNumberAsync(string incidentNumber);
+
+    /// <summary>
+    /// Stores imported ServiceNow incidents (upserts by incident number).
+    /// </summary>
+    Task<(int created, int updated, int skipped)> StoreServiceNowIncidentsAsync(IEnumerable<ServiceNowIncident> incidents);
+
+    /// <summary>
+    /// Updates an incident (for manual linking/amendments).
+    /// </summary>
+    Task<ServiceNowIncident> UpdateServiceNowIncidentAsync(ServiceNowIncident incident);
+
+    /// <summary>
+    /// Deletes an incident by ID.
+    /// </summary>
+    Task DeleteServiceNowIncidentAsync(string incidentId);
+
+    /// <summary>
+    /// Clears all imported incidents.
+    /// </summary>
+    Task ClearServiceNowIncidentsAsync();
+
+    /// <summary>
+    /// Gets the saved incident CSV column mapping configuration.
+    /// </summary>
+    Task<ServiceNowIncidentColumnMapping?> GetServiceNowIncidentColumnMappingAsync();
+
+    /// <summary>
+    /// Saves the incident CSV column mapping configuration.
+    /// </summary>
+    Task SaveServiceNowIncidentColumnMappingAsync(ServiceNowIncidentColumnMapping mapping);
+
+    /// <summary>
+    /// Gets incident analysis summary.
+    /// </summary>
+    Task<IncidentAnalysisSummary> GetIncidentAnalysisSummaryAsync();
+
+    /// <summary>
+    /// Attempts to auto-link incidents to applications based on configuration items.
+    /// </summary>
+    Task<int> AutoLinkIncidentsToApplicationsAsync();
 }
 
 /// <summary>

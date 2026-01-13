@@ -17,6 +17,7 @@ public class DatabaseDataService : IMockDataService
 
     // In-memory caches for configuration data (not persisted to DB yet)
     private ServiceNowColumnMapping? _serviceNowColumnMapping;
+    private ServiceNowIncidentColumnMapping? _incidentColumnMapping;
     private AppNameMappingConfig? _appNameMappingConfig;
     private TaskSchedulingConfig _taskSchedulingConfig = new();
     private SystemSettings _systemSettings = new();
@@ -1748,6 +1749,295 @@ public class DatabaseDataService : IMockDataService
             Success = false,
             Message = "Connection testing not implemented for database service"
         });
+    }
+
+    #endregion
+
+    #region ServiceNow Incidents
+
+    public async Task<IReadOnlyList<ServiceNowIncident>> GetServiceNowIncidentsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.ServiceNowIncidents.AsNoTracking()
+            .OrderByDescending(i => i.ImportedAt)
+            .ToListAsync();
+        return entities.Select(EntityToIncident).ToList();
+    }
+
+    public async Task<IReadOnlyList<ServiceNowIncident>> GetIncidentsForApplicationAsync(string applicationId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.ServiceNowIncidents.AsNoTracking()
+            .Where(i => i.LinkedApplicationId == applicationId)
+            .OrderByDescending(i => i.ImportedAt)
+            .ToListAsync();
+        return entities.Select(EntityToIncident).ToList();
+    }
+
+    public async Task<ServiceNowIncident?> GetServiceNowIncidentAsync(string incidentId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.ServiceNowIncidents.AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == incidentId);
+        return entity != null ? EntityToIncident(entity) : null;
+    }
+
+    public async Task<ServiceNowIncident?> GetServiceNowIncidentByNumberAsync(string incidentNumber)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.ServiceNowIncidents.AsNoTracking()
+            .FirstOrDefaultAsync(i => i.IncidentNumber == incidentNumber);
+        return entity != null ? EntityToIncident(entity) : null;
+    }
+
+    public async Task<(int created, int updated, int skipped)> StoreServiceNowIncidentsAsync(IEnumerable<ServiceNowIncident> incidents)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        int created = 0, updated = 0, skipped = 0;
+
+        foreach (var incident in incidents)
+        {
+            var existing = await context.ServiceNowIncidents
+                .FirstOrDefaultAsync(i => i.IncidentNumber == incident.IncidentNumber);
+
+            if (existing != null)
+            {
+                // Update existing
+                IncidentToEntity(incident, existing);
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                updated++;
+            }
+            else
+            {
+                // Create new
+                var entity = new ServiceNowIncidentEntity { Id = incident.Id };
+                IncidentToEntity(incident, entity);
+                context.ServiceNowIncidents.Add(entity);
+                created++;
+            }
+        }
+
+        await context.SaveChangesAsync();
+        return (created, updated, skipped);
+    }
+
+    public async Task<ServiceNowIncident> UpdateServiceNowIncidentAsync(ServiceNowIncident incident)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.ServiceNowIncidents.FirstOrDefaultAsync(i => i.Id == incident.Id)
+            ?? throw new InvalidOperationException($"Incident {incident.Id} not found");
+
+        IncidentToEntity(incident, entity);
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        entity.ManuallyReviewed = true;
+        await context.SaveChangesAsync();
+
+        return EntityToIncident(entity);
+    }
+
+    public async Task DeleteServiceNowIncidentAsync(string incidentId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.ServiceNowIncidents.FirstOrDefaultAsync(i => i.Id == incidentId);
+        if (entity != null)
+        {
+            context.ServiceNowIncidents.Remove(entity);
+            await context.SaveChangesAsync();
+        }
+    }
+
+    public async Task ClearServiceNowIncidentsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        context.ServiceNowIncidents.RemoveRange(context.ServiceNowIncidents);
+        await context.SaveChangesAsync();
+    }
+
+    public Task<ServiceNowIncidentColumnMapping?> GetServiceNowIncidentColumnMappingAsync()
+    {
+        return Task.FromResult(_incidentColumnMapping);
+    }
+
+    public Task SaveServiceNowIncidentColumnMappingAsync(ServiceNowIncidentColumnMapping mapping)
+    {
+        _incidentColumnMapping = mapping;
+        return Task.CompletedTask;
+    }
+
+    public async Task<IncidentAnalysisSummary> GetIncidentAnalysisSummaryAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var incidents = await context.ServiceNowIncidents.AsNoTracking().ToListAsync();
+
+        var linked = incidents.Where(i => i.LinkStatus == ConfigItemLinkStatus.Linked.ToString()
+            || i.LinkStatus == ConfigItemLinkStatus.ManuallyLinked.ToString()).ToList();
+        var unlinked = incidents.Where(i => i.LinkStatus != ConfigItemLinkStatus.Linked.ToString()
+            && i.LinkStatus != ConfigItemLinkStatus.ManuallyLinked.ToString()).ToList();
+
+        // Top applications by incident count
+        var topApps = linked
+            .Where(i => !string.IsNullOrEmpty(i.LinkedApplicationId))
+            .GroupBy(i => new { i.LinkedApplicationId, i.LinkedApplicationName })
+            .Select(g => new ApplicationIncidentCount
+            {
+                ApplicationId = g.Key.LinkedApplicationId!,
+                ApplicationName = g.Key.LinkedApplicationName ?? "Unknown",
+                IncidentCount = g.Count(),
+                BandaidFixCount = g.Count(i => i.CloseCode?.Contains("Workaround", StringComparison.OrdinalIgnoreCase) == true
+                    || i.CloseCode?.Contains("Temporary", StringComparison.OrdinalIgnoreCase) == true)
+            })
+            .OrderByDescending(x => x.IncidentCount)
+            .Take(10)
+            .ToList();
+
+        // Close codes
+        var closeCodes = incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .Select(g => new CloseCodeCount { CloseCode = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .Take(10)
+            .ToList();
+
+        // By state
+        var byState = incidents
+            .Where(i => !string.IsNullOrEmpty(i.State))
+            .GroupBy(i => i.State!)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        return new IncidentAnalysisSummary
+        {
+            TotalIncidents = incidents.Count,
+            LinkedIncidents = linked.Count,
+            UnlinkedIncidents = unlinked.Count,
+            MissingConfigItem = incidents.Count(i => i.LinkStatus == ConfigItemLinkStatus.MissingConfigItem.ToString()),
+            NoMatchingApplication = incidents.Count(i => i.LinkStatus == ConfigItemLinkStatus.NoMatchingApplication.ToString()),
+            TopApplications = topApps,
+            TopCloseCodes = closeCodes,
+            ByState = byState
+        };
+    }
+
+    public async Task<int> AutoLinkIncidentsToApplicationsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var incidents = await context.ServiceNowIncidents
+            .Where(i => i.LinkStatus == ConfigItemLinkStatus.Unknown.ToString()
+                || i.LinkStatus == ConfigItemLinkStatus.MissingConfigItem.ToString()
+                || i.LinkStatus == ConfigItemLinkStatus.NoMatchingApplication.ToString())
+            .ToListAsync();
+
+        var applications = await context.Applications.AsNoTracking().ToListAsync();
+        var importedApps = await context.ImportedServiceNowApplications.AsNoTracking().ToListAsync();
+        int linkedCount = 0;
+
+        foreach (var incident in incidents)
+        {
+            if (string.IsNullOrEmpty(incident.ConfigurationItem))
+            {
+                incident.LinkStatus = ConfigItemLinkStatus.MissingConfigItem.ToString();
+                continue;
+            }
+
+            // Try to match by name (case-insensitive)
+            var app = applications.FirstOrDefault(a =>
+                a.Name.Equals(incident.ConfigurationItem, StringComparison.OrdinalIgnoreCase));
+
+            // If not found, try imported apps
+            if (app == null)
+            {
+                var importedApp = importedApps.FirstOrDefault(ia =>
+                    ia.Name.Equals(incident.ConfigurationItem, StringComparison.OrdinalIgnoreCase));
+                if (importedApp != null)
+                {
+                    app = applications.FirstOrDefault(a => a.ServiceNowId == importedApp.ServiceNowId);
+                }
+            }
+
+            if (app != null)
+            {
+                incident.LinkedApplicationId = app.Id;
+                incident.LinkedApplicationName = app.Name;
+                incident.LinkStatus = ConfigItemLinkStatus.Linked.ToString();
+                incident.UpdatedAt = DateTimeOffset.UtcNow;
+                linkedCount++;
+            }
+            else
+            {
+                incident.LinkStatus = ConfigItemLinkStatus.NoMatchingApplication.ToString();
+                incident.LinkStatusNotes = "Configuration item does not match any application in the system";
+            }
+        }
+
+        await context.SaveChangesAsync();
+        return linkedCount;
+    }
+
+    private static ServiceNowIncident EntityToIncident(ServiceNowIncidentEntity entity)
+    {
+        var entries = new List<IncidentEntry>();
+        if (!string.IsNullOrEmpty(entity.EntriesJson))
+        {
+            try
+            {
+                entries = JsonSerializer.Deserialize<List<IncidentEntry>>(entity.EntriesJson, JsonOptions) ?? [];
+            }
+            catch { /* Ignore parse errors */ }
+        }
+
+        var rawCsv = new Dictionary<string, string>();
+        if (!string.IsNullOrEmpty(entity.RawCsvValuesJson))
+        {
+            try
+            {
+                rawCsv = JsonSerializer.Deserialize<Dictionary<string, string>>(entity.RawCsvValuesJson, JsonOptions) ?? [];
+            }
+            catch { /* Ignore parse errors */ }
+        }
+
+        return new ServiceNowIncident
+        {
+            Id = entity.Id,
+            IncidentNumber = entity.IncidentNumber,
+            State = entity.State,
+            ConfigurationItem = entity.ConfigurationItem,
+            ShortDescription = entity.ShortDescription,
+            Description = entity.Description,
+            CloseCode = entity.CloseCode,
+            CloseNotes = entity.CloseNotes,
+            CommentsAndWorkNotesRaw = entity.CommentsAndWorkNotesRaw,
+            Entries = entries,
+            LinkedApplicationId = entity.LinkedApplicationId,
+            LinkedApplicationName = entity.LinkedApplicationName,
+            LinkStatus = Enum.TryParse<ConfigItemLinkStatus>(entity.LinkStatus, out var ls) ? ls : ConfigItemLinkStatus.Unknown,
+            LinkStatusNotes = entity.LinkStatusNotes,
+            ManuallyReviewed = entity.ManuallyReviewed,
+            ImportedAt = entity.ImportedAt,
+            UpdatedAt = entity.UpdatedAt,
+            RawCsvValues = rawCsv
+        };
+    }
+
+    private static void IncidentToEntity(ServiceNowIncident incident, ServiceNowIncidentEntity entity)
+    {
+        entity.IncidentNumber = incident.IncidentNumber;
+        entity.State = incident.State;
+        entity.ConfigurationItem = incident.ConfigurationItem;
+        entity.ShortDescription = incident.ShortDescription;
+        entity.Description = incident.Description;
+        entity.CloseCode = incident.CloseCode;
+        entity.CloseNotes = incident.CloseNotes;
+        entity.CommentsAndWorkNotesRaw = incident.CommentsAndWorkNotesRaw;
+        entity.EntriesJson = JsonSerializer.Serialize(incident.Entries, JsonOptions);
+        entity.LinkedApplicationId = incident.LinkedApplicationId;
+        entity.LinkedApplicationName = incident.LinkedApplicationName;
+        entity.LinkStatus = incident.LinkStatus.ToString();
+        entity.LinkStatusNotes = incident.LinkStatusNotes;
+        entity.ManuallyReviewed = incident.ManuallyReviewed;
+        entity.ImportedAt = incident.ImportedAt;
+        entity.RawCsvValuesJson = incident.RawCsvValues != null
+            ? JsonSerializer.Serialize(incident.RawCsvValues, JsonOptions)
+            : "{}";
     }
 
     #endregion

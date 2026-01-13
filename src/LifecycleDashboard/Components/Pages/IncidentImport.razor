@@ -1,0 +1,931 @@
+@page "/incident-import"
+@using LifecycleDashboard.Services
+@using DI = LifecycleDashboard.Services.DataIntegration
+@using System.Text
+@using System.Text.RegularExpressions
+@inject IMockDataService DataService
+@inject DI.IDataSyncOrchestrator SyncOrchestrator
+@inject IJSRuntime JS
+
+<PageTitle>Incident Import - Lifecycle Dashboard</PageTitle>
+
+<div class="import-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>ServiceNow Incident Import</h1>
+            <p class="subtitle">Import incidents from ServiceNow CSV export for analysis and trending</p>
+        </div>
+    </header>
+
+    <!-- Step 1: File Upload -->
+    <section class="import-section">
+        <div class="section-header">
+            <span class="step-number @(_currentStep >= 1 ? "active" : "")">1</span>
+            <h2>Upload CSV File</h2>
+        </div>
+
+        <div class="upload-area @(_csvFile != null ? "has-file" : "")" @ondragover:preventDefault @ondrop="HandleDrop">
+            @if (_csvFile == null)
+            {
+                <i class="bi bi-cloud-upload upload-icon"></i>
+                <p>Drag and drop your ServiceNow incident export here, or</p>
+                <InputFile OnChange="HandleFileSelected" accept=".csv" class="file-input" id="csvFileInput" />
+                <label for="csvFileInput" class="btn btn-primary">Choose File</label>
+            }
+            else
+            {
+                <i class="bi bi-file-earmark-check upload-icon success"></i>
+                <p class="filename">@_csvFile.Name</p>
+                <p class="file-info">@FormatFileSize(_csvFile.Size) - @_detectedColumns.Count columns detected</p>
+                <button class="btn btn-outline" @onclick="ClearFile">
+                    <i class="bi bi-x"></i> Remove
+                </button>
+            }
+        </div>
+
+        @if (_uploadError != null)
+        {
+            <div class="error-message">
+                <i class="bi bi-exclamation-triangle"></i> @_uploadError
+            </div>
+        }
+    </section>
+
+    @if (_currentStep >= 2)
+    {
+        <!-- Step 2: Column Mapping -->
+        <section class="import-section">
+            <div class="section-header">
+                <span class="step-number active">2</span>
+                <h2>Map CSV Columns to Incident Fields</h2>
+                @if (_savedMapping != null)
+                {
+                    <span class="mapping-saved-badge">
+                        <i class="bi bi-check-circle"></i> Previous mapping loaded
+                    </span>
+                }
+            </div>
+
+            <p class="section-description">
+                Select which CSV column corresponds to each incident property.
+                Required fields are marked with <span class="required-marker">*</span>
+            </p>
+
+            <div class="mapping-grid">
+                @foreach (var field in _mappingFields)
+                {
+                    <div class="mapping-row @(field.IsRequired && string.IsNullOrEmpty(GetMappingValue(field.PropertyName)) ? "missing-required" : "")">
+                        <label class="field-label">
+                            @field.DisplayName
+                            @if (field.IsRequired)
+                            {
+                                <span class="required-marker">*</span>
+                            }
+                        </label>
+                        <select class="mapping-select"
+                                value="@GetMappingValue(field.PropertyName)"
+                                @onchange="e => SetMappingValue(field.PropertyName, e.Value?.ToString())">
+                            <option value="">-- Select Column --</option>
+                            @foreach (var col in _detectedColumns)
+                            {
+                                <option value="@col">@col</option>
+                            }
+                        </select>
+                        @if (!string.IsNullOrEmpty(GetMappingValue(field.PropertyName)))
+                        {
+                            <span class="sample-value" title="Sample value from first row">
+                                @GetSampleValue(GetMappingValue(field.PropertyName)!)
+                            </span>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="mapping-actions">
+                <button class="btn btn-outline" @onclick="SaveMapping" disabled="@(!HasRequiredMappings())">
+                    <i class="bi bi-save"></i> Save Mapping
+                </button>
+                <button class="btn btn-outline" @onclick="ClearMapping">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reset
+                </button>
+                <button class="btn btn-primary" @onclick="GeneratePreview" disabled="@(!HasRequiredMappings())">
+                    <i class="bi bi-eye"></i> Preview Import
+                </button>
+            </div>
+        </section>
+    }
+
+    @if (_currentStep >= 3 && _previewData.Count > 0)
+    {
+        <!-- Step 3: Preview -->
+        <section class="import-section">
+            <div class="section-header">
+                <span class="step-number active">3</span>
+                <h2>Preview Import Data</h2>
+            </div>
+
+            <div class="preview-stats">
+                <div class="stat">
+                    <span class="stat-value">@_totalRows</span>
+                    <span class="stat-label">Total Rows</span>
+                </div>
+                <div class="stat success">
+                    <span class="stat-value">@_linkedCount</span>
+                    <span class="stat-label">Linked</span>
+                </div>
+                <div class="stat warning">
+                    <span class="stat-value">@_missingCiCount</span>
+                    <span class="stat-label">Missing CI</span>
+                </div>
+                <div class="stat warning">
+                    <span class="stat-value">@_noMatchCount</span>
+                    <span class="stat-label">No Match</span>
+                </div>
+                <div class="stat error">
+                    <span class="stat-value">@_parseErrors.Count</span>
+                    <span class="stat-label">Errors</span>
+                </div>
+            </div>
+
+            @if (_parseWarnings.Count > 0 || _parseErrors.Count > 0)
+            {
+                <div class="parse-issues">
+                    @foreach (var error in _parseErrors.Take(5))
+                    {
+                        <div class="issue error">
+                            <i class="bi bi-x-circle"></i>
+                            <span>Row @error.RowNumber: @error.Message</span>
+                        </div>
+                    }
+                    @foreach (var warning in _parseWarnings.Take(5))
+                    {
+                        <div class="issue warning">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <span>Row @warning.RowNumber: @warning.Message</span>
+                        </div>
+                    }
+                    @if (_parseErrors.Count + _parseWarnings.Count > 10)
+                    {
+                        <div class="more-issues">
+                            ... and @(_parseErrors.Count + _parseWarnings.Count - 10) more issues
+                        </div>
+                    }
+                </div>
+            }
+
+            <div class="link-status-legend">
+                <div class="legend-item linked">
+                    <i class="bi bi-check-circle-fill"></i>
+                    <span>Linked to application</span>
+                </div>
+                <div class="legend-item missing-ci">
+                    <i class="bi bi-question-circle-fill"></i>
+                    <span>Missing config item (can be linked manually)</span>
+                </div>
+                <div class="legend-item no-match">
+                    <i class="bi bi-exclamation-circle-fill"></i>
+                    <span>No matching application (may be hardware/infra)</span>
+                </div>
+            </div>
+
+            <div class="preview-table-container">
+                <table class="preview-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Incident #</th>
+                            <th>State</th>
+                            <th>Config Item</th>
+                            <th>Short Description</th>
+                            <th>Close Code</th>
+                            <th>Entries</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var incident in _previewData.Take(20))
+                        {
+                            <tr class="@GetRowClass(incident.LinkStatus)">
+                                <td class="status-cell">
+                                    @switch (incident.LinkStatus)
+                                    {
+                                        case ConfigItemLinkStatus.Linked:
+                                            <i class="bi bi-check-circle-fill status-linked" title="Linked to @incident.LinkedApplicationName"></i>
+                                            break;
+                                        case ConfigItemLinkStatus.MissingConfigItem:
+                                            <i class="bi bi-question-circle-fill status-missing" title="Missing configuration item"></i>
+                                            break;
+                                        case ConfigItemLinkStatus.NoMatchingApplication:
+                                            <i class="bi bi-exclamation-circle-fill status-no-match" title="No matching application"></i>
+                                            break;
+                                        default:
+                                            <i class="bi bi-dash-circle status-unknown"></i>
+                                            break;
+                                    }
+                                </td>
+                                <td class="mono">@incident.IncidentNumber</td>
+                                <td>@(incident.State ?? "-")</td>
+                                <td class="config-item">
+                                    @if (incident.LinkStatus == ConfigItemLinkStatus.Linked)
+                                    {
+                                        <span class="linked-app" title="@incident.ConfigurationItem">
+                                            @incident.LinkedApplicationName
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        @(incident.ConfigurationItem ?? "-")
+                                    }
+                                </td>
+                                <td class="description-cell" title="@incident.ShortDescription">
+                                    @TruncateText(incident.ShortDescription, 50)
+                                </td>
+                                <td>@(incident.CloseCode ?? "-")</td>
+                                <td class="entries-count">
+                                    @if (incident.Entries.Count > 0)
+                                    {
+                                        <span class="entry-badge">@incident.Entries.Count</span>
+                                    }
+                                    else
+                                    {
+                                        <span>-</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_previewData.Count > 20)
+            {
+                <div class="preview-footer">
+                    Showing 20 of @_previewData.Count incidents
+                </div>
+            }
+
+            <div class="import-actions">
+                <button class="btn btn-outline" @onclick="() => _currentStep = 2">
+                    <i class="bi bi-arrow-left"></i> Back to Mapping
+                </button>
+                <button class="btn btn-primary btn-lg" @onclick="ExecuteImport" disabled="@(_importing || _previewData.Count == 0)">
+                    @if (_importing)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Importing...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-download"></i>
+                        <span>Import @_previewData.Count Incidents</span>
+                    }
+                </button>
+            </div>
+        </section>
+    }
+
+    @if (_importComplete)
+    {
+        <!-- Step 4: Complete -->
+        <section class="import-section success-section">
+            <div class="success-content">
+                <i class="bi bi-check-circle-fill success-icon"></i>
+                <h2>Import Complete!</h2>
+                <p>
+                    Successfully imported @_importedCount incidents.
+                    @if (_updatedCount > 0)
+                    {
+                        <span>@_updatedCount were updated from previous imports.</span>
+                    }
+                </p>
+                <div class="import-summary">
+                    <div class="summary-item">
+                        <span class="summary-value">@_linkedCount</span>
+                        <span class="summary-label">Linked</span>
+                    </div>
+                    <div class="summary-item warning">
+                        <span class="summary-value">@_missingCiCount</span>
+                        <span class="summary-label">Missing CI</span>
+                    </div>
+                    <div class="summary-item warning">
+                        <span class="summary-value">@_noMatchCount</span>
+                        <span class="summary-label">No Match</span>
+                    </div>
+                </div>
+                <div class="success-actions">
+                    <button class="btn btn-outline" @onclick="ResetImport">
+                        <i class="bi bi-arrow-repeat"></i> Import Another File
+                    </button>
+                    <a href="/incidents" class="btn btn-primary">
+                        <i class="bi bi-arrow-right"></i> View Incidents
+                    </a>
+                </div>
+            </div>
+        </section>
+    }
+
+    <!-- Previously Imported Data -->
+    @if (_existingImports.Count > 0 && !_importComplete)
+    {
+        <section class="import-section existing-section">
+            <div class="section-header">
+                <h2>Previously Imported</h2>
+                <span class="import-count">@_existingImports.Count incidents</span>
+            </div>
+            <p class="section-description">
+                You have existing incident data. New imports will update existing records by incident number.
+            </p>
+            <button class="btn btn-outline btn-sm" @onclick="ClearExistingData">
+                <i class="bi bi-trash"></i> Clear All Imported Data
+            </button>
+        </section>
+    }
+</div>
+
+@code {
+    private IBrowserFile? _csvFile;
+    private List<string> _detectedColumns = [];
+    private List<Dictionary<string, string>> _csvRows = [];
+    private string? _uploadError;
+
+    private int _currentStep = 1;
+    private ServiceNowIncidentColumnMapping? _savedMapping;
+    private Dictionary<string, string?> _currentMapping = new();
+
+    private List<ServiceNowIncident> _previewData = [];
+    private List<ServiceNowIncident> _existingImports = [];
+    private List<ParseIssue> _parseErrors = [];
+    private List<ParseIssue> _parseWarnings = [];
+    private int _totalRows;
+    private int _linkedCount;
+    private int _missingCiCount;
+    private int _noMatchCount;
+
+    private bool _importing;
+    private bool _importComplete;
+    private int _importedCount;
+    private int _updatedCount;
+    private int _skippedCount;
+
+    // Cached application lookup for linking
+    private Dictionary<string, (string Id, string Name)> _applicationLookup = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, (string Id, string Name)> _serviceNowAppLookup = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly List<MappingField> _mappingFields =
+    [
+        // Required field
+        new("IncidentNumberColumn", "Incident Number", true),
+
+        // Standard incident fields
+        new("StateColumn", "State", false),
+        new("ConfigurationItemColumn", "Configuration Item (cmdb_ci)", false),
+        new("ShortDescriptionColumn", "Short Description", false),
+        new("DescriptionColumn", "Description", false),
+        new("CloseCodeColumn", "Close Code", false),
+        new("CloseNotesColumn", "Close Notes", false),
+        new("CommentsAndWorkNotesColumn", "Comments and Work Notes", false)
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _savedMapping = await DataService.GetServiceNowIncidentColumnMappingAsync();
+        _existingImports = (await DataService.GetServiceNowIncidentsAsync()).ToList();
+
+        // Build application lookup for linking
+        var apps = await DataService.GetApplicationsAsync();
+        foreach (var app in apps)
+        {
+            _applicationLookup[app.Name] = (app.Id, app.Name);
+        }
+
+        // Also include ServiceNow imported applications
+        var snApps = await DataService.GetImportedServiceNowApplicationsAsync();
+        foreach (var app in snApps)
+        {
+            _serviceNowAppLookup[app.Name] = (app.ServiceNowId, app.Name);
+            // Also add to main lookup if not already present
+            if (!_applicationLookup.ContainsKey(app.Name))
+            {
+                _applicationLookup[app.Name] = (app.ServiceNowId, app.Name);
+            }
+        }
+
+        if (_savedMapping != null)
+        {
+            LoadMappingFromSaved(_savedMapping);
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        _uploadError = null;
+        _csvFile = e.File;
+
+        if (_csvFile.Size > 50 * 1024 * 1024) // 50MB limit
+        {
+            _uploadError = "File too large. Maximum size is 50MB.";
+            _csvFile = null;
+            return;
+        }
+
+        await ParseCsvFile();
+    }
+
+    private async Task HandleDrop()
+    {
+        await Task.CompletedTask;
+    }
+
+    private async Task ParseCsvFile()
+    {
+        if (_csvFile == null) return;
+
+        try
+        {
+            using var stream = _csvFile.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            var content = await reader.ReadToEndAsync();
+            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            if (lines.Length == 0)
+            {
+                _uploadError = "CSV file is empty.";
+                return;
+            }
+
+            // Parse header row
+            _detectedColumns = ParseCsvLine(lines[0]).ToList();
+
+            if (_detectedColumns.Count == 0)
+            {
+                _uploadError = "Could not detect columns in CSV header.";
+                return;
+            }
+
+            // Parse data rows
+            _csvRows.Clear();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var values = ParseCsvLine(lines[i]);
+                if (values.Count > 0)
+                {
+                    var row = new Dictionary<string, string>();
+                    for (int j = 0; j < Math.Min(_detectedColumns.Count, values.Count); j++)
+                    {
+                        row[_detectedColumns[j]] = values[j];
+                    }
+                    _csvRows.Add(row);
+                }
+            }
+
+            _totalRows = _csvRows.Count;
+            _currentStep = 2;
+
+            // Try to auto-map columns based on saved mapping or common patterns
+            if (_savedMapping != null)
+            {
+                LoadMappingFromSaved(_savedMapping);
+            }
+            else
+            {
+                AutoDetectMapping();
+            }
+        }
+        catch (Exception ex)
+        {
+            _uploadError = $"Error parsing CSV: {ex.Message}";
+        }
+    }
+
+    private List<string> ParseCsvLine(string line)
+    {
+        var values = new List<string>();
+        var current = new StringBuilder();
+        bool inQuotes = false;
+
+        foreach (char c in line)
+        {
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+            }
+            else if (c == ',' && !inQuotes)
+            {
+                values.Add(current.ToString().Trim());
+                current.Clear();
+            }
+            else if (c != '\r')
+            {
+                current.Append(c);
+            }
+        }
+
+        values.Add(current.ToString().Trim());
+        return values;
+    }
+
+    private void LoadMappingFromSaved(ServiceNowIncidentColumnMapping mapping)
+    {
+        _currentMapping["IncidentNumberColumn"] = mapping.IncidentNumberColumn;
+        _currentMapping["StateColumn"] = mapping.StateColumn;
+        _currentMapping["ConfigurationItemColumn"] = mapping.ConfigurationItemColumn;
+        _currentMapping["ShortDescriptionColumn"] = mapping.ShortDescriptionColumn;
+        _currentMapping["DescriptionColumn"] = mapping.DescriptionColumn;
+        _currentMapping["CloseCodeColumn"] = mapping.CloseCodeColumn;
+        _currentMapping["CloseNotesColumn"] = mapping.CloseNotesColumn;
+        _currentMapping["CommentsAndWorkNotesColumn"] = mapping.CommentsAndWorkNotesColumn;
+    }
+
+    private void AutoDetectMapping()
+    {
+        var patterns = new Dictionary<string, string[]>
+        {
+            ["IncidentNumberColumn"] = ["number", "incident_number", "inc_number", "incident"],
+            ["StateColumn"] = ["state", "status", "incident_state"],
+            ["ConfigurationItemColumn"] = ["cmdb_ci", "configuration_item", "ci", "cmdb_ci.name"],
+            ["ShortDescriptionColumn"] = ["short_description", "short_desc", "summary", "title"],
+            ["DescriptionColumn"] = ["description", "desc", "details"],
+            ["CloseCodeColumn"] = ["close_code", "closure_code", "resolution_code"],
+            ["CloseNotesColumn"] = ["close_notes", "closure_notes", "resolution_notes"],
+            ["CommentsAndWorkNotesColumn"] = ["comments_and_work_notes", "work_notes", "comments", "notes"]
+        };
+
+        foreach (var (field, candidatePatterns) in patterns)
+        {
+            foreach (var pattern in candidatePatterns)
+            {
+                var match = _detectedColumns.FirstOrDefault(c =>
+                    c.Equals(pattern, StringComparison.OrdinalIgnoreCase) ||
+                    c.Replace("_", "").Equals(pattern.Replace("_", ""), StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    _currentMapping[field] = match;
+                    break;
+                }
+            }
+        }
+    }
+
+    private string? GetMappingValue(string propertyName)
+    {
+        return _currentMapping.TryGetValue(propertyName, out var value) ? value : null;
+    }
+
+    private void SetMappingValue(string propertyName, string? value)
+    {
+        _currentMapping[propertyName] = value;
+    }
+
+    private string GetSampleValue(string columnName)
+    {
+        if (_csvRows.Count == 0) return "";
+        if (_csvRows[0].TryGetValue(columnName, out var value))
+        {
+            return value.Length > 40 ? value[..40] + "..." : value;
+        }
+        return "";
+    }
+
+    private bool HasRequiredMappings()
+    {
+        return !string.IsNullOrEmpty(GetMappingValue("IncidentNumberColumn"));
+    }
+
+    private async Task SaveMapping()
+    {
+        var mapping = new ServiceNowIncidentColumnMapping
+        {
+            IncidentNumberColumn = GetMappingValue("IncidentNumberColumn"),
+            StateColumn = GetMappingValue("StateColumn"),
+            ConfigurationItemColumn = GetMappingValue("ConfigurationItemColumn"),
+            ShortDescriptionColumn = GetMappingValue("ShortDescriptionColumn"),
+            DescriptionColumn = GetMappingValue("DescriptionColumn"),
+            CloseCodeColumn = GetMappingValue("CloseCodeColumn"),
+            CloseNotesColumn = GetMappingValue("CloseNotesColumn"),
+            CommentsAndWorkNotesColumn = GetMappingValue("CommentsAndWorkNotesColumn")
+        };
+
+        await DataService.SaveServiceNowIncidentColumnMappingAsync(mapping);
+        _savedMapping = mapping;
+    }
+
+    private void ClearMapping()
+    {
+        _currentMapping.Clear();
+    }
+
+    private void GeneratePreview()
+    {
+        _previewData.Clear();
+        _parseErrors.Clear();
+        _parseWarnings.Clear();
+        _linkedCount = 0;
+        _missingCiCount = 0;
+        _noMatchCount = 0;
+
+        var incidentNumberCol = GetMappingValue("IncidentNumberColumn");
+
+        if (string.IsNullOrEmpty(incidentNumberCol))
+        {
+            return;
+        }
+
+        var existingIncidentNumbers = _existingImports.Select(i => i.IncidentNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < _csvRows.Count; i++)
+        {
+            var row = _csvRows[i];
+            var rowNum = i + 2; // 1-indexed, plus header row
+
+            // Get required field
+            var incidentNumber = GetCsvValue(row, incidentNumberCol);
+
+            if (string.IsNullOrWhiteSpace(incidentNumber))
+            {
+                _parseErrors.Add(new ParseIssue(rowNum, "Missing Incident Number"));
+                continue;
+            }
+
+            // Check for duplicates in this import
+            if (_previewData.Any(p => p.IncidentNumber.Equals(incidentNumber, StringComparison.OrdinalIgnoreCase)))
+            {
+                _parseWarnings.Add(new ParseIssue(rowNum, $"Duplicate incident number in file: {incidentNumber}"));
+                continue;
+            }
+
+            // Check if already exists (will be updated)
+            if (existingIncidentNumbers.Contains(incidentNumber))
+            {
+                _parseWarnings.Add(new ParseIssue(rowNum, $"Incident {incidentNumber} exists and will be updated"));
+            }
+
+            var configItem = GetCsvValue(row, GetMappingValue("ConfigurationItemColumn"));
+            var commentsRaw = GetCsvValue(row, GetMappingValue("CommentsAndWorkNotesColumn"));
+
+            // Determine link status
+            var (linkStatus, linkedAppId, linkedAppName, linkNotes) = DetermineLinkStatus(configItem);
+
+            // Parse comments and work notes
+            var entries = ParseCommentsAndWorkNotes(commentsRaw);
+
+            var incident = new ServiceNowIncident
+            {
+                Id = Guid.NewGuid().ToString(),
+                IncidentNumber = incidentNumber,
+                State = GetCsvValue(row, GetMappingValue("StateColumn")),
+                ConfigurationItem = configItem,
+                ShortDescription = GetCsvValue(row, GetMappingValue("ShortDescriptionColumn")),
+                Description = GetCsvValue(row, GetMappingValue("DescriptionColumn")),
+                CloseCode = GetCsvValue(row, GetMappingValue("CloseCodeColumn")),
+                CloseNotes = GetCsvValue(row, GetMappingValue("CloseNotesColumn")),
+                CommentsAndWorkNotesRaw = commentsRaw,
+                Entries = entries,
+                LinkStatus = linkStatus,
+                LinkedApplicationId = linkedAppId,
+                LinkedApplicationName = linkedAppName,
+                LinkStatusNotes = linkNotes,
+                RawCsvValues = row,
+                ImportedAt = DateTimeOffset.UtcNow
+            };
+
+            _previewData.Add(incident);
+
+            // Update counts
+            switch (linkStatus)
+            {
+                case ConfigItemLinkStatus.Linked:
+                    _linkedCount++;
+                    break;
+                case ConfigItemLinkStatus.MissingConfigItem:
+                    _missingCiCount++;
+                    break;
+                case ConfigItemLinkStatus.NoMatchingApplication:
+                    _noMatchCount++;
+                    break;
+            }
+        }
+
+        _currentStep = 3;
+    }
+
+    private (ConfigItemLinkStatus Status, string? AppId, string? AppName, string? Notes) DetermineLinkStatus(string? configItem)
+    {
+        if (string.IsNullOrWhiteSpace(configItem))
+        {
+            return (ConfigItemLinkStatus.MissingConfigItem, null, null, "No configuration item provided");
+        }
+
+        // Try to find matching application
+        if (_applicationLookup.TryGetValue(configItem, out var app))
+        {
+            return (ConfigItemLinkStatus.Linked, app.Id, app.Name, null);
+        }
+
+        // Try partial match (config item might be a display name variant)
+        var partialMatch = _applicationLookup.Keys
+            .FirstOrDefault(k => k.Contains(configItem, StringComparison.OrdinalIgnoreCase) ||
+                                 configItem.Contains(k, StringComparison.OrdinalIgnoreCase));
+        if (partialMatch != null)
+        {
+            var matchedApp = _applicationLookup[partialMatch];
+            return (ConfigItemLinkStatus.Linked, matchedApp.Id, matchedApp.Name, $"Matched via partial name: {partialMatch}");
+        }
+
+        return (ConfigItemLinkStatus.NoMatchingApplication, null, null, $"No application found matching '{configItem}'");
+    }
+
+    private List<IncidentEntry> ParseCommentsAndWorkNotes(string? rawText)
+    {
+        var entries = new List<IncidentEntry>();
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            return entries;
+        }
+
+        // ServiceNow comments typically follow patterns like:
+        // "2024-01-15 14:30:22 - John Doe (Work notes)\nActual content here..."
+        // or "2024-01-15 14:30:22 - John Doe (Additional comments)\nActual content here..."
+        // Entries are separated by newlines and each starts with a date
+
+        // Pattern: date (various formats) - author name (type)
+        var entryPattern = new Regex(
+            @"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*-\s*([^(\n]+)\s*\(([^)]+)\)",
+            RegexOptions.Multiline);
+
+        var matches = entryPattern.Matches(rawText);
+
+        if (matches.Count == 0)
+        {
+            // If no structured entries found, treat entire text as single entry
+            entries.Add(new IncidentEntry
+            {
+                EntryType = IncidentEntryType.Unknown,
+                Content = rawText.Trim(),
+                RawText = rawText
+            });
+            return entries;
+        }
+
+        for (int i = 0; i < matches.Count; i++)
+        {
+            var match = matches[i];
+            var timestamp = match.Groups[1].Value;
+            var author = match.Groups[2].Value.Trim();
+            var typeText = match.Groups[3].Value.Trim().ToLowerInvariant();
+
+            // Determine entry type
+            var entryType = typeText switch
+            {
+                "work notes" or "work note" => IncidentEntryType.WorkNote,
+                "additional comments" or "comments" or "comment" => IncidentEntryType.Comment,
+                _ => IncidentEntryType.Unknown
+            };
+
+            // Get content (text until next entry or end)
+            var startIndex = match.Index + match.Length;
+            var endIndex = (i + 1 < matches.Count) ? matches[i + 1].Index : rawText.Length;
+            var content = rawText.Substring(startIndex, endIndex - startIndex).Trim();
+
+            // Try to parse timestamp
+            DateTimeOffset? parsedTime = null;
+            if (DateTimeOffset.TryParse(timestamp, out var dt))
+            {
+                parsedTime = dt;
+            }
+
+            entries.Add(new IncidentEntry
+            {
+                EntryType = entryType,
+                Timestamp = parsedTime,
+                Author = author,
+                Content = content,
+                RawText = match.Value + content
+            });
+        }
+
+        return entries;
+    }
+
+    private string? GetCsvValue(Dictionary<string, string> row, string? columnName)
+    {
+        if (string.IsNullOrEmpty(columnName)) return null;
+        return row.TryGetValue(columnName, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+    }
+
+    private async Task ExecuteImport()
+    {
+        if (_previewData.Count == 0) return;
+
+        _importing = true;
+        StateHasChanged();
+
+        try
+        {
+            var (created, updated, skipped) = await DataService.StoreServiceNowIncidentsAsync(_previewData);
+
+            _importedCount = created;
+            _updatedCount = updated;
+            _skippedCount = skipped;
+            _importComplete = true;
+            _existingImports = (await DataService.GetServiceNowIncidentsAsync()).ToList();
+
+            // Record successful import in job history
+            await SyncOrchestrator.RecordManualImportAsync(
+                DI.DataSourceType.ServiceNow,
+                recordsProcessed: _previewData.Count,
+                recordsCreated: created,
+                recordsUpdated: updated,
+                success: true,
+                triggeredBy: "Incident CSV Import",
+                description: $"Imported {_previewData.Count} incidents from CSV file ({created} new, {updated} updated)");
+        }
+        catch (Exception ex)
+        {
+            var innerEx = ex;
+            while (innerEx.InnerException != null)
+                innerEx = innerEx.InnerException;
+
+            var errorMsg = innerEx == ex
+                ? $"Import failed: {ex.Message}"
+                : $"Import failed: {ex.Message} - Inner: {innerEx.Message}";
+
+            _uploadError = errorMsg;
+
+            await SyncOrchestrator.RecordManualImportAsync(
+                DI.DataSourceType.ServiceNow,
+                recordsProcessed: _previewData.Count,
+                recordsCreated: 0,
+                recordsUpdated: 0,
+                success: false,
+                errorMessage: errorMsg,
+                triggeredBy: "Incident CSV Import",
+                description: $"Failed to import {_previewData.Count} incidents from CSV file");
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+
+    private void ClearFile()
+    {
+        _csvFile = null;
+        _detectedColumns.Clear();
+        _csvRows.Clear();
+        _previewData.Clear();
+        _parseErrors.Clear();
+        _parseWarnings.Clear();
+        _currentStep = 1;
+        _uploadError = null;
+        _linkedCount = 0;
+        _missingCiCount = 0;
+        _noMatchCount = 0;
+    }
+
+    private void ResetImport()
+    {
+        ClearFile();
+        _importComplete = false;
+        _importedCount = 0;
+        _updatedCount = 0;
+        _skippedCount = 0;
+    }
+
+    private async Task ClearExistingData()
+    {
+        await DataService.ClearServiceNowIncidentsAsync();
+        _existingImports.Clear();
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+
+    private static string TruncateText(string? text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text)) return "-";
+        return text.Length > maxLength ? text[..maxLength] + "..." : text;
+    }
+
+    private static string GetRowClass(ConfigItemLinkStatus status)
+    {
+        return status switch
+        {
+            ConfigItemLinkStatus.MissingConfigItem => "row-missing-ci",
+            ConfigItemLinkStatus.NoMatchingApplication => "row-no-match",
+            _ => ""
+        };
+    }
+
+    private record MappingField(string PropertyName, string DisplayName, bool IsRequired);
+    private record ParseIssue(int RowNumber, string Message);
+}

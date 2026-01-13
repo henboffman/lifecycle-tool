@@ -26,6 +26,7 @@ public class LifecycleDbContext : DbContext
     public DbSet<SyncedRepositoryEntity> SyncedRepositories => Set<SyncedRepositoryEntity>();
     public DbSet<ImportedServiceNowApplicationEntity> ImportedServiceNowApplications => Set<ImportedServiceNowApplicationEntity>();
     public DbSet<FrameworkVersionEntity> FrameworkVersions => Set<FrameworkVersionEntity>();
+    public DbSet<ServiceNowIncidentEntity> ServiceNowIncidents => Set<ServiceNowIncidentEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -262,6 +263,27 @@ public class LifecycleDbContext : DbContext
             entity.HasIndex(e => e.Version);
             entity.HasIndex(e => new { e.Framework, e.Version }).IsUnique();
             entity.HasIndex(e => e.TargetFrameworkMoniker);
+        });
+
+        // ServiceNow Incidents
+        modelBuilder.Entity<ServiceNowIncidentEntity>(entity =>
+        {
+            entity.ToTable("ServiceNowIncidents");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.IncidentNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.State).HasMaxLength(50);
+            entity.Property(e => e.ConfigurationItem).HasMaxLength(200);
+            entity.Property(e => e.ShortDescription).HasMaxLength(500);
+            entity.Property(e => e.CloseCode).HasMaxLength(100);
+            entity.Property(e => e.LinkStatus).HasMaxLength(50);
+            entity.Property(e => e.LinkStatusNotes).HasMaxLength(500);
+            entity.Property(e => e.LinkedApplicationId).HasMaxLength(100);
+            entity.Property(e => e.LinkedApplicationName).HasMaxLength(200);
+            entity.HasIndex(e => e.IncidentNumber).IsUnique();
+            entity.HasIndex(e => e.ConfigurationItem);
+            entity.HasIndex(e => e.LinkedApplicationId);
+            entity.HasIndex(e => e.CloseCode);
+            entity.HasIndex(e => e.State);
         });
     }
 }

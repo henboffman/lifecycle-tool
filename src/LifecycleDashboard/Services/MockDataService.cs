@@ -3295,4 +3295,335 @@ public class MockDataService : IMockDataService
     }
 
     #endregion
+
+    #region ServiceNow Incidents
+
+    private readonly List<ServiceNowIncident> _incidents = [];
+    private ServiceNowIncidentColumnMapping? _incidentColumnMapping;
+    private bool _mockIncidentsInitialized;
+
+    private void InitializeMockIncidents()
+    {
+        if (_mockIncidentsInitialized) return;
+        _mockIncidentsInitialized = true;
+
+        var apps = Applications.Take(5).ToList();
+        if (apps.Count == 0) return;
+
+        // Generate realistic mock incidents
+        var mockIncidents = new List<ServiceNowIncident>
+        {
+            new()
+            {
+                Id = "inc-001",
+                IncidentNumber = "INC0012345",
+                State = "Resolved",
+                ConfigurationItem = apps[0].Name,
+                ShortDescription = "Application performance degradation during peak hours",
+                Description = "Users reporting slow response times between 9am-11am. Application taking 10+ seconds to load dashboards.",
+                CloseCode = "Solved (Work Around)",
+                CloseNotes = "Implemented temporary caching solution. Long-term fix requires database optimization.",
+                LinkedApplicationId = apps[0].Id,
+                LinkedApplicationName = apps[0].Name,
+                LinkStatus = ConfigItemLinkStatus.Linked,
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-30),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-30), Author = "John Smith", Content = "Initial investigation shows high database load during peak hours. Query analysis pending." },
+                    new() { EntryType = IncidentEntryType.Comment, Timestamp = DateTimeOffset.UtcNow.AddDays(-29), Author = "Support Team", Content = "User confirmed issue persists. Escalating to development team." },
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-28), Author = "Sarah Johnson", Content = "Implemented application-level caching. Monitoring performance. Consider database indexing for permanent fix." }
+                ]
+            },
+            new()
+            {
+                Id = "inc-002",
+                IncidentNumber = "INC0012346",
+                State = "Closed",
+                ConfigurationItem = apps[0].Name,
+                ShortDescription = "Login timeout errors for external users",
+                Description = "External users unable to authenticate. Timeout after 30 seconds.",
+                CloseCode = "Solved (Permanently)",
+                CloseNotes = "Fixed SSO configuration. Root cause was certificate expiration.",
+                LinkedApplicationId = apps[0].Id,
+                LinkedApplicationName = apps[0].Name,
+                LinkStatus = ConfigItemLinkStatus.Linked,
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-25),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-25), Author = "Mike Chen", Content = "Identified expired SSL certificate causing SSO failures." },
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-24), Author = "Mike Chen", Content = "Certificate renewed. Testing with users confirmed fix." }
+                ]
+            },
+            new()
+            {
+                Id = "inc-003",
+                IncidentNumber = "INC0012347",
+                State = "Resolved",
+                ConfigurationItem = apps.Count > 1 ? apps[1].Name : apps[0].Name,
+                ShortDescription = "Report generation failing with timeout",
+                Description = "Monthly reports failing to generate. Process times out after 5 minutes.",
+                CloseCode = "Solved (Work Around)",
+                CloseNotes = "Increased timeout value. Need to optimize report queries.",
+                LinkedApplicationId = apps.Count > 1 ? apps[1].Id : apps[0].Id,
+                LinkedApplicationName = apps.Count > 1 ? apps[1].Name : apps[0].Name,
+                LinkStatus = ConfigItemLinkStatus.Linked,
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-20),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.Comment, Timestamp = DateTimeOffset.UtcNow.AddDays(-20), Author = "Report User", Content = "Monthly sales report not completing. Getting timeout error." },
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-19), Author = "DBA Team", Content = "Report query scanning full table. Missing index on date column. Temporary fix: increased timeout. Permanent fix needs index creation during maintenance window." }
+                ]
+            },
+            new()
+            {
+                Id = "inc-004",
+                IncidentNumber = "INC0012348",
+                State = "Closed",
+                ConfigurationItem = null,
+                ShortDescription = "Network connectivity issue in Building A",
+                Description = "Users in Building A experiencing intermittent network drops.",
+                CloseCode = "Solved (Permanently)",
+                CloseNotes = "Replaced faulty network switch.",
+                LinkStatus = ConfigItemLinkStatus.MissingConfigItem,
+                LinkStatusNotes = "No configuration item specified - likely infrastructure issue",
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-15),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-15), Author = "Network Team", Content = "Isolated issue to switch in server room B-12. Replacement scheduled." }
+                ]
+            },
+            new()
+            {
+                Id = "inc-005",
+                IncidentNumber = "INC0012349",
+                State = "Resolved",
+                ConfigurationItem = "Legacy System XYZ",
+                ShortDescription = "Data sync failure between systems",
+                Description = "Nightly data sync from legacy system not completing.",
+                CloseCode = "Solved (Work Around)",
+                CloseNotes = "Restarted sync process. Need to investigate memory leak.",
+                LinkStatus = ConfigItemLinkStatus.NoMatchingApplication,
+                LinkStatusNotes = "Configuration item 'Legacy System XYZ' does not match any application in the portfolio",
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-10),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-10), Author = "Integration Team", Content = "Sync process consuming excessive memory. Temporary restart resolves. Memory leak suspected in data transformation module." }
+                ]
+            },
+            new()
+            {
+                Id = "inc-006",
+                IncidentNumber = "INC0012350",
+                State = "Closed",
+                ConfigurationItem = apps.Count > 2 ? apps[2].Name : apps[0].Name,
+                ShortDescription = "UI display issue after browser update",
+                Description = "Charts not rendering correctly in latest Chrome version.",
+                CloseCode = "Solved (Permanently)",
+                CloseNotes = "Updated charting library to latest version.",
+                LinkedApplicationId = apps.Count > 2 ? apps[2].Id : apps[0].Id,
+                LinkedApplicationName = apps.Count > 2 ? apps[2].Name : apps[0].Name,
+                LinkStatus = ConfigItemLinkStatus.Linked,
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-5),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.Comment, Timestamp = DateTimeOffset.UtcNow.AddDays(-5), Author = "End User", Content = "Pie charts showing as blank after Chrome auto-updated." },
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-4), Author = "Dev Team", Content = "Chrome 120 deprecated API used by charting library. Upgrading to v5.2 resolves the issue." }
+                ]
+            },
+            new()
+            {
+                Id = "inc-007",
+                IncidentNumber = "INC0012351",
+                State = "Resolved",
+                ConfigurationItem = apps[0].Name,
+                ShortDescription = "Duplicate records appearing in search results",
+                Description = "Users seeing duplicate entries when searching. Data integrity concern.",
+                CloseCode = "Solved (Work Around)",
+                CloseNotes = "Applied DISTINCT to queries. Root cause: data import bug creating duplicates.",
+                LinkedApplicationId = apps[0].Id,
+                LinkedApplicationName = apps[0].Name,
+                LinkStatus = ConfigItemLinkStatus.Linked,
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-3),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-3), Author = "Data Team", Content = "Found 1,247 duplicate records. Batch import on 12/15 created duplicates due to missing unique constraint check. Added DISTINCT to search as immediate fix." },
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-2), Author = "Data Team", Content = "Need to plan data cleanup and add proper constraint to prevent future duplicates." }
+                ]
+            },
+            new()
+            {
+                Id = "inc-008",
+                IncidentNumber = "INC0012352",
+                State = "Resolved",
+                ConfigurationItem = apps.Count > 3 ? apps[3].Name : apps[0].Name,
+                ShortDescription = "Email notifications not being sent",
+                Description = "Automated email alerts stopped working.",
+                CloseCode = "Solved (Permanently)",
+                CloseNotes = "SMTP credentials expired. Renewed and updated configuration.",
+                LinkedApplicationId = apps.Count > 3 ? apps[3].Id : apps[0].Id,
+                LinkedApplicationName = apps.Count > 3 ? apps[3].Name : apps[0].Name,
+                LinkStatus = ConfigItemLinkStatus.Linked,
+                ImportedAt = DateTimeOffset.UtcNow.AddDays(-1),
+                Entries = [
+                    new() { EntryType = IncidentEntryType.WorkNote, Timestamp = DateTimeOffset.UtcNow.AddDays(-1), Author = "Admin", Content = "SMTP service account password expired per policy. Renewed credentials and updated in app config." }
+                ]
+            }
+        };
+
+        _incidents.AddRange(mockIncidents);
+    }
+
+    public Task<IReadOnlyList<ServiceNowIncident>> GetServiceNowIncidentsAsync()
+    {
+        InitializeMockIncidents();
+        return Task.FromResult<IReadOnlyList<ServiceNowIncident>>(_incidents.OrderByDescending(i => i.ImportedAt).ToList());
+    }
+
+    public Task<IReadOnlyList<ServiceNowIncident>> GetIncidentsForApplicationAsync(string applicationId)
+    {
+        InitializeMockIncidents();
+        return Task.FromResult<IReadOnlyList<ServiceNowIncident>>(
+            _incidents.Where(i => i.LinkedApplicationId == applicationId).OrderByDescending(i => i.ImportedAt).ToList());
+    }
+
+    public Task<ServiceNowIncident?> GetServiceNowIncidentAsync(string incidentId)
+    {
+        InitializeMockIncidents();
+        return Task.FromResult(_incidents.FirstOrDefault(i => i.Id == incidentId));
+    }
+
+    public Task<ServiceNowIncident?> GetServiceNowIncidentByNumberAsync(string incidentNumber)
+    {
+        InitializeMockIncidents();
+        return Task.FromResult(_incidents.FirstOrDefault(i => i.IncidentNumber == incidentNumber));
+    }
+
+    public Task<(int created, int updated, int skipped)> StoreServiceNowIncidentsAsync(IEnumerable<ServiceNowIncident> incidents)
+    {
+        int created = 0, updated = 0, skipped = 0;
+
+        foreach (var incident in incidents)
+        {
+            var existingIndex = _incidents.FindIndex(i => i.IncidentNumber == incident.IncidentNumber);
+            if (existingIndex >= 0)
+            {
+                _incidents[existingIndex] = incident with { UpdatedAt = DateTimeOffset.UtcNow };
+                updated++;
+            }
+            else
+            {
+                _incidents.Add(incident);
+                created++;
+            }
+        }
+
+        return Task.FromResult((created, updated, skipped));
+    }
+
+    public Task<ServiceNowIncident> UpdateServiceNowIncidentAsync(ServiceNowIncident incident)
+    {
+        var index = _incidents.FindIndex(i => i.Id == incident.Id);
+        if (index >= 0)
+        {
+            var updated = incident with { UpdatedAt = DateTimeOffset.UtcNow, ManuallyReviewed = true };
+            _incidents[index] = updated;
+            return Task.FromResult(updated);
+        }
+        throw new InvalidOperationException($"Incident {incident.Id} not found");
+    }
+
+    public Task DeleteServiceNowIncidentAsync(string incidentId)
+    {
+        _incidents.RemoveAll(i => i.Id == incidentId);
+        return Task.CompletedTask;
+    }
+
+    public Task ClearServiceNowIncidentsAsync()
+    {
+        _incidents.Clear();
+        _mockIncidentsInitialized = false;
+        return Task.CompletedTask;
+    }
+
+    public Task<ServiceNowIncidentColumnMapping?> GetServiceNowIncidentColumnMappingAsync()
+    {
+        return Task.FromResult(_incidentColumnMapping);
+    }
+
+    public Task SaveServiceNowIncidentColumnMappingAsync(ServiceNowIncidentColumnMapping mapping)
+    {
+        _incidentColumnMapping = mapping;
+        return Task.CompletedTask;
+    }
+
+    public Task<IncidentAnalysisSummary> GetIncidentAnalysisSummaryAsync()
+    {
+        InitializeMockIncidents();
+
+        var linked = _incidents.Where(i => i.LinkStatus is ConfigItemLinkStatus.Linked or ConfigItemLinkStatus.ManuallyLinked).ToList();
+        var topApps = linked
+            .Where(i => !string.IsNullOrEmpty(i.LinkedApplicationId))
+            .GroupBy(i => new { i.LinkedApplicationId, i.LinkedApplicationName })
+            .Select(g => new ApplicationIncidentCount
+            {
+                ApplicationId = g.Key.LinkedApplicationId!,
+                ApplicationName = g.Key.LinkedApplicationName ?? "Unknown",
+                IncidentCount = g.Count(),
+                BandaidFixCount = g.Count(i => i.CloseCode?.Contains("Work Around", StringComparison.OrdinalIgnoreCase) == true)
+            })
+            .OrderByDescending(x => x.IncidentCount)
+            .Take(10)
+            .ToList();
+
+        var closeCodes = _incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .Select(g => new CloseCodeCount { CloseCode = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
+        var byState = _incidents
+            .Where(i => !string.IsNullOrEmpty(i.State))
+            .GroupBy(i => i.State!)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        return Task.FromResult(new IncidentAnalysisSummary
+        {
+            TotalIncidents = _incidents.Count,
+            LinkedIncidents = linked.Count,
+            UnlinkedIncidents = _incidents.Count - linked.Count,
+            MissingConfigItem = _incidents.Count(i => i.LinkStatus == ConfigItemLinkStatus.MissingConfigItem),
+            NoMatchingApplication = _incidents.Count(i => i.LinkStatus == ConfigItemLinkStatus.NoMatchingApplication),
+            TopApplications = topApps,
+            TopCloseCodes = closeCodes,
+            ByState = byState
+        });
+    }
+
+    public Task<int> AutoLinkIncidentsToApplicationsAsync()
+    {
+        int linkedCount = 0;
+        foreach (var incident in _incidents.Where(i => i.LinkStatus != ConfigItemLinkStatus.Linked && i.LinkStatus != ConfigItemLinkStatus.ManuallyLinked))
+        {
+            if (string.IsNullOrEmpty(incident.ConfigurationItem))
+            {
+                continue;
+            }
+
+            var app = Applications.FirstOrDefault(a =>
+                a.Name.Equals(incident.ConfigurationItem, StringComparison.OrdinalIgnoreCase));
+
+            if (app != null)
+            {
+                var index = _incidents.FindIndex(i => i.Id == incident.Id);
+                if (index >= 0)
+                {
+                    _incidents[index] = incident with
+                    {
+                        LinkedApplicationId = app.Id,
+                        LinkedApplicationName = app.Name,
+                        LinkStatus = ConfigItemLinkStatus.Linked,
+                        UpdatedAt = DateTimeOffset.UtcNow
+                    };
+                    linkedCount++;
+                }
+            }
+        }
+        return Task.FromResult(linkedCount);
+    }
+
+    #endregion
 }

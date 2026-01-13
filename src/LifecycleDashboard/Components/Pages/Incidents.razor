@@ -1,0 +1,732 @@
+@page "/incidents"
+@using LifecycleDashboard.Services
+@using System.Text.Json
+@inject IMockDataService DataService
+@inject NavigationManager Navigation
+
+<PageTitle>Incidents - Lifecycle Dashboard</PageTitle>
+
+<div class="incidents-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>ServiceNow Incidents</h1>
+            <p class="subtitle">Analyze imported incidents to identify patterns and improvement opportunities</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline" @onclick="ToggleDemoData" title="@(_showDemoData ? "Showing demo data" : "Showing database data")">
+                <i class="bi bi-@(_showDemoData ? "eye-slash" : "eye")"></i>
+                @(_showDemoData ? "Hide Demo" : "Show Demo")
+            </button>
+            <a href="/incident-import" class="btn btn-primary">
+                <i class="bi bi-upload"></i>
+                Import Incidents
+            </a>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading incidents...</p>
+        </div>
+    }
+    else if (_incidents.Count == 0)
+    {
+        <div class="empty-state">
+            <i class="bi bi-inbox empty-icon"></i>
+            <h2>No Incidents Found</h2>
+            <p>Import ServiceNow incident data to analyze patterns and identify improvement opportunities.</p>
+            <a href="/incident-import" class="btn btn-primary btn-lg">
+                <i class="bi bi-upload"></i>
+                Import Incidents
+            </a>
+        </div>
+    }
+    else
+    {
+        <!-- Summary Cards -->
+        <section class="summary-section">
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="card-icon">
+                        <i class="bi bi-ticket-detailed"></i>
+                    </div>
+                    <div class="card-content">
+                        <span class="card-value">@_summary.TotalIncidents</span>
+                        <span class="card-label">Total Incidents</span>
+                    </div>
+                </div>
+                <div class="summary-card success">
+                    <div class="card-icon">
+                        <i class="bi bi-link-45deg"></i>
+                    </div>
+                    <div class="card-content">
+                        <span class="card-value">@_summary.LinkedIncidents</span>
+                        <span class="card-label">Linked to Apps</span>
+                    </div>
+                </div>
+                <div class="summary-card warning">
+                    <div class="card-icon">
+                        <i class="bi bi-question-circle"></i>
+                    </div>
+                    <div class="card-content">
+                        <span class="card-value">@_summary.MissingConfigItem</span>
+                        <span class="card-label">Missing CI</span>
+                    </div>
+                </div>
+                <div class="summary-card danger">
+                    <div class="card-icon">
+                        <i class="bi bi-exclamation-circle"></i>
+                    </div>
+                    <div class="card-content">
+                        <span class="card-value">@_summary.NoMatchingApplication</span>
+                        <span class="card-label">Unmatched</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Analysis Row -->
+        <section class="analysis-section">
+            <div class="analysis-row">
+                <!-- Top Applications -->
+                <div class="analysis-card">
+                    <div class="analysis-header">
+                        <h3>Top Applications by Incidents</h3>
+                    </div>
+                    <div class="analysis-content">
+                        @if (_summary.TopApplications.Count > 0)
+                        {
+                            <div class="ranking-list">
+                                @foreach (var (app, index) in _summary.TopApplications.Take(5).Select((a, i) => (a, i)))
+                                {
+                                    <div class="ranking-item">
+                                        <span class="rank">@(index + 1)</span>
+                                        <span class="name">@app.ApplicationName</span>
+                                        <span class="count">@app.IncidentCount incidents</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="no-data">No application data available</p>
+                        }
+                    </div>
+                </div>
+
+                <!-- Close Codes -->
+                <div class="analysis-card">
+                    <div class="analysis-header">
+                        <h3>Common Close Codes</h3>
+                    </div>
+                    <div class="analysis-content">
+                        @if (_summary.TopCloseCodes.Count > 0)
+                        {
+                            <div class="close-codes-list">
+                                @foreach (var closeCode in _summary.TopCloseCodes.Take(5))
+                                {
+                                    <div class="close-code-item">
+                                        <span class="code-name">@(closeCode.CloseCode ?? "Not specified")</span>
+                                        <div class="code-bar-container">
+                                            <div class="code-bar" style="width: @GetBarWidth(closeCode.Count)%"></div>
+                                        </div>
+                                        <span class="code-count">@closeCode.Count</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="no-data">No close code data available</p>
+                        }
+                    </div>
+                </div>
+
+                <!-- By State -->
+                <div class="analysis-card">
+                    <div class="analysis-header">
+                        <h3>By State</h3>
+                    </div>
+                    <div class="analysis-content">
+                        @if (_summary.ByState.Count > 0)
+                        {
+                            <div class="state-grid">
+                                @foreach (var (state, count) in _summary.ByState.OrderByDescending(x => x.Value).Take(6))
+                                {
+                                    <div class="state-item">
+                                        <span class="state-count">@count</span>
+                                        <span class="state-name">@(state ?? "Unknown")</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="no-data">No state data available</p>
+                        }
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Filters -->
+        <section class="filters-section">
+            <div class="filters-row">
+                <div class="filter-group">
+                    <label>Search</label>
+                    <input type="text" class="filter-input" placeholder="Search incidents..."
+                           @bind="_searchTerm" @bind:event="oninput" @onkeyup="ApplyFilters" />
+                </div>
+                <div class="filter-group">
+                    <label>Link Status</label>
+                    <select class="filter-select" @bind="_filterLinkStatus" @bind:after="ApplyFilters">
+                        <option value="">All</option>
+                        <option value="Linked">Linked</option>
+                        <option value="MissingConfigItem">Missing CI</option>
+                        <option value="NoMatchingApplication">No Match</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>State</label>
+                    <select class="filter-select" @bind="_filterState" @bind:after="ApplyFilters">
+                        <option value="">All States</option>
+                        @foreach (var state in _availableStates)
+                        {
+                            <option value="@state">@state</option>
+                        }
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Close Code</label>
+                    <select class="filter-select" @bind="_filterCloseCode" @bind:after="ApplyFilters">
+                        <option value="">All Codes</option>
+                        @foreach (var closeCode in _availableCloseCodes)
+                        {
+                            <option value="@closeCode">@closeCode</option>
+                        }
+                    </select>
+                </div>
+                @if (HasActiveFilters())
+                {
+                    <button class="btn btn-outline btn-sm clear-filters" @onclick="ClearFilters">
+                        <i class="bi bi-x"></i> Clear
+                    </button>
+                }
+            </div>
+        </section>
+
+        <!-- Incidents Table -->
+        <section class="incidents-section">
+            <div class="section-header">
+                <h2>Incidents (@_filteredIncidents.Count)</h2>
+                <div class="section-actions">
+                    <button class="btn btn-outline btn-sm" @onclick="AutoLinkIncidents" disabled="@_autoLinking">
+                        @if (_autoLinking)
+                        {
+                            <span class="spinner-sm"></span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-link"></i>
+                        }
+                        Auto-Link
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table class="incidents-table">
+                    <thead>
+                        <tr>
+                            <th class="status-col">Status</th>
+                            <th>Incident #</th>
+                            <th>State</th>
+                            <th>Configuration Item</th>
+                            <th>Short Description</th>
+                            <th>Close Code</th>
+                            <th class="entries-col">Notes</th>
+                            <th class="actions-col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var incident in GetPagedIncidents())
+                        {
+                            <tr class="@GetRowClass(incident)">
+                                <td class="status-col">
+                                    @switch (incident.LinkStatus)
+                                    {
+                                        case ConfigItemLinkStatus.Linked:
+                                        case ConfigItemLinkStatus.ManuallyLinked:
+                                            <i class="bi bi-check-circle-fill status-linked" title="Linked to @incident.LinkedApplicationName"></i>
+                                            break;
+                                        case ConfigItemLinkStatus.MissingConfigItem:
+                                            <i class="bi bi-question-circle-fill status-missing" title="Missing configuration item"></i>
+                                            break;
+                                        case ConfigItemLinkStatus.NoMatchingApplication:
+                                            <i class="bi bi-exclamation-circle-fill status-no-match" title="No matching application"></i>
+                                            break;
+                                        default:
+                                            <i class="bi bi-dash-circle status-unknown"></i>
+                                            break;
+                                    }
+                                </td>
+                                <td class="incident-number">@incident.IncidentNumber</td>
+                                <td>@(incident.State ?? "-")</td>
+                                <td class="config-item">
+                                    @if (incident.LinkStatus == ConfigItemLinkStatus.Linked || incident.LinkStatus == ConfigItemLinkStatus.ManuallyLinked)
+                                    {
+                                        <span class="linked-app" title="@incident.ConfigurationItem">
+                                            @incident.LinkedApplicationName
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span title="@incident.ConfigurationItem">@TruncateText(incident.ConfigurationItem, 30)</span>
+                                    }
+                                </td>
+                                <td class="description-cell" title="@incident.ShortDescription">
+                                    @TruncateText(incident.ShortDescription, 50)
+                                </td>
+                                <td>@(incident.CloseCode ?? "-")</td>
+                                <td class="entries-col">
+                                    @if (incident.Entries.Count > 0)
+                                    {
+                                        <button class="entry-badge" @onclick="() => ShowEntries(incident)">
+                                            @incident.Entries.Count
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <span>-</span>
+                                    }
+                                </td>
+                                <td class="actions-col">
+                                    <button class="btn-icon" @onclick="() => ShowIncidentDetail(incident)" title="View details">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    @if (incident.LinkStatus == ConfigItemLinkStatus.MissingConfigItem || incident.LinkStatus == ConfigItemLinkStatus.NoMatchingApplication)
+                                    {
+                                        <button class="btn-icon" @onclick="() => ShowLinkDialog(incident)" title="Link to application">
+                                            <i class="bi bi-link"></i>
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_filteredIncidents.Count > _pageSize)
+            {
+                <div class="pagination">
+                    <button class="btn btn-outline btn-sm" @onclick="PreviousPage" disabled="@(_currentPage == 1)">
+                        <i class="bi bi-chevron-left"></i> Previous
+                    </button>
+                    <span class="page-info">Page @_currentPage of @TotalPages</span>
+                    <button class="btn btn-outline btn-sm" @onclick="NextPage" disabled="@(_currentPage >= TotalPages)">
+                        Next <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+            }
+        </section>
+    }
+
+    <!-- Incident Detail Modal -->
+    @if (_selectedIncident != null)
+    {
+        <div class="modal-overlay" @onclick="CloseModal">
+            <div class="modal-content" @onclick:stopPropagation>
+                <div class="modal-header">
+                    <h2>@_selectedIncident.IncidentNumber</h2>
+                    <button class="btn-icon" @onclick="CloseModal">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <label>State</label>
+                            <span>@(_selectedIncident.State ?? "-")</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Configuration Item</label>
+                            <span>@(_selectedIncident.ConfigurationItem ?? "-")</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Link Status</label>
+                            <span class="@GetLinkStatusClass(_selectedIncident.LinkStatus)">
+                                @_selectedIncident.LinkStatus
+                                @if (!string.IsNullOrEmpty(_selectedIncident.LinkedApplicationName))
+                                {
+                                    <span> - @_selectedIncident.LinkedApplicationName</span>
+                                }
+                            </span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Close Code</label>
+                            <span>@(_selectedIncident.CloseCode ?? "-")</span>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <label>Short Description</label>
+                        <p class="detail-text">@(_selectedIncident.ShortDescription ?? "-")</p>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_selectedIncident.Description))
+                    {
+                        <div class="detail-section">
+                            <label>Full Description</label>
+                            <p class="detail-text long-text">@_selectedIncident.Description</p>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_selectedIncident.CloseNotes))
+                    {
+                        <div class="detail-section">
+                            <label>Close Notes</label>
+                            <p class="detail-text">@_selectedIncident.CloseNotes</p>
+                        </div>
+                    }
+
+                    @if (_selectedIncident.Entries.Count > 0)
+                    {
+                        <div class="detail-section">
+                            <label>Comments and Work Notes (@_selectedIncident.Entries.Count)</label>
+                            <div class="entries-list">
+                                @foreach (var entry in _selectedIncident.Entries.OrderByDescending(e => e.Timestamp))
+                                {
+                                    <div class="entry-item @entry.EntryType.ToString().ToLower()">
+                                        <div class="entry-header">
+                                            <span class="entry-type">@entry.EntryType</span>
+                                            @if (entry.Author != null)
+                                            {
+                                                <span class="entry-author">@entry.Author</span>
+                                            }
+                                            @if (entry.Timestamp.HasValue)
+                                            {
+                                                <span class="entry-time">@entry.Timestamp.Value.ToString("MMM dd, yyyy HH:mm")</span>
+                                            }
+                                        </div>
+                                        <div class="entry-content">@entry.Content</div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Link Dialog -->
+    @if (_linkingIncident != null)
+    {
+        <div class="modal-overlay" @onclick="CloseLinkDialog">
+            <div class="modal-content link-dialog" @onclick:stopPropagation>
+                <div class="modal-header">
+                    <h2>Link Incident to Application</h2>
+                    <button class="btn-icon" @onclick="CloseLinkDialog">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="link-info">
+                        Link <strong>@_linkingIncident.IncidentNumber</strong> to an application:
+                    </p>
+                    @if (!string.IsNullOrEmpty(_linkingIncident.ConfigurationItem))
+                    {
+                        <p class="config-item-info">
+                            Current configuration item: <code>@_linkingIncident.ConfigurationItem</code>
+                        </p>
+                    }
+
+                    <div class="link-search">
+                        <input type="text" class="filter-input" placeholder="Search applications..."
+                               @bind="_linkSearchTerm" @bind:event="oninput" />
+                    </div>
+
+                    <div class="application-list">
+                        @foreach (var app in GetFilteredApplications().Take(10))
+                        {
+                            <button class="application-option" @onclick="() => LinkToApplication(app)">
+                                <span class="app-name">@app.Name</span>
+                                <span class="app-capability">@(app.Capability ?? "No capability")</span>
+                            </button>
+                        }
+                        @if (!GetFilteredApplications().Any())
+                        {
+                            <p class="no-results">No matching applications found</p>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ServiceNowIncident> _incidents = [];
+    private List<ServiceNowIncident> _filteredIncidents = [];
+    private IncidentAnalysisSummary _summary = new();
+    private List<Application> _applications = [];
+    private bool _loading = true;
+    private bool _showDemoData;
+    private bool _autoLinking;
+
+    // Filters
+    private string _searchTerm = "";
+    private string _filterLinkStatus = "";
+    private string _filterState = "";
+    private string _filterCloseCode = "";
+    private List<string> _availableStates = [];
+    private List<string> _availableCloseCodes = [];
+
+    // Pagination
+    private int _currentPage = 1;
+    private const int _pageSize = 25;
+    private int TotalPages => (int)Math.Ceiling(_filteredIncidents.Count / (double)_pageSize);
+
+    // Modals
+    private ServiceNowIncident? _selectedIncident;
+    private ServiceNowIncident? _linkingIncident;
+    private string _linkSearchTerm = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        try
+        {
+            _incidents = (await DataService.GetServiceNowIncidentsAsync()).ToList();
+            _summary = await DataService.GetIncidentAnalysisSummaryAsync();
+            _applications = (await DataService.GetApplicationsAsync()).ToList();
+
+            // Build filter options
+            _availableStates = _incidents
+                .Select(i => i.State)
+                .Where(s => !string.IsNullOrEmpty(s))
+                .Distinct()
+                .OrderBy(s => s)
+                .ToList()!;
+
+            _availableCloseCodes = _incidents
+                .Select(i => i.CloseCode)
+                .Where(c => !string.IsNullOrEmpty(c))
+                .Distinct()
+                .OrderBy(c => c)
+                .ToList()!;
+
+            ApplyFilters();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ToggleDemoData()
+    {
+        _showDemoData = !_showDemoData;
+        // In a full implementation, this would switch data sources
+        // For now, the MockDataService already provides demo data
+        await LoadData();
+    }
+
+    private void ApplyFilters()
+    {
+        var filtered = _incidents.AsEnumerable();
+
+        // Search term
+        if (!string.IsNullOrWhiteSpace(_searchTerm))
+        {
+            var term = _searchTerm.ToLowerInvariant();
+            filtered = filtered.Where(i =>
+                (i.IncidentNumber?.ToLowerInvariant().Contains(term) ?? false) ||
+                (i.ShortDescription?.ToLowerInvariant().Contains(term) ?? false) ||
+                (i.Description?.ToLowerInvariant().Contains(term) ?? false) ||
+                (i.ConfigurationItem?.ToLowerInvariant().Contains(term) ?? false) ||
+                (i.LinkedApplicationName?.ToLowerInvariant().Contains(term) ?? false));
+        }
+
+        // Link status
+        if (!string.IsNullOrEmpty(_filterLinkStatus))
+        {
+            if (Enum.TryParse<ConfigItemLinkStatus>(_filterLinkStatus, out var status))
+            {
+                filtered = filtered.Where(i => i.LinkStatus == status);
+            }
+        }
+
+        // State
+        if (!string.IsNullOrEmpty(_filterState))
+        {
+            filtered = filtered.Where(i => i.State == _filterState);
+        }
+
+        // Close code
+        if (!string.IsNullOrEmpty(_filterCloseCode))
+        {
+            filtered = filtered.Where(i => i.CloseCode == _filterCloseCode);
+        }
+
+        _filteredIncidents = filtered.OrderByDescending(i => i.ImportedAt).ToList();
+        _currentPage = 1;
+    }
+
+    private bool HasActiveFilters()
+    {
+        return !string.IsNullOrWhiteSpace(_searchTerm) ||
+               !string.IsNullOrEmpty(_filterLinkStatus) ||
+               !string.IsNullOrEmpty(_filterState) ||
+               !string.IsNullOrEmpty(_filterCloseCode);
+    }
+
+    private void ClearFilters()
+    {
+        _searchTerm = "";
+        _filterLinkStatus = "";
+        _filterState = "";
+        _filterCloseCode = "";
+        ApplyFilters();
+    }
+
+    private IEnumerable<ServiceNowIncident> GetPagedIncidents()
+    {
+        return _filteredIncidents
+            .Skip((_currentPage - 1) * _pageSize)
+            .Take(_pageSize);
+    }
+
+    private void PreviousPage()
+    {
+        if (_currentPage > 1)
+        {
+            _currentPage--;
+        }
+    }
+
+    private void NextPage()
+    {
+        if (_currentPage < TotalPages)
+        {
+            _currentPage++;
+        }
+    }
+
+    private async Task AutoLinkIncidents()
+    {
+        _autoLinking = true;
+        try
+        {
+            var linkedCount = await DataService.AutoLinkIncidentsToApplicationsAsync();
+            if (linkedCount > 0)
+            {
+                await LoadData();
+            }
+        }
+        finally
+        {
+            _autoLinking = false;
+        }
+    }
+
+    private void ShowIncidentDetail(ServiceNowIncident incident)
+    {
+        _selectedIncident = incident;
+    }
+
+    private void ShowEntries(ServiceNowIncident incident)
+    {
+        _selectedIncident = incident;
+    }
+
+    private void CloseModal()
+    {
+        _selectedIncident = null;
+    }
+
+    private void ShowLinkDialog(ServiceNowIncident incident)
+    {
+        _linkingIncident = incident;
+        _linkSearchTerm = "";
+    }
+
+    private void CloseLinkDialog()
+    {
+        _linkingIncident = null;
+        _linkSearchTerm = "";
+    }
+
+    private IEnumerable<Application> GetFilteredApplications()
+    {
+        if (string.IsNullOrWhiteSpace(_linkSearchTerm))
+        {
+            return _applications.OrderBy(a => a.Name);
+        }
+
+        var term = _linkSearchTerm.ToLowerInvariant();
+        return _applications
+            .Where(a => a.Name.ToLowerInvariant().Contains(term) ||
+                       (a.Capability?.ToLowerInvariant().Contains(term) ?? false))
+            .OrderBy(a => a.Name);
+    }
+
+    private async Task LinkToApplication(Application app)
+    {
+        if (_linkingIncident == null) return;
+
+        var updated = _linkingIncident with
+        {
+            LinkedApplicationId = app.Id,
+            LinkedApplicationName = app.Name,
+            LinkStatus = ConfigItemLinkStatus.ManuallyLinked,
+            ManuallyReviewed = true,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        await DataService.UpdateServiceNowIncidentAsync(updated);
+        CloseLinkDialog();
+        await LoadData();
+    }
+
+    private int GetBarWidth(int count)
+    {
+        if (_summary.TotalIncidents == 0) return 0;
+        return (int)Math.Round((double)count / _summary.TopCloseCodes.Max(c => c.Count) * 100);
+    }
+
+    private static string TruncateText(string? text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text)) return "-";
+        return text.Length > maxLength ? text[..maxLength] + "..." : text;
+    }
+
+    private static string GetRowClass(ServiceNowIncident incident)
+    {
+        return incident.LinkStatus switch
+        {
+            ConfigItemLinkStatus.MissingConfigItem => "row-missing-ci",
+            ConfigItemLinkStatus.NoMatchingApplication => "row-no-match",
+            _ => ""
+        };
+    }
+
+    private static string GetLinkStatusClass(ConfigItemLinkStatus status)
+    {
+        return status switch
+        {
+            ConfigItemLinkStatus.Linked or ConfigItemLinkStatus.ManuallyLinked => "status-linked",
+            ConfigItemLinkStatus.MissingConfigItem => "status-missing",
+            ConfigItemLinkStatus.NoMatchingApplication => "status-no-match",
+            _ => ""
+        };
+    }
+}
