@@ -219,6 +219,15 @@ public interface IMockDataService
     /// </summary>
     Task ClearSyncedRepositoriesAsync();
 
+    /// <summary>
+    /// Refreshes application data from synced repositories.
+    /// Links repositories to applications using AppNameMappings,
+    /// updates tech stack, security findings, last activity date,
+    /// and recalculates health scores.
+    /// </summary>
+    /// <returns>Tuple of (repos linked, apps updated)</returns>
+    Task<(int linked, int updated)> RefreshApplicationsFromSyncedDataAsync();
+
     // Imported ServiceNow Applications
 
     /// <summary>

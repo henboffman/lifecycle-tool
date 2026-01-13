@@ -12,6 +12,7 @@ namespace LifecycleDashboard.Services;
 public class DatabaseDataService : IMockDataService
 {
     private readonly IDbContextFactory<LifecycleDbContext> _contextFactory;
+    private readonly IHealthScoringService _healthScoringService;
     private readonly ILogger<DatabaseDataService> _logger;
 
     // In-memory caches for configuration data (not persisted to DB yet)
@@ -29,9 +30,11 @@ public class DatabaseDataService : IMockDataService
 
     public DatabaseDataService(
         IDbContextFactory<LifecycleDbContext> contextFactory,
+        IHealthScoringService healthScoringService,
         ILogger<DatabaseDataService> logger)
     {
         _contextFactory = contextFactory;
+        _healthScoringService = healthScoringService;
         _logger = logger;
 
         // Initialize default data source configs
@@ -507,9 +510,113 @@ public class DatabaseDataService : IMockDataService
     public async Task<RepositoryInfo?> GetRepositoryInfoAsync(string applicationId)
     {
         await using var context = await _contextFactory.CreateDbContextAsync();
-        var entity = await context.Repositories.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.RepositoryId == applicationId);
-        return entity?.ToModel();
+
+        // First, try to find a SyncedRepository linked to this application
+        var syncedRepo = await context.SyncedRepositories.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.LinkedApplicationId == applicationId);
+
+        // If not found by LinkedApplicationId, try to find via AppNameMapping
+        if (syncedRepo == null)
+        {
+            var app = await context.Applications.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == applicationId);
+
+            if (app != null)
+            {
+                // Look up the AppNameMapping for this application
+                var mapping = await context.AppNameMappings.AsNoTracking()
+                    .FirstOrDefaultAsync(m => m.ServiceNowAppName == app.Name);
+
+                if (mapping != null && !string.IsNullOrEmpty(mapping.AzureDevOpsRepoNamesJson))
+                {
+                    var repoNames = System.Text.Json.JsonSerializer.Deserialize<List<string>>(
+                        mapping.AzureDevOpsRepoNamesJson, JsonOptions) ?? [];
+
+                    if (repoNames.Count > 0)
+                    {
+                        // Find the synced repository by name
+                        syncedRepo = await context.SyncedRepositories.AsNoTracking()
+                            .FirstOrDefaultAsync(r => repoNames.Contains(r.Name));
+                    }
+                }
+            }
+        }
+
+        if (syncedRepo == null)
+            return null;
+
+        // Convert SyncedRepository to RepositoryInfo
+        return ConvertSyncedRepositoryToRepositoryInfo(syncedRepo.ToModel());
+    }
+
+    /// <summary>
+    /// Converts a SyncedRepository to RepositoryInfo format for the ApplicationDetail page.
+    /// </summary>
+    private static RepositoryInfo ConvertSyncedRepositoryToRepositoryInfo(SyncedRepository repo)
+    {
+        // Parse the primary stack
+        var stackType = Enum.TryParse<StackType>(repo.PrimaryStack, true, out var parsed)
+            ? parsed
+            : StackType.Unknown;
+
+        // Build contributor list
+        var contributors = repo.Contributors
+            .Select(c => new ContributorInfo
+            {
+                Name = c,
+                Email = $"{c.ToLowerInvariant().Replace(" ", ".")}@company.com", // Placeholder
+                CommitCount = 0,
+                Last365DaysCommitCount = 0
+            })
+            .ToList();
+
+        // Build package list
+        var packages = repo.Packages
+            .Select(p => new PackageReference
+            {
+                Name = p.Name,
+                Version = p.Version,
+                Type = p.PackageManager.ToLowerInvariant() switch
+                {
+                    "nuget" => PackageType.NuGet,
+                    "npm" => PackageType.Npm,
+                    "pip" => PackageType.Pip,
+                    "maven" => PackageType.Maven,
+                    _ => PackageType.Other
+                }
+            })
+            .ToList();
+
+        return new RepositoryInfo
+        {
+            RepositoryId = repo.Id,
+            Name = repo.Name,
+            DefaultBranch = repo.DefaultBranch,
+            Url = repo.Url,
+            Packages = packages,
+            Stack = new TechnologyStackInfo
+            {
+                PrimaryStack = stackType,
+                Frameworks = repo.Frameworks,
+                Languages = repo.Languages,
+                DetectedPattern = repo.DetectedPattern,
+                TargetFramework = repo.TargetFramework
+            },
+            Commits = new CommitHistory
+            {
+                LastCommitDate = repo.LastCommitDate,
+                TotalCommitCount = repo.TotalCommits ?? 0,
+                TopContributors = contributors
+            },
+            Readme = new ReadmeStatus
+            {
+                Exists = repo.HasReadme,
+                CharacterCount = repo.ReadmeQualityScore ?? 0
+            },
+            LastBuildDate = repo.LastBuildDate,
+            LastBuildStatus = repo.LastBuildResult,
+            LastSyncDate = repo.SyncedAt
+        };
     }
 
     #endregion
@@ -854,6 +961,238 @@ public class DatabaseDataService : IMockDataService
         await using var context = await _contextFactory.CreateDbContextAsync();
         context.SyncedRepositories.RemoveRange(context.SyncedRepositories);
         await context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Refreshes application data from synced repositories.
+    /// This method:
+    /// 1. Links SyncedRepositories to Applications using AppNameMappings
+    /// 2. Updates Application with tech stack, security findings, and last activity date
+    /// 3. Recalculates health scores for all applications
+    /// </summary>
+    public async Task<(int linked, int updated)> RefreshApplicationsFromSyncedDataAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var linkedCount = 0;
+        var updatedCount = 0;
+
+        // Get all mappings
+        var mappings = await context.AppNameMappings.AsNoTracking().ToListAsync();
+        var syncedRepos = await context.SyncedRepositories.ToListAsync();
+        var applications = await context.Applications.ToListAsync();
+
+        _logger.LogInformation(
+            "RefreshApplicationsFromSyncedData: Found {MappingCount} mappings, {RepoCount} repos, {AppCount} applications",
+            mappings.Count, syncedRepos.Count, applications.Count);
+
+        // Build a lookup of repo name -> mapping
+        var repoNameToMapping = new Dictionary<string, AppNameMappingEntity>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mapping in mappings)
+        {
+            if (!string.IsNullOrEmpty(mapping.AzureDevOpsRepoNamesJson))
+            {
+                try
+                {
+                    var repoNames = System.Text.Json.JsonSerializer.Deserialize<List<string>>(
+                        mapping.AzureDevOpsRepoNamesJson, JsonOptions) ?? [];
+                    foreach (var repoName in repoNames)
+                    {
+                        repoNameToMapping[repoName] = mapping;
+                    }
+                }
+                catch (System.Text.Json.JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse repo names for mapping {MappingId}", mapping.Id);
+                }
+            }
+        }
+
+        // Build a lookup of ServiceNow app name -> Application
+        var appNameToApplication = applications
+            .ToDictionary(a => a.Name, a => a, StringComparer.OrdinalIgnoreCase);
+
+        // Link repos to applications and gather data for updates
+        foreach (var repo in syncedRepos)
+        {
+            if (repoNameToMapping.TryGetValue(repo.Name, out var mapping))
+            {
+                if (appNameToApplication.TryGetValue(mapping.ServiceNowAppName, out var app))
+                {
+                    // Link the repository to the application
+                    if (repo.LinkedApplicationId != app.Id)
+                    {
+                        repo.LinkedApplicationId = app.Id;
+                        repo.LinkedApplicationName = app.Name;
+                        linkedCount++;
+                        _logger.LogDebug("Linked repo {RepoName} to application {AppName}", repo.Name, app.Name);
+                    }
+
+                    // Update application with data from repo
+                    var wasUpdated = false;
+
+                    // Update tech stack (stored as JSON array in entity)
+                    var newTechStackList = BuildTechStackListFromRepo(repo);
+                    var newTechStackJson = System.Text.Json.JsonSerializer.Serialize(newTechStackList, JsonOptions);
+                    if (newTechStackList.Count > 0 && app.TechnologyStackJson != newTechStackJson)
+                    {
+                        app.TechnologyStackJson = newTechStackJson;
+                        wasUpdated = true;
+                    }
+
+                    // Update last activity date
+                    if (repo.LastCommitDate.HasValue && app.LastActivityDate != repo.LastCommitDate)
+                    {
+                        app.LastActivityDate = repo.LastCommitDate;
+                        wasUpdated = true;
+                    }
+
+                    // Update security findings from vulnerability counts
+                    var securityFindings = BuildSecurityFindingsFromRepo(repo);
+                    if (securityFindings.Count > 0)
+                    {
+                        app.SecurityFindingsJson = System.Text.Json.JsonSerializer.Serialize(securityFindings, JsonOptions);
+                        wasUpdated = true;
+                    }
+
+                    // Update last sync date
+                    app.LastSyncDate = DateTimeOffset.UtcNow;
+
+                    if (wasUpdated)
+                    {
+                        updatedCount++;
+                    }
+                }
+            }
+        }
+
+        // Recalculate health scores for all applications
+        var tasks = await context.Tasks.AsNoTracking().ToListAsync();
+        var tasksByAppId = tasks.GroupBy(t => t.ApplicationId)
+            .ToDictionary(g => g.Key, g => g.Select(t => t.ToModel()).ToList());
+
+        foreach (var app in applications)
+        {
+            var appTasks = tasksByAppId.GetValueOrDefault(app.Id) ?? [];
+            var appModel = app.ToModel();
+
+            var breakdown = _healthScoringService.CalculateHealthScore(appModel, appTasks);
+            var newHealthScore = breakdown.FinalScore;
+
+            if (app.HealthScore != newHealthScore)
+            {
+                app.HealthScore = newHealthScore;
+                _logger.LogDebug("Updated health score for {AppName}: {OldScore} -> {NewScore}",
+                    app.Name, appModel.HealthScore, newHealthScore);
+            }
+        }
+
+        await context.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "RefreshApplicationsFromSyncedData complete: {LinkedCount} repos linked, {UpdatedCount} apps updated",
+            linkedCount, updatedCount);
+
+        return (linkedCount, updatedCount);
+    }
+
+    /// <summary>
+    /// Builds a tech stack list from repository data for the Application.TechnologyStack field.
+    /// </summary>
+    private static List<string> BuildTechStackListFromRepo(SyncedRepositoryEntity repo)
+    {
+        var parts = new List<string>();
+
+        if (!string.IsNullOrEmpty(repo.PrimaryStack) && repo.PrimaryStack != "Unknown")
+        {
+            parts.Add(repo.PrimaryStack);
+        }
+
+        if (!string.IsNullOrEmpty(repo.TargetFramework))
+        {
+            parts.Add(repo.TargetFramework);
+        }
+
+        if (!string.IsNullOrEmpty(repo.FrameworksJson))
+        {
+            try
+            {
+                var frameworks = System.Text.Json.JsonSerializer.Deserialize<List<string>>(repo.FrameworksJson, JsonOptions) ?? [];
+                parts.AddRange(frameworks);
+            }
+            catch { /* Ignore parse errors */ }
+        }
+
+        if (!string.IsNullOrEmpty(repo.LanguagesJson))
+        {
+            try
+            {
+                var languages = System.Text.Json.JsonSerializer.Deserialize<List<string>>(repo.LanguagesJson, JsonOptions) ?? [];
+                parts.AddRange(languages);
+            }
+            catch { /* Ignore parse errors */ }
+        }
+
+        return parts.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Builds SecurityFinding list from repository vulnerability counts.
+    /// </summary>
+    private static List<SecurityFinding> BuildSecurityFindingsFromRepo(SyncedRepositoryEntity repo)
+    {
+        var findings = new List<SecurityFinding>();
+
+        // Create aggregated findings for each severity level with counts
+        if (repo.OpenCriticalVulnerabilities > 0)
+        {
+            findings.Add(new SecurityFinding
+            {
+                Id = $"{repo.Id}-critical",
+                Title = $"Critical Vulnerabilities ({repo.OpenCriticalVulnerabilities})",
+                Severity = SecuritySeverity.Critical,
+                Description = $"{repo.OpenCriticalVulnerabilities} critical vulnerabilities detected by CodeQL/Advanced Security",
+                DetectedDate = repo.LastSecurityScanDate ?? DateTimeOffset.UtcNow
+            });
+        }
+
+        if (repo.OpenHighVulnerabilities > 0)
+        {
+            findings.Add(new SecurityFinding
+            {
+                Id = $"{repo.Id}-high",
+                Title = $"High Vulnerabilities ({repo.OpenHighVulnerabilities})",
+                Severity = SecuritySeverity.High,
+                Description = $"{repo.OpenHighVulnerabilities} high severity vulnerabilities detected by CodeQL/Advanced Security",
+                DetectedDate = repo.LastSecurityScanDate ?? DateTimeOffset.UtcNow
+            });
+        }
+
+        if (repo.OpenMediumVulnerabilities > 0)
+        {
+            findings.Add(new SecurityFinding
+            {
+                Id = $"{repo.Id}-medium",
+                Title = $"Medium Vulnerabilities ({repo.OpenMediumVulnerabilities})",
+                Severity = SecuritySeverity.Medium,
+                Description = $"{repo.OpenMediumVulnerabilities} medium severity vulnerabilities detected by CodeQL/Advanced Security",
+                DetectedDate = repo.LastSecurityScanDate ?? DateTimeOffset.UtcNow
+            });
+        }
+
+        if (repo.OpenLowVulnerabilities > 0)
+        {
+            findings.Add(new SecurityFinding
+            {
+                Id = $"{repo.Id}-low",
+                Title = $"Low Vulnerabilities ({repo.OpenLowVulnerabilities})",
+                Severity = SecuritySeverity.Low,
+                Description = $"{repo.OpenLowVulnerabilities} low severity vulnerabilities detected by CodeQL/Advanced Security",
+                DetectedDate = repo.LastSecurityScanDate ?? DateTimeOffset.UtcNow
+            });
+        }
+
+        return findings;
     }
 
     #endregion

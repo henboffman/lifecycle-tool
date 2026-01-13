@@ -2854,6 +2854,12 @@ public class MockDataService : IMockDataService
         return Task.CompletedTask;
     }
 
+    public Task<(int linked, int updated)> RefreshApplicationsFromSyncedDataAsync()
+    {
+        // Mock implementation - no actual refresh needed for mock data
+        return Task.FromResult((0, 0));
+    }
+
     #endregion
 
     #region ServiceNow Application Storage

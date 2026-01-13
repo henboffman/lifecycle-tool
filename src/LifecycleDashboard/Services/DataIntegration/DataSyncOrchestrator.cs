@@ -1000,6 +1000,29 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 Duration = DateTimeOffset.UtcNow - storeStart
             });
 
+            // Step 4: Refresh application data from synced repositories
+            var refreshStart = DateTimeOffset.UtcNow;
+            _logger.LogInformation("Refreshing application data from synced repositories...");
+            ReportProgress("Refreshing applications", syncedRepos.Count, syncedRepos.Count, message: "Updating applications with synced data...");
+
+            var (linkedCount, updatedCount) = await _mockDataService.RefreshApplicationsFromSyncedDataAsync();
+
+            stepResults.Add(new SyncStepResult
+            {
+                StepName = "Refresh Application Data",
+                Success = true,
+                SuccessCount = updatedCount,
+                Duration = DateTimeOffset.UtcNow - refreshStart,
+                Details = new Dictionary<string, object>
+                {
+                    ["RepositoriesLinked"] = linkedCount,
+                    ["ApplicationsUpdated"] = updatedCount
+                }
+            });
+
+            _logger.LogInformation("Application refresh complete: {LinkedCount} repos linked, {UpdatedCount} apps updated",
+                linkedCount, updatedCount);
+
             _logger.LogInformation("Azure DevOps sync completed. Processed {Count} repositories (incremental skipped: {IncrementalSkip}). " +
                 "Tech Stack: {TechStackSuccess}/{Total}, Commits: {CommitsSuccess}/{Total}, " +
                 "Packages: {PackagesSuccess}/{Total}, README: {ReadmeSuccess}/{Total}, Pipeline: {PipelineSuccess}/{Total}, " +
