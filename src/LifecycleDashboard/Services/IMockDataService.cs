@@ -484,6 +484,38 @@ public interface IMockDataService
     /// Attempts to auto-link incidents to applications based on configuration items.
     /// </summary>
     Task<int> AutoLinkIncidentsToApplicationsAsync();
+
+    // Incident Recommendations (AI-generated)
+
+    /// <summary>
+    /// Gets all incident recommendations.
+    /// </summary>
+    Task<IReadOnlyList<IncidentRecommendation>> GetIncidentRecommendationsAsync();
+
+    /// <summary>
+    /// Gets incident recommendations for a specific application.
+    /// </summary>
+    Task<IReadOnlyList<IncidentRecommendation>> GetIncidentRecommendationsForApplicationAsync(string applicationId);
+
+    /// <summary>
+    /// Gets an incident recommendation by ID.
+    /// </summary>
+    Task<IncidentRecommendation?> GetIncidentRecommendationAsync(string id);
+
+    /// <summary>
+    /// Stores incident recommendations (replaces existing ones for same application).
+    /// </summary>
+    Task<int> StoreIncidentRecommendationsAsync(IEnumerable<IncidentRecommendation> recommendations);
+
+    /// <summary>
+    /// Updates the status of an incident recommendation.
+    /// </summary>
+    Task<IncidentRecommendation> UpdateIncidentRecommendationStatusAsync(string id, RecommendationStatus status, string? notes = null);
+
+    /// <summary>
+    /// Deletes old/expired recommendations.
+    /// </summary>
+    Task<int> CleanupExpiredRecommendationsAsync(int daysOld = 90);
 }
 
 /// <summary>

@@ -1751,3 +1751,264 @@
         gap: 0.5rem;
     }
 }
+
+/* Incidents Tab */
+.incident-summary-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+
+@media (max-width: 768px) {
+    .incident-summary-cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.incident-summary-card {
+    background: var(--color-bg);
+    padding: 1.25rem;
+    border-radius: var(--radius-md);
+    text-align: center;
+}
+
+.incident-summary-value {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.incident-summary-value.warning {
+    color: var(--color-attention);
+}
+
+.incident-summary-label {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+    margin-top: 0.25rem;
+}
+
+/* Close Code Breakdown */
+.close-code-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.close-code-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    transition: all 0.2s ease;
+}
+
+.close-code-item.repeat-pattern {
+    background: rgba(234, 179, 8, 0.05);
+    border-left: 3px solid var(--color-attention);
+}
+
+.close-code-info {
+    flex: 0 0 200px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.close-code-name {
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.repeat-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--radius-sm);
+    background: var(--color-attention-bg);
+    color: var(--color-attention);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.close-code-bar {
+    flex: 1;
+    height: 8px;
+    background: var(--color-surface);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+}
+
+.close-code-fill {
+    height: 100%;
+    background: var(--color-primary);
+    border-radius: var(--radius-full);
+    transition: width 0.3s ease;
+}
+
+.close-code-item.repeat-pattern .close-code-fill {
+    background: var(--color-attention);
+}
+
+.close-code-count {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    font-weight: 600;
+    min-width: 30px;
+    text-align: right;
+}
+
+/* Incident List */
+.incident-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.incident-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+}
+
+.incident-number {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 100px;
+}
+
+.incident-number .number {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.incident-number .state {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+}
+
+.incident-number .state.resolved {
+    background: var(--color-healthy-bg);
+    color: var(--color-healthy);
+}
+
+.incident-number .state.open {
+    background: var(--color-attention-bg);
+    color: var(--color-attention);
+}
+
+.incident-number .state.in-progress {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+}
+
+.incident-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.incident-description {
+    font-size: 0.875rem;
+    color: var(--color-text);
+    line-height: 1.4;
+}
+
+.incident-close-code {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.incident-date {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+.incidents-more {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+/* Health Impact Breakdown */
+.health-impact-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+
+.impact-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.impact-row:last-child {
+    border-bottom: none;
+}
+
+.impact-row.total {
+    border-top: 2px solid var(--color-border);
+    padding-top: 0.75rem;
+    margin-top: 0.25rem;
+    font-weight: 600;
+}
+
+.impact-label {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.impact-row.total .impact-label {
+    color: var(--color-text);
+}
+
+.impact-value {
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+.impact-value.penalty {
+    color: var(--color-critical);
+}
+
+@media (max-width: 768px) {
+    .close-code-info {
+        flex: 0 0 120px;
+    }
+
+    .incident-item {
+        flex-wrap: wrap;
+    }
+
+    .incident-number {
+        min-width: auto;
+    }
+
+    .incident-details {
+        width: 100%;
+        order: 3;
+    }
+}

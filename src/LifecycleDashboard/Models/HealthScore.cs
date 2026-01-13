@@ -67,6 +67,11 @@ public record HealthScoreBreakdown
     public int DataConflictPenalty { get; init; }
 
     /// <summary>
+    /// Incident history penalty (high incident count indicates instability).
+    /// </summary>
+    public int IncidentPenalty { get; init; }
+
+    /// <summary>
     /// Final calculated score.
     /// </summary>
     public int FinalScore => Math.Max(0, Math.Min(100,
@@ -76,12 +81,18 @@ public record HealthScoreBreakdown
         + MaintenanceAdjustment
         + DocumentationAdjustment
         - OverdueTaskPenalty
-        - DataConflictPenalty));
+        - DataConflictPenalty
+        - IncidentPenalty));
 
     /// <summary>
     /// Details about security findings impact.
     /// </summary>
     public SecurityScoreDetails? SecurityDetails { get; init; }
+
+    /// <summary>
+    /// Details about incident impact.
+    /// </summary>
+    public IncidentScoreDetails? IncidentDetails { get; init; }
 }
 
 /// <summary>
@@ -109,6 +120,45 @@ public record SecurityScoreDetails
         var lowPenalty = Math.Min(10, (int)(LowCount * 0.5));
 
         return criticalPenalty + highPenalty + mediumPenalty + lowPenalty;
+    }
+}
+
+/// <summary>
+/// Details about incident impact on health score.
+/// </summary>
+public record IncidentScoreDetails
+{
+    /// <summary>
+    /// Total incidents linked to this application.
+    /// </summary>
+    public int TotalIncidents { get; init; }
+
+    /// <summary>
+    /// Incidents in the last 90 days.
+    /// </summary>
+    public int RecentIncidents { get; init; }
+
+    /// <summary>
+    /// Number of repeat incident patterns (same close code appearing 3+ times).
+    /// </summary>
+    public int RepeatPatterns { get; init; }
+
+    /// <summary>
+    /// Most common close codes and their counts.
+    /// </summary>
+    public Dictionary<string, int> CloseCodeCounts { get; init; } = new();
+
+    /// <summary>
+    /// Calculate penalty based on incident metrics.
+    /// Recent incidents (90 days): -2 each (max -20)
+    /// Repeat patterns: -3 each (max -15)
+    /// </summary>
+    public int CalculatePenalty()
+    {
+        var recentPenalty = Math.Min(20, RecentIncidents * 2);
+        var repeatPenalty = Math.Min(15, RepeatPatterns * 3);
+
+        return recentPenalty + repeatPenalty;
     }
 }
 

@@ -27,6 +27,7 @@ public class LifecycleDbContext : DbContext
     public DbSet<ImportedServiceNowApplicationEntity> ImportedServiceNowApplications => Set<ImportedServiceNowApplicationEntity>();
     public DbSet<FrameworkVersionEntity> FrameworkVersions => Set<FrameworkVersionEntity>();
     public DbSet<ServiceNowIncidentEntity> ServiceNowIncidents => Set<ServiceNowIncidentEntity>();
+    public DbSet<IncidentRecommendationEntity> IncidentRecommendations => Set<IncidentRecommendationEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -284,6 +285,26 @@ public class LifecycleDbContext : DbContext
             entity.HasIndex(e => e.LinkedApplicationId);
             entity.HasIndex(e => e.CloseCode);
             entity.HasIndex(e => e.State);
+        });
+
+        // Incident Recommendations (AI-generated)
+        modelBuilder.Entity<IncidentRecommendationEntity>(entity =>
+        {
+            entity.ToTable("IncidentRecommendations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.RecommendedAction).IsRequired();
+            entity.Property(e => e.Type).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ApplicationId).HasMaxLength(100);
+            entity.Property(e => e.ApplicationName).HasMaxLength(200);
+            entity.Property(e => e.EstimatedEffort).HasMaxLength(50);
+            entity.HasIndex(e => e.ApplicationId);
+            entity.HasIndex(e => e.Type);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.Priority);
+            entity.HasIndex(e => e.GeneratedAt);
         });
     }
 }

@@ -88,6 +88,14 @@ else
                     role="tab" @onclick="() => SetTab(DetailTab.Usage)">
                 <i class="bi bi-graph-up"></i> Usage
             </button>
+            <button class="tab-btn @(_activeTab == DetailTab.Incidents ? "active" : "")"
+                    role="tab" @onclick="() => SetTab(DetailTab.Incidents)">
+                <i class="bi bi-exclamation-octagon"></i> Incidents
+                @if (_incidents.Count > 0)
+                {
+                    <span class="tab-badge">@_incidents.Count</span>
+                }
+            </button>
             <button class="tab-btn @(_activeTab == DetailTab.Operations ? "active" : "")"
                     role="tab" @onclick="() => SetTab(DetailTab.Operations)">
                 <i class="bi bi-calendar-event"></i> Operations
@@ -684,6 +692,165 @@ else
                     }
                 </section>
             }
+            else if (_activeTab == DetailTab.Incidents)
+            {
+                <section class="tab-panel">
+                    <!-- Incident Summary -->
+                    <div class="content-section">
+                        <h2><i class="bi bi-exclamation-octagon"></i> Incident Summary</h2>
+                        @if (_incidents.Count == 0)
+                        {
+                            <div class="empty-state success">
+                                <i class="bi bi-check-circle"></i>
+                                <h3>No Linked Incidents</h3>
+                                <p>No ServiceNow incidents are currently linked to this application.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="incident-summary-cards">
+                                <div class="incident-summary-card">
+                                    <div class="incident-summary-value">@_incidents.Count</div>
+                                    <div class="incident-summary-label">Total Incidents</div>
+                                </div>
+                                <div class="incident-summary-card">
+                                    <div class="incident-summary-value @(GetRecentIncidentCount() > 5 ? "warning" : "")">@GetRecentIncidentCount()</div>
+                                    <div class="incident-summary-label">Last 90 Days</div>
+                                </div>
+                                <div class="incident-summary-card">
+                                    <div class="incident-summary-value @(GetRepeatPatternCount() > 0 ? "warning" : "")">@GetRepeatPatternCount()</div>
+                                    <div class="incident-summary-label">Repeat Patterns</div>
+                                </div>
+                                <div class="incident-summary-card">
+                                    <div class="incident-summary-value">@GetBandaidFixCount()</div>
+                                    <div class="incident-summary-label">Band-aid Fixes</div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    @if (_incidents.Count > 0)
+                    {
+                        <!-- Close Code Analysis -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-pie-chart"></i> Close Code Breakdown</h2>
+                            <p class="section-description">Understanding resolution patterns can reveal opportunities for permanent fixes.</p>
+                            @{
+                                var closeCodeGroups = GetCloseCodeBreakdown();
+                            }
+                            @if (closeCodeGroups.Count == 0)
+                            {
+                                <p class="empty-message">No close codes recorded for these incidents.</p>
+                            }
+                            else
+                            {
+                                <div class="close-code-list">
+                                    @foreach (var group in closeCodeGroups.Take(10))
+                                    {
+                                        var isRepeatPattern = group.Count >= 3;
+                                        <div class="close-code-item @(isRepeatPattern ? "repeat-pattern" : "")">
+                                            <div class="close-code-info">
+                                                <span class="close-code-name">@group.CloseCode</span>
+                                                @if (isRepeatPattern)
+                                                {
+                                                    <span class="repeat-badge">Repeat Pattern</span>
+                                                }
+                                            </div>
+                                            <div class="close-code-bar">
+                                                <div class="close-code-fill" style="width: @GetCloseCodePercentage(group.Count)%"></div>
+                                            </div>
+                                            <span class="close-code-count">@group.Count</span>
+                                        </div>
+                                    }
+                                </div>
+
+                                @if (closeCodeGroups.Any(g => g.Count >= 3))
+                                {
+                                    <div class="analysis-item info" style="margin-top: 1rem;">
+                                        <i class="bi bi-lightbulb"></i>
+                                        <p>
+                                            <strong>@closeCodeGroups.Count(g => g.Count >= 3) repeat pattern(s) detected.</strong>
+                                            These recurring issues may indicate opportunities for permanent fixes or process improvements.
+                                        </p>
+                                    </div>
+                                }
+                            }
+                        </div>
+
+                        <!-- Recent Incidents -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-clock-history"></i> Recent Incidents</h2>
+                            <div class="incident-list">
+                                @foreach (var incident in _incidents.OrderByDescending(i => i.ImportedAt).Take(10))
+                                {
+                                    <div class="incident-item">
+                                        <div class="incident-number">
+                                            <span class="number">@incident.IncidentNumber</span>
+                                            <span class="state @GetIncidentStateClass(incident.State)">@(incident.State ?? "Unknown")</span>
+                                        </div>
+                                        <div class="incident-details">
+                                            <span class="incident-description">@(incident.ShortDescription ?? "No description")</span>
+                                            @if (!string.IsNullOrEmpty(incident.CloseCode))
+                                            {
+                                                <span class="incident-close-code">
+                                                    <i class="bi bi-tag"></i> @incident.CloseCode
+                                                </span>
+                                            }
+                                        </div>
+                                        <div class="incident-date">
+                                            @incident.ImportedAt.ToString("MMM d, yyyy")
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                            @if (_incidents.Count > 10)
+                            {
+                                <div class="incidents-more">
+                                    <a href="/incidents?app=@Id" class="btn btn-outline">
+                                        <i class="bi bi-list"></i> View All @_incidents.Count Incidents
+                                    </a>
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Incident Impact on Health Score -->
+                        <div class="content-section">
+                            <h2><i class="bi bi-heart-pulse"></i> Health Score Impact</h2>
+                            @{
+                                var recentCount = GetRecentIncidentCount();
+                                var repeatPatterns = GetRepeatPatternCount();
+                                var recentPenalty = Math.Min(20, recentCount * 2);
+                                var repeatPenalty = Math.Min(15, repeatPatterns * 3);
+                                var totalPenalty = recentPenalty + repeatPenalty;
+                            }
+                            <div class="health-impact-breakdown">
+                                <div class="impact-row">
+                                    <span class="impact-label">Recent incidents (@recentCount × -2 pts, max -20)</span>
+                                    <span class="impact-value penalty">-@recentPenalty</span>
+                                </div>
+                                <div class="impact-row">
+                                    <span class="impact-label">Repeat patterns (@repeatPatterns × -3 pts, max -15)</span>
+                                    <span class="impact-value penalty">-@repeatPenalty</span>
+                                </div>
+                                <div class="impact-row total">
+                                    <span class="impact-label">Total Incident Penalty</span>
+                                    <span class="impact-value penalty">-@totalPenalty</span>
+                                </div>
+                            </div>
+                            @if (totalPenalty > 10)
+                            {
+                                <div class="analysis-item warning" style="margin-top: 1rem;">
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                    <p>
+                                        High incident penalty is significantly affecting this application's health score.
+                                        Addressing repeat patterns could improve the score by up to @repeatPenalty points.
+                                    </p>
+                                </div>
+                            }
+                        </div>
+                    }
+                </section>
+            }
             else if (_activeTab == DetailTab.Operations)
             {
                 <section class="tab-panel">
@@ -1075,6 +1242,7 @@ else
     private Application? _application;
     private RepositoryInfo? _repositoryInfo;
     private List<LifecycleTask> _tasks = [];
+    private List<ServiceNowIncident> _incidents = [];
     private bool _isLoading = true;
     private DetailTab _activeTab = DetailTab.Overview;
 
@@ -1084,6 +1252,7 @@ else
         Security,
         Repository,
         Usage,
+        Incidents,
         Operations,
         Documentation,
         Tasks,
@@ -1097,6 +1266,7 @@ else
         {
             _repositoryInfo = await DataService.GetRepositoryInfoAsync(Id);
             _tasks = (await DataService.GetTasksForApplicationAsync(Id)).ToList();
+            _incidents = (await DataService.GetIncidentsForApplicationAsync(Id)).ToList();
         }
         _isLoading = false;
     }
@@ -1373,4 +1543,55 @@ else
     private bool PeriodPrefersMaintenance(CriticalPeriod period) =>
         period.Criticality == PeriodCriticality.MaintenanceWindow ||
         period.Criticality == PeriodCriticality.LowActivity;
+
+    // Incident tab helpers
+    private int GetRecentIncidentCount()
+    {
+        var cutoffDate = DateTimeOffset.UtcNow.AddDays(-90);
+        return _incidents.Count(i => i.ImportedAt >= cutoffDate);
+    }
+
+    private int GetRepeatPatternCount()
+    {
+        return _incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .Count(g => g.Count() >= 3);
+    }
+
+    private int GetBandaidFixCount()
+    {
+        return _incidents.Count(i =>
+            i.CloseCode?.Contains("Band-aid", StringComparison.OrdinalIgnoreCase) == true ||
+            i.CloseCode?.Contains("Workaround", StringComparison.OrdinalIgnoreCase) == true ||
+            i.CloseCode?.Contains("Temporary", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    private List<(string CloseCode, int Count)> GetCloseCodeBreakdown()
+    {
+        return _incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .Select(g => (CloseCode: g.Key, Count: g.Count()))
+            .OrderByDescending(g => g.Count)
+            .ToList();
+    }
+
+    private int GetCloseCodePercentage(int count)
+    {
+        if (_incidents.Count == 0) return 0;
+        return (int)Math.Round(100.0 * count / _incidents.Count);
+    }
+
+    private string GetIncidentStateClass(string? state)
+    {
+        if (string.IsNullOrEmpty(state)) return "";
+        return state.ToLowerInvariant() switch
+        {
+            "closed" or "resolved" => "resolved",
+            "open" or "new" => "open",
+            "in progress" => "in-progress",
+            _ => ""
+        };
+    }
 }

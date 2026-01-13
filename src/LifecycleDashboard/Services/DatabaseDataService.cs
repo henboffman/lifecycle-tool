@@ -2041,4 +2041,158 @@ public class DatabaseDataService : IMockDataService
     }
 
     #endregion
+
+    #region Incident Recommendations
+
+    public async Task<IReadOnlyList<IncidentRecommendation>> GetIncidentRecommendationsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.IncidentRecommendations
+            .Where(e => e.Status == "Active" || e.Status == "InProgress")
+            .OrderBy(e => e.Priority)
+            .ThenByDescending(e => e.GeneratedAt)
+            .ToListAsync();
+
+        return entities.Select(MapToIncidentRecommendation).ToList();
+    }
+
+    public async Task<IReadOnlyList<IncidentRecommendation>> GetIncidentRecommendationsForApplicationAsync(string applicationId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.IncidentRecommendations
+            .Where(e => e.ApplicationId == applicationId &&
+                       (e.Status == "Active" || e.Status == "InProgress"))
+            .OrderBy(e => e.Priority)
+            .ThenByDescending(e => e.GeneratedAt)
+            .ToListAsync();
+
+        return entities.Select(MapToIncidentRecommendation).ToList();
+    }
+
+    public async Task<IncidentRecommendation?> GetIncidentRecommendationAsync(string id)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.IncidentRecommendations.FindAsync(id);
+        return entity == null ? null : MapToIncidentRecommendation(entity);
+    }
+
+    public async Task<int> StoreIncidentRecommendationsAsync(IEnumerable<IncidentRecommendation> recommendations)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var count = 0;
+        foreach (var rec in recommendations)
+        {
+            var existing = await context.IncidentRecommendations.FindAsync(rec.Id);
+            if (existing != null)
+            {
+                MapToEntity(rec, existing);
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            else
+            {
+                var entity = new IncidentRecommendationEntity { Id = rec.Id };
+                MapToEntity(rec, entity);
+                context.IncidentRecommendations.Add(entity);
+            }
+            count++;
+        }
+
+        await context.SaveChangesAsync();
+        return count;
+    }
+
+    public async Task<IncidentRecommendation> UpdateIncidentRecommendationStatusAsync(string id, RecommendationStatus status, string? notes = null)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.IncidentRecommendations.FindAsync(id);
+        if (entity == null)
+        {
+            throw new InvalidOperationException($"Recommendation with ID {id} not found");
+        }
+
+        entity.Status = status.ToString();
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        if (notes != null)
+        {
+            entity.Notes = notes;
+        }
+        if (status == RecommendationStatus.Resolved || status == RecommendationStatus.Dismissed)
+        {
+            entity.ResolvedAt = DateTimeOffset.UtcNow;
+        }
+
+        await context.SaveChangesAsync();
+        return MapToIncidentRecommendation(entity);
+    }
+
+    public async Task<int> CleanupExpiredRecommendationsAsync(int daysOld = 90)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var cutoffDate = DateTimeOffset.UtcNow.AddDays(-daysOld);
+
+        var expired = await context.IncidentRecommendations
+            .Where(e => e.GeneratedAt < cutoffDate &&
+                       (e.Status == "Resolved" || e.Status == "Dismissed"))
+            .ToListAsync();
+
+        context.IncidentRecommendations.RemoveRange(expired);
+        await context.SaveChangesAsync();
+
+        return expired.Count;
+    }
+
+    private static IncidentRecommendation MapToIncidentRecommendation(IncidentRecommendationEntity entity)
+    {
+        return new IncidentRecommendation
+        {
+            Id = entity.Id,
+            ApplicationId = entity.ApplicationId,
+            ApplicationName = entity.ApplicationName,
+            Type = Enum.TryParse<IncidentRecommendationType>(entity.Type, out var type)
+                ? type
+                : IncidentRecommendationType.GeneralImprovement,
+            Priority = entity.Priority,
+            Title = entity.Title,
+            Description = entity.Description,
+            RootCauseAnalysis = entity.RootCauseAnalysis,
+            RecommendedAction = entity.RecommendedAction,
+            ExpectedImpact = entity.ExpectedImpact,
+            EstimatedEffort = entity.EstimatedEffort,
+            RelatedCloseCodes = JsonSerializer.Deserialize<List<string>>(entity.RelatedCloseCodesJson, JsonOptions) ?? [],
+            RelatedIncidentNumbers = JsonSerializer.Deserialize<List<string>>(entity.RelatedIncidentNumbersJson, JsonOptions) ?? [],
+            IncidentCount = entity.IncidentCount,
+            ConfidenceScore = entity.ConfidenceScore,
+            Status = Enum.TryParse<RecommendationStatus>(entity.Status, out var status)
+                ? status
+                : RecommendationStatus.Active,
+            GeneratedAt = entity.GeneratedAt,
+            UpdatedAt = entity.UpdatedAt,
+            ResolvedAt = entity.ResolvedAt,
+            Notes = entity.Notes
+        };
+    }
+
+    private static void MapToEntity(IncidentRecommendation rec, IncidentRecommendationEntity entity)
+    {
+        entity.ApplicationId = rec.ApplicationId;
+        entity.ApplicationName = rec.ApplicationName;
+        entity.Type = rec.Type.ToString();
+        entity.Priority = rec.Priority;
+        entity.Title = rec.Title;
+        entity.Description = rec.Description;
+        entity.RootCauseAnalysis = rec.RootCauseAnalysis;
+        entity.RecommendedAction = rec.RecommendedAction;
+        entity.ExpectedImpact = rec.ExpectedImpact;
+        entity.EstimatedEffort = rec.EstimatedEffort;
+        entity.RelatedCloseCodesJson = JsonSerializer.Serialize(rec.RelatedCloseCodes, JsonOptions);
+        entity.RelatedIncidentNumbersJson = JsonSerializer.Serialize(rec.RelatedIncidentNumbers, JsonOptions);
+        entity.IncidentCount = rec.IncidentCount;
+        entity.ConfidenceScore = rec.ConfidenceScore;
+        entity.Status = rec.Status.ToString();
+        entity.GeneratedAt = rec.GeneratedAt;
+        entity.ResolvedAt = rec.ResolvedAt;
+        entity.Notes = rec.Notes;
+    }
+
+    #endregion
 }

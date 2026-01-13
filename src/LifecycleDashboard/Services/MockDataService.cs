@@ -3626,4 +3626,95 @@ public class MockDataService : IMockDataService
     }
 
     #endregion
+
+    #region Incident Recommendations
+
+    private readonly List<IncidentRecommendation> _incidentRecommendations = [];
+
+    public Task<IReadOnlyList<IncidentRecommendation>> GetIncidentRecommendationsAsync()
+    {
+        var activeRecommendations = _incidentRecommendations
+            .Where(r => r.Status == RecommendationStatus.Active || r.Status == RecommendationStatus.InProgress)
+            .OrderBy(r => r.Priority)
+            .ThenByDescending(r => r.GeneratedAt)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<IncidentRecommendation>>(activeRecommendations);
+    }
+
+    public Task<IReadOnlyList<IncidentRecommendation>> GetIncidentRecommendationsForApplicationAsync(string applicationId)
+    {
+        var recommendations = _incidentRecommendations
+            .Where(r => r.ApplicationId == applicationId &&
+                       (r.Status == RecommendationStatus.Active || r.Status == RecommendationStatus.InProgress))
+            .OrderBy(r => r.Priority)
+            .ThenByDescending(r => r.GeneratedAt)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<IncidentRecommendation>>(recommendations);
+    }
+
+    public Task<IncidentRecommendation?> GetIncidentRecommendationAsync(string id)
+    {
+        var recommendation = _incidentRecommendations.FirstOrDefault(r => r.Id == id);
+        return Task.FromResult(recommendation);
+    }
+
+    public Task<int> StoreIncidentRecommendationsAsync(IEnumerable<IncidentRecommendation> recommendations)
+    {
+        var recList = recommendations.ToList();
+        var count = 0;
+
+        foreach (var rec in recList)
+        {
+            // Check for existing recommendation with same ID
+            var existingIndex = _incidentRecommendations.FindIndex(r => r.Id == rec.Id);
+            if (existingIndex >= 0)
+            {
+                _incidentRecommendations[existingIndex] = rec with { UpdatedAt = DateTimeOffset.UtcNow };
+            }
+            else
+            {
+                _incidentRecommendations.Add(rec);
+            }
+            count++;
+        }
+
+        return Task.FromResult(count);
+    }
+
+    public Task<IncidentRecommendation> UpdateIncidentRecommendationStatusAsync(string id, RecommendationStatus status, string? notes = null)
+    {
+        var index = _incidentRecommendations.FindIndex(r => r.Id == id);
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"Recommendation with ID {id} not found");
+        }
+
+        var existing = _incidentRecommendations[index];
+        var updated = existing with
+        {
+            Status = status,
+            Notes = notes ?? existing.Notes,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            ResolvedAt = status == RecommendationStatus.Resolved || status == RecommendationStatus.Dismissed
+                ? DateTimeOffset.UtcNow
+                : existing.ResolvedAt
+        };
+
+        _incidentRecommendations[index] = updated;
+        return Task.FromResult(updated);
+    }
+
+    public Task<int> CleanupExpiredRecommendationsAsync(int daysOld = 90)
+    {
+        var cutoffDate = DateTimeOffset.UtcNow.AddDays(-daysOld);
+        var countBefore = _incidentRecommendations.Count;
+
+        _incidentRecommendations.RemoveAll(r =>
+            r.GeneratedAt < cutoffDate &&
+            (r.Status == RecommendationStatus.Resolved || r.Status == RecommendationStatus.Dismissed));
+
+        return Task.FromResult(countBefore - _incidentRecommendations.Count);
+    }
+
+    #endregion
 }

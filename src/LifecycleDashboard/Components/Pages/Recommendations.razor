@@ -161,6 +161,59 @@
             }
         </section>
 
+        <!-- Incident Patterns -->
+        <section class="recommendation-section incident-section">
+            <div class="section-header">
+                <h2><i class="bi bi-exclamation-octagon"></i> Incident Patterns</h2>
+                <span class="section-count">@_incidentRecommendations.Count findings</span>
+            </div>
+            @if (_incidentRecommendations.Count == 0)
+            {
+                <div class="empty-section">
+                    <i class="bi bi-check-circle"></i>
+                    <span>No problematic incident patterns detected</span>
+                </div>
+            }
+            else
+            {
+                <div class="incident-recommendations">
+                    @foreach (var rec in _incidentRecommendations.Take(8))
+                    {
+                        <div class="incident-rec-card @rec.Severity.ToLower()">
+                            <div class="rec-icon @rec.Type.ToString().ToLower()">
+                                @((MarkupString)GetIncidentRecommendationIcon(rec.Type))
+                            </div>
+                            <div class="rec-content">
+                                <div class="rec-header">
+                                    <span class="rec-type-badge @rec.Type.ToString().ToLower()">@GetIncidentRecommendationTypeLabel(rec.Type)</span>
+                                    <span class="rec-severity-badge @rec.Severity.ToLower()">@rec.Severity</span>
+                                </div>
+                                <h4>@rec.Title</h4>
+                                <p class="rec-description">@rec.Description</p>
+                                <div class="rec-action">
+                                    <i class="bi bi-arrow-right-circle"></i>
+                                    @rec.RecommendedAction
+                                </div>
+                            </div>
+                            <div class="rec-app">
+                                <button class="btn btn-sm btn-outline" @onclick="() => NavigateToApp(rec.ApplicationId)">
+                                    View App
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+                @if (_incidentRecommendations.Count > 8)
+                {
+                    <div class="view-more">
+                        <a href="/incidents" class="btn btn-outline">
+                            <i class="bi bi-list"></i> View All @_incidentRecommendations.Count Incident Findings
+                        </a>
+                    </div>
+                }
+            }
+        </section>
+
         <!-- AI Insights (Live) -->
         <section class="recommendation-section ai-section">
             <div class="section-header">
@@ -356,12 +409,14 @@
     private List<PriorityAction> _priorityActions = [];
     private List<Application> _retirementCandidates = [];
     private List<Application> _documentationGaps = [];
+    private List<IncidentRecommendation> _incidentRecommendations = [];
     private AiServiceStatus? _aiStatus;
     private PortfolioInsights? _portfolioInsights;
     private RiskPrediction? _riskPrediction;
     private ActionPlan? _actionPlan;
     private IReadOnlyList<Application> _allApplications = [];
     private IReadOnlyList<LifecycleTask> _allTasks = [];
+    private IReadOnlyList<ServiceNowIncident> _allIncidents = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -445,6 +500,89 @@
         _documentationGaps = applications
             .Where(a => !a.Documentation.HasArchitectureDiagram || !a.Documentation.HasSystemDocumentation)
             .OrderByDescending(a => !a.Documentation.HasArchitectureDiagram && !a.Documentation.HasSystemDocumentation)
+            .ToList();
+
+        // Incident pattern analysis (non-AI)
+        _allIncidents = await DataService.GetServiceNowIncidentsAsync();
+        var incidentsByApp = _allIncidents
+            .Where(i => !string.IsNullOrEmpty(i.LinkedApplicationId))
+            .GroupBy(i => i.LinkedApplicationId!)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var (appId, incidents) in incidentsByApp)
+        {
+            var app = applications.FirstOrDefault(a => a.Id == appId);
+            if (app == null) continue;
+
+            // Check for high incident volume (5+ in last 90 days)
+            var recentIncidents = incidents.Count(i => i.ImportedAt >= DateTimeOffset.UtcNow.AddDays(-90));
+            if (recentIncidents >= 5)
+            {
+                _incidentRecommendations.Add(new IncidentRecommendation
+                {
+                    Type = IncidentRecommendationType.HighVolume,
+                    Severity = recentIncidents >= 10 ? "High" : "Medium",
+                    ApplicationId = appId,
+                    ApplicationName = app.Name,
+                    Title = $"High incident volume for {app.Name}",
+                    Description = $"{recentIncidents} incidents in the last 90 days suggests recurring issues.",
+                    RecommendedAction = "Review incident patterns and root causes to reduce support burden.",
+                    IncidentCount = recentIncidents
+                });
+            }
+
+            // Check for repeat patterns (same close code 3+ times)
+            var closeCodeCounts = incidents
+                .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+                .GroupBy(i => i.CloseCode!)
+                .Where(g => g.Count() >= 3)
+                .Select(g => new { Code = g.Key, Count = g.Count() })
+                .OrderByDescending(g => g.Count)
+                .ToList();
+
+            foreach (var pattern in closeCodeCounts)
+            {
+                _incidentRecommendations.Add(new IncidentRecommendation
+                {
+                    Type = IncidentRecommendationType.RepeatPattern,
+                    Severity = pattern.Count >= 5 ? "High" : "Medium",
+                    ApplicationId = appId,
+                    ApplicationName = app.Name,
+                    Title = $"Repeat pattern: \"{pattern.Code}\" ({pattern.Count}x)",
+                    Description = $"Same close code appearing {pattern.Count} times indicates a systemic issue.",
+                    RecommendedAction = "Investigate root cause and implement permanent fix to prevent recurrence.",
+                    CloseCode = pattern.Code,
+                    PatternCount = pattern.Count
+                });
+            }
+
+            // Check for band-aid/workaround fixes
+            var bandaidCount = incidents.Count(i =>
+                i.CloseCode?.Contains("Band-aid", StringComparison.OrdinalIgnoreCase) == true ||
+                i.CloseCode?.Contains("Workaround", StringComparison.OrdinalIgnoreCase) == true ||
+                i.CloseCode?.Contains("Temporary", StringComparison.OrdinalIgnoreCase) == true);
+
+            if (bandaidCount >= 2)
+            {
+                _incidentRecommendations.Add(new IncidentRecommendation
+                {
+                    Type = IncidentRecommendationType.BandaidFix,
+                    Severity = bandaidCount >= 5 ? "High" : "Medium",
+                    ApplicationId = appId,
+                    ApplicationName = app.Name,
+                    Title = $"{bandaidCount} band-aid fixes for {app.Name}",
+                    Description = "Multiple temporary fixes suggest technical debt accumulation.",
+                    RecommendedAction = "Schedule time to implement permanent solutions for these workarounds.",
+                    BandaidCount = bandaidCount
+                });
+            }
+        }
+
+        // Sort recommendations by severity and count
+        _incidentRecommendations = _incidentRecommendations
+            .OrderByDescending(r => r.Severity == "High")
+            .ThenByDescending(r => r.Severity == "Medium")
+            .ThenByDescending(r => r.PatternCount + r.IncidentCount + r.BandaidCount)
             .ToList();
 
         _isLoading = false;
@@ -556,4 +694,42 @@
         public string ApplicationId { get; set; } = "";
         public string ApplicationName { get; set; } = "";
     }
+
+    private class IncidentRecommendation
+    {
+        public IncidentRecommendationType Type { get; set; }
+        public string Severity { get; set; } = "";
+        public string ApplicationId { get; set; } = "";
+        public string ApplicationName { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string RecommendedAction { get; set; } = "";
+        public string? CloseCode { get; set; }
+        public int PatternCount { get; set; }
+        public int IncidentCount { get; set; }
+        public int BandaidCount { get; set; }
+    }
+
+    private enum IncidentRecommendationType
+    {
+        HighVolume,
+        RepeatPattern,
+        BandaidFix
+    }
+
+    private static string GetIncidentRecommendationIcon(IncidentRecommendationType type) => type switch
+    {
+        IncidentRecommendationType.HighVolume => "<i class=\"bi bi-graph-up-arrow\"></i>",
+        IncidentRecommendationType.RepeatPattern => "<i class=\"bi bi-arrow-repeat\"></i>",
+        IncidentRecommendationType.BandaidFix => "<i class=\"bi bi-bandaid\"></i>",
+        _ => "<i class=\"bi bi-exclamation-triangle\"></i>"
+    };
+
+    private static string GetIncidentRecommendationTypeLabel(IncidentRecommendationType type) => type switch
+    {
+        IncidentRecommendationType.HighVolume => "High Volume",
+        IncidentRecommendationType.RepeatPattern => "Repeat Pattern",
+        IncidentRecommendationType.BandaidFix => "Band-aid Fix",
+        _ => "Unknown"
+    };
 }

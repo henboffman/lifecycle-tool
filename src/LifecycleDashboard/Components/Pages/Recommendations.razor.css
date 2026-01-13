@@ -947,3 +947,173 @@
         max-width: none;
     }
 }
+
+/* Incident Recommendations Section */
+.incident-section {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+}
+
+.incident-recommendations {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.incident-rec-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--color-border);
+    transition: all 0.2s ease;
+}
+
+.incident-rec-card:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.incident-rec-card.high {
+    border-left-color: var(--color-at-risk);
+}
+
+.incident-rec-card.medium {
+    border-left-color: var(--color-attention);
+}
+
+.rec-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 1.25rem;
+}
+
+.rec-icon.highvolume {
+    background: rgba(234, 88, 12, 0.1);
+    color: var(--color-at-risk);
+}
+
+.rec-icon.repeatpattern {
+    background: rgba(234, 179, 8, 0.1);
+    color: var(--color-attention);
+}
+
+.rec-icon.bandaidfix {
+    background: rgba(167, 139, 250, 0.1);
+    color: #a78bfa;
+}
+
+.rec-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.rec-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.rec-type-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.rec-type-badge.highvolume {
+    background: rgba(234, 88, 12, 0.1);
+    color: var(--color-at-risk);
+}
+
+.rec-type-badge.repeatpattern {
+    background: rgba(234, 179, 8, 0.1);
+    color: var(--color-attention);
+}
+
+.rec-type-badge.bandaidfix {
+    background: rgba(167, 139, 250, 0.1);
+    color: #a78bfa;
+}
+
+.rec-severity-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+}
+
+.rec-severity-badge.high {
+    background: rgba(234, 88, 12, 0.1);
+    color: var(--color-at-risk);
+}
+
+.rec-severity-badge.medium {
+    background: rgba(234, 179, 8, 0.1);
+    color: var(--color-attention);
+}
+
+.rec-content h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0 0 0.25rem 0;
+    color: var(--color-text);
+}
+
+.rec-description {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin: 0 0 0.5rem 0;
+    line-height: 1.4;
+}
+
+.rec-action {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--color-primary);
+    padding: 0.5rem;
+    background: var(--color-primary-light);
+    border-radius: var(--radius-sm);
+}
+
+.rec-action i {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+
+.rec-app {
+    flex-shrink: 0;
+}
+
+.view-more {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+@media (max-width: 768px) {
+    .incident-rec-card {
+        flex-direction: column;
+    }
+
+    .rec-app {
+        width: 100%;
+    }
+
+    .rec-app button {
+        width: 100%;
+    }
+}

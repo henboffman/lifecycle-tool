@@ -37,6 +37,10 @@ namespace LifecycleDashboard.Services;
 /// - Each overdue task: -3 points
 /// - Overdue 30+ days: -5 points instead
 ///
+/// Incident History:
+/// - Recent incidents (90 days): -2 points each (max -20)
+/// - Repeat patterns (same close code 3+ times): -3 points each (max -15)
+///
 /// Health Categories:
 /// - Healthy: 80-100 (Green)
 /// - Needs Attention: 60-79 (Yellow/Amber)
@@ -82,6 +86,14 @@ public class HealthScoringService : IHealthScoringService
     private const int OverdueTaskPenalty = 3;
     private const int SeverelyOverdueTaskPenalty = 5;
     private const int SeverelyOverdueDays = 30;
+
+    // Incident penalties
+    private const int RecentIncidentDays = 90;
+    private const int RecentIncidentPenaltyPerIncident = 2;
+    private const int MaxRecentIncidentPenalty = 20;
+    private const int RepeatPatternThreshold = 3;
+    private const int RepeatPatternPenalty = 3;
+    private const int MaxRepeatPatternPenalty = 15;
 
     public HealthScoreBreakdown CalculateHealthScore(Application application, IEnumerable<LifecycleTask> tasks)
     {
@@ -209,5 +221,75 @@ public class HealthScoringService : IHealthScoringService
         }
 
         return totalPenalty;
+    }
+
+    public HealthScoreBreakdown CalculateHealthScore(Application application, IEnumerable<LifecycleTask> tasks, IEnumerable<ServiceNowIncident> incidents)
+    {
+        var securityPenalty = CalculateSecurityPenalty(application.SecurityFindings);
+        var usageAdjustment = CalculateUsageAdjustment(application.Usage);
+        var maintenanceAdjustment = CalculateMaintenanceAdjustment(application.LastActivityDate);
+        var documentationAdjustment = CalculateDocumentationAdjustment(application.Documentation);
+        var overdueTaskPenalty = CalculateOverdueTaskPenalty(tasks);
+        var dataConflictPenalty = application.HasDataConflicts ? 5 : 0;
+        var (incidentPenalty, incidentDetails) = CalculateIncidentPenalty(incidents);
+
+        var securityDetails = new SecurityScoreDetails
+        {
+            CriticalCount = application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Critical && !f.IsResolved),
+            HighCount = application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.High && !f.IsResolved),
+            MediumCount = application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Medium && !f.IsResolved),
+            LowCount = application.SecurityFindings.Count(f => f.Severity == SecuritySeverity.Low && !f.IsResolved)
+        };
+
+        return new HealthScoreBreakdown
+        {
+            BaseScore = BaseScore,
+            SecurityPenalty = securityPenalty,
+            UsageAdjustment = usageAdjustment,
+            MaintenanceAdjustment = maintenanceAdjustment,
+            DocumentationAdjustment = documentationAdjustment,
+            OverdueTaskPenalty = overdueTaskPenalty,
+            DataConflictPenalty = dataConflictPenalty,
+            IncidentPenalty = incidentPenalty,
+            SecurityDetails = securityDetails,
+            IncidentDetails = incidentDetails
+        };
+    }
+
+    public (int Penalty, IncidentScoreDetails Details) CalculateIncidentPenalty(IEnumerable<ServiceNowIncident> incidents)
+    {
+        var incidentList = incidents.ToList();
+
+        if (incidentList.Count == 0)
+        {
+            return (0, new IncidentScoreDetails());
+        }
+
+        // Calculate recent incidents (last 90 days)
+        var cutoffDate = DateTimeOffset.UtcNow.AddDays(-RecentIncidentDays);
+        var recentIncidents = incidentList.Count(i => i.ImportedAt >= cutoffDate);
+
+        // Calculate repeat patterns (same close code appearing 3+ times)
+        var closeCodeCounts = incidentList
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var repeatPatterns = closeCodeCounts.Count(kv => kv.Value >= RepeatPatternThreshold);
+
+        // Calculate penalties
+        var recentPenalty = Math.Min(MaxRecentIncidentPenalty, recentIncidents * RecentIncidentPenaltyPerIncident);
+        var repeatPenalty = Math.Min(MaxRepeatPatternPenalty, repeatPatterns * RepeatPatternPenalty);
+        var totalPenalty = recentPenalty + repeatPenalty;
+
+        var details = new IncidentScoreDetails
+        {
+            TotalIncidents = incidentList.Count,
+            RecentIncidents = recentIncidents,
+            RepeatPatterns = repeatPatterns,
+            CloseCodeCounts = closeCodeCounts
+        };
+
+        return (totalPenalty, details);
     }
 }
