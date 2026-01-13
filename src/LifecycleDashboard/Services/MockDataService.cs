@@ -1674,6 +1674,12 @@ public class MockDataService : IMockDataService
         return Task.CompletedTask;
     }
 
+    public Task ClearAllTasksAsync()
+    {
+        Tasks.Clear();
+        return Task.CompletedTask;
+    }
+
     public Task<LifecycleTask> UpdateTaskStatusAsync(string taskId, Models.TaskStatus newStatus, string performedByUserId, string performedByName, string? notes = null)
     {
         var index = Tasks.FindIndex(t => t.Id == taskId);

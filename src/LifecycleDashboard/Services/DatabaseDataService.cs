@@ -248,6 +248,13 @@ public class DatabaseDataService : IMockDataService
         }
     }
 
+    public async Task ClearAllTasksAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        context.Tasks.RemoveRange(context.Tasks);
+        await context.SaveChangesAsync();
+    }
+
     public async Task<LifecycleTask> UpdateTaskStatusAsync(string taskId, Models.TaskStatus newStatus, string performedByUserId, string performedByName, string? notes = null)
     {
         await using var context = await _contextFactory.CreateDbContextAsync();

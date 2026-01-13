@@ -12,6 +12,7 @@
 @inject DataIntegration.ISharePointService SharePointService
 @inject DataIntegration.IServiceNowService ServiceNowService
 @inject DataIntegration.IIisDatabaseService IisDatabaseService
+@inject ITaskGenerationService TaskGenerationService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
@@ -986,6 +987,61 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Task Generation -->
+                <div class="config-card wide">
+                    <h3>Task Generation</h3>
+                    <p class="config-desc">Generate tasks based on application state, role assignments, and security findings</p>
+
+                    @if (_taskGenerationResult != null)
+                    {
+                        <div class="generation-result @(_taskGenerationResult.Errors.Count > 0 ? "has-errors" : "success")">
+                            <div class="result-stats">
+                                <span><i class="bi bi-check-circle"></i> @_taskGenerationResult.TasksCreated created</span>
+                                <span><i class="bi bi-skip-forward"></i> @_taskGenerationResult.TasksSkipped skipped</span>
+                                <span><i class="bi bi-collection"></i> @_taskGenerationResult.ApplicationsProcessed apps processed</span>
+                            </div>
+                            @if (_taskGenerationResult.TasksByType.Count > 0)
+                            {
+                                <div class="result-breakdown">
+                                    @foreach (var kvp in _taskGenerationResult.TasksByType)
+                                    {
+                                        <span class="type-badge">@kvp.Key: @kvp.Value</span>
+                                    }
+                                </div>
+                            }
+                            @if (_taskGenerationResult.Errors.Count > 0)
+                            {
+                                <div class="result-errors">
+                                    <strong>Errors:</strong>
+                                    @foreach (var error in _taskGenerationResult.Errors.Take(5))
+                                    {
+                                        <div class="error-item">@error</div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div class="generation-actions">
+                        <label class="toggle-inline">
+                            <input type="checkbox" @bind="_clearTasksBeforeGenerate" />
+                            <span>Clear existing tasks before generating</span>
+                        </label>
+                        <button class="btn btn-primary" @onclick="GenerateTasksAsync" disabled="@_isGeneratingTasks">
+                            @if (_isGeneratingTasks)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Generating...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-magic"></i>
+                                <span>Generate Tasks</span>
+                            }
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <div class="config-footer-actions">
@@ -1719,6 +1775,11 @@
     private bool _isSavingTaskConfig;
     private string? _taskConfigSaveMessage;
     private bool _taskConfigSaveSuccess;
+
+    // Task Generation state
+    private TaskGenerationResult? _taskGenerationResult;
+    private bool _clearTasksBeforeGenerate;
+    private bool _isGeneratingTasks;
 
     // Audit Log state
     private List<AuditLogEntry> _auditLogEntries = [];
@@ -2598,6 +2659,37 @@
         _taskConfigCriticalEscalation = 0;
         _taskConfigMaxTasks = 10;
         _taskConfigSmartScheduling = true;
+    }
+
+    private async Task GenerateTasksAsync()
+    {
+        _isGeneratingTasks = true;
+        _taskGenerationResult = null;
+        StateHasChanged();
+
+        try
+        {
+            // Optionally clear existing tasks first
+            if (_clearTasksBeforeGenerate)
+            {
+                await DataService.ClearAllTasksAsync();
+            }
+
+            // Generate real tasks based on application data
+            _taskGenerationResult = await TaskGenerationService.GenerateTasksAsync();
+        }
+        catch (Exception ex)
+        {
+            _taskGenerationResult = new TaskGenerationResult
+            {
+                Errors = [$"Failed to generate tasks: {ex.Message}"]
+            };
+        }
+        finally
+        {
+            _isGeneratingTasks = false;
+            StateHasChanged();
+        }
     }
 
     #endregion

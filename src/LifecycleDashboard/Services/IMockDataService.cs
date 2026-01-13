@@ -106,6 +106,11 @@ public interface IMockDataService
     Task DeleteTaskAsync(string taskId);
 
     /// <summary>
+    /// Deletes all tasks (used to clear mock/seeded tasks before generating real ones).
+    /// </summary>
+    Task ClearAllTasksAsync();
+
+    /// <summary>
     /// Updates task status with history tracking.
     /// </summary>
     Task<LifecycleTask> UpdateTaskStatusAsync(string taskId, Models.TaskStatus newStatus, string performedByUserId, string performedByName, string? notes = null);
