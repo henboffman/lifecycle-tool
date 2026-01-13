@@ -620,6 +620,61 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
         var apps = criticalApps.ToList();
         var tasks = overdueTasks.ToList();
 
+        // If no critical issues, return early
+        if (apps.Count == 0 && tasks.Count == 0)
+        {
+            return new ActionPlan
+            {
+                Summary = "No critical issues requiring immediate action. Continue monitoring portfolio health.",
+                Actions = [],
+                EstimatedImpact = "Maintain current health levels"
+            };
+        }
+
+        // Build AI prompt with detailed context
+        var systemPrompt = @"You are an IT portfolio management expert helping prioritize remediation actions.
+Analyze the provided critical applications and overdue tasks to create a prioritized action plan.
+Be specific, actionable, and focus on the highest-impact items first.
+Consider dependencies between actions and group related work where possible.";
+
+        var appDetails = apps.Take(8).Select(app =>
+        {
+            var criticalVulns = app.SecurityFindings.Count(f => !f.IsResolved && f.Severity == SecuritySeverity.Critical);
+            var highVulns = app.SecurityFindings.Count(f => !f.IsResolved && f.Severity == SecuritySeverity.High);
+            var vulnInfo = criticalVulns > 0 || highVulns > 0
+                ? $" ({criticalVulns} critical, {highVulns} high vulns)"
+                : "";
+            var docInfo = !app.Documentation.HasArchitectureDiagram || !app.Documentation.HasSystemDocumentation
+                ? " [Missing docs]"
+                : "";
+            return $"- {app.Name}: Health {app.HealthScore}/100{vulnInfo}{docInfo}";
+        });
+
+        var taskDetails = tasks.Take(5).Select(t =>
+            $"- {t.Title} ({t.ApplicationName}): {t.DaysOverdue} days overdue");
+
+        var prompt = $@"Create a prioritized action plan for these IT portfolio issues:
+
+CRITICAL APPLICATIONS ({apps.Count} total):
+{string.Join("\n", appDetails)}
+
+OVERDUE TASKS ({tasks.Count} total):
+{string.Join("\n", taskDetails)}
+
+Provide:
+1. A 2-3 sentence executive summary of the situation and recommended approach
+2. Top 5 prioritized actions with:
+   - Clear action title
+   - Rationale for priority
+   - Target application(s)
+   - Expected outcome
+3. Overall estimated impact on portfolio health
+
+Be concise and actionable.";
+
+        var aiResponse = await CallAiAsync(prompt, systemPrompt);
+
+        // Generate actions - enhanced with AI insights if available
         var actions = new List<PrioritizedAction>();
         var priority = 1;
 
@@ -628,44 +683,88 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
         {
             var criticalVulns = app.SecurityFindings.Count(f => !f.IsResolved && f.Severity == SecuritySeverity.Critical);
             var highVulns = app.SecurityFindings.Count(f => !f.IsResolved && f.Severity == SecuritySeverity.High);
+            var hasDocGaps = !app.Documentation.HasArchitectureDiagram || !app.Documentation.HasSystemDocumentation;
+
+            // Determine the primary action based on the app's issues
+            string action, rationale, outcome;
+            if (criticalVulns > 0)
+            {
+                action = $"Remediate critical security vulnerabilities in {app.Name}";
+                rationale = $"Contains {criticalVulns} critical and {highVulns} high-severity vulnerabilities. Security issues should be addressed before other improvements.";
+                outcome = $"Reduce security risk exposure and improve health score from {app.HealthScore} to {Math.Min(100, app.HealthScore + 20)}";
+            }
+            else if (highVulns > 0)
+            {
+                action = $"Address high-severity vulnerabilities in {app.Name}";
+                rationale = $"Contains {highVulns} high-severity vulnerabilities that could escalate if left unaddressed.";
+                outcome = $"Prevent security escalation and improve health score to {Math.Min(100, app.HealthScore + 15)}";
+            }
+            else if (hasDocGaps)
+            {
+                action = $"Complete documentation for {app.Name}";
+                rationale = $"Health score of {app.HealthScore} with missing documentation creates operational risk and knowledge gaps.";
+                outcome = "Improve maintainability and reduce onboarding time for new team members";
+            }
+            else
+            {
+                action = $"Conduct health review for {app.Name}";
+                rationale = $"Health score of {app.HealthScore} indicates multiple issues requiring investigation and remediation planning.";
+                outcome = $"Identify root causes and create targeted improvement plan";
+            }
 
             actions.Add(new PrioritizedAction
             {
                 Priority = priority++,
-                Action = $"Remediate security vulnerabilities in {app.Name}",
-                Rationale = criticalVulns > 0
-                    ? $"Contains {criticalVulns} critical and {highVulns} high-severity vulnerabilities requiring immediate attention"
-                    : $"Health score of {app.HealthScore} indicates multiple issues requiring remediation",
+                Action = action,
+                Rationale = rationale,
                 TargetApplications = [app.Name],
-                ExpectedOutcome = $"Improve health score from {app.HealthScore} to {Math.Min(100, app.HealthScore + 15)}"
+                ExpectedOutcome = outcome
             });
         }
 
         // Generate structured actions for overdue tasks
         foreach (var task in tasks.OrderByDescending(t => t.DaysOverdue).Take(3))
         {
+            var urgency = task.DaysOverdue > 30 ? "significantly overdue" : task.DaysOverdue > 14 ? "overdue" : "past due";
             actions.Add(new PrioritizedAction
             {
                 Priority = priority++,
-                Action = task.Title,
-                Rationale = $"Task is {task.DaysOverdue} days overdue and impacts {task.ApplicationName}",
+                Action = $"Complete: {task.Title}",
+                Rationale = $"Task is {task.DaysOverdue} days {urgency}. Delayed tasks can cascade into larger issues and compliance concerns.",
                 TargetApplications = [task.ApplicationName],
-                ExpectedOutcome = "Resolve compliance issue and reduce overdue task count"
+                ExpectedOutcome = "Restore compliance, reduce task backlog, and prevent downstream impacts"
             });
         }
 
-        // Generate clean summary
-        var summary = apps.Count > 0 || tasks.Count > 0
-            ? $"Prioritize addressing {apps.Count} critical application{(apps.Count == 1 ? "" : "s")} and {tasks.Count} overdue task{(tasks.Count == 1 ? "" : "s")} to stabilize portfolio health."
-            : "No critical issues requiring immediate action. Continue monitoring portfolio health.";
+        // Use AI response for summary if available, otherwise generate deterministically
+        string summary;
+        string estimatedImpact;
+
+        if (!string.IsNullOrEmpty(aiResponse))
+        {
+            // Clean and use AI response as summary (first paragraph or first 300 chars)
+            var cleanedResponse = CleanMarkdown(aiResponse);
+            var firstParagraph = cleanedResponse.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? cleanedResponse;
+            summary = firstParagraph.Length > 400 ? firstParagraph[..400] + "..." : firstParagraph;
+
+            // Extract impact estimate from AI or generate based on data
+            var totalVulns = apps.Sum(a => a.SecurityFindings.Count(f => !f.IsResolved && (f.Severity == SecuritySeverity.Critical || f.Severity == SecuritySeverity.High)));
+            estimatedImpact = totalVulns > 0
+                ? $"Addressing these {actions.Count} actions could resolve {totalVulns} critical/high vulnerabilities and improve average portfolio health by {Math.Min(25, apps.Count * 5 + tasks.Count * 2)}%"
+                : $"Completing these {actions.Count} actions is expected to improve portfolio health by {Math.Min(20, apps.Count * 4 + tasks.Count * 2)}%";
+        }
+        else
+        {
+            summary = $"Your portfolio has {apps.Count} critical application{(apps.Count == 1 ? "" : "s")} and {tasks.Count} overdue task{(tasks.Count == 1 ? "" : "s")} requiring attention. " +
+                      "Prioritize security vulnerabilities first, then address overdue compliance tasks to stabilize portfolio health.";
+            estimatedImpact = $"Expected portfolio health improvement: {Math.Min(20, apps.Count * 4 + tasks.Count * 2)}%";
+        }
 
         return new ActionPlan
         {
             Summary = summary,
             Actions = actions,
-            EstimatedImpact = apps.Count > 0 || tasks.Count > 0
-                ? $"Expected portfolio health improvement: {Math.Min(20, apps.Count * 4 + tasks.Count * 2)}%"
-                : "Maintain current health levels"
+            EstimatedImpact = estimatedImpact
         };
     }
 
