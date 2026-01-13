@@ -62,6 +62,9 @@ builder.Services.AddSingleton<IIisDatabaseService, IisDatabaseService>();
 builder.Services.AddSingleton<ISyncStateService, SyncStateService>();
 builder.Services.AddSingleton<IDataSyncOrchestrator, DataSyncOrchestrator>();
 
+// Register task generation service
+builder.Services.AddSingleton<ITaskGenerationService, TaskGenerationService>();
+
 var app = builder.Build();
 
 // Seed database with initial data if empty (development only)

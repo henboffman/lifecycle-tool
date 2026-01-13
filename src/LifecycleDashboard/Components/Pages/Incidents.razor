@@ -1,6 +1,7 @@
 @page "/incidents"
 @using LifecycleDashboard.Services
 @using LifecycleDashboard.Models
+@using LifecycleDashboard.Components.Shared
 @using System.Text.Json
 @inject IMockDataService DataService
 @inject IAiRecommendationService AiService
@@ -223,7 +224,7 @@
                     <div class="ai-results">
                         <div class="ai-summary">
                             <h4>Summary</h4>
-                            <p>@_analysisResult.Summary</p>
+                            <MarkdownContent Content="@_analysisResult.Summary" />
                             <div class="analysis-meta">
                                 <span><i class="bi bi-clock"></i> @_analysisResult.GeneratedAt.LocalDateTime.ToString("g")</span>
                                 <span><i class="bi bi-ticket-detailed"></i> @_analysisResult.IncidentsAnalyzed incidents analyzed</span>
@@ -260,7 +261,7 @@
                                                 <span class="quick-win-title">@quickWin.Title</span>
                                                 <span class="effort-badge @quickWin.Effort.ToLower()">@quickWin.Effort effort</span>
                                             </div>
-                                            <p class="quick-win-desc">@quickWin.Description</p>
+                                            <div class="quick-win-desc"><MarkdownContent Content="@quickWin.Description" /></div>
                                             @if (!string.IsNullOrEmpty(quickWin.EstimatedImpact))
                                             {
                                                 <span class="quick-win-impact">Impact: @quickWin.EstimatedImpact</span>
@@ -288,20 +289,23 @@
                                                 }
                                             </div>
                                             <h5>@rec.Title</h5>
-                                            <p class="rec-description">@rec.Description</p>
+                                            <div class="rec-description"><MarkdownContent Content="@rec.Description" /></div>
                                             @if (!string.IsNullOrEmpty(rec.RootCauseAnalysis))
                                             {
                                                 <div class="rec-root-cause">
-                                                    <strong>Root Cause:</strong> @rec.RootCauseAnalysis
+                                                    <strong>Root Cause:</strong>
+                                                    <MarkdownContent Content="@rec.RootCauseAnalysis" />
                                                 </div>
                                             }
                                             <div class="rec-action">
-                                                <strong>Recommended Action:</strong> @rec.RecommendedAction
+                                                <strong>Recommended Action:</strong>
+                                                <MarkdownContent Content="@rec.RecommendedAction" />
                                             </div>
                                             @if (!string.IsNullOrEmpty(rec.ExpectedImpact))
                                             {
                                                 <div class="rec-impact">
-                                                    <strong>Expected Impact:</strong> @rec.ExpectedImpact
+                                                    <strong>Expected Impact:</strong>
+                                                    <MarkdownContent Content="@rec.ExpectedImpact" />
                                                 </div>
                                             }
                                             @if (rec.RelatedCloseCodes.Count > 0)
