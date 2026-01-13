@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Azure.Identity;
 using LifecycleDashboard.Models;
 
 namespace LifecycleDashboard.Services;
@@ -107,6 +108,8 @@ public class OllamaRecommendationService : IAiRecommendationService
         var deployment = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiDeployment);
         var apiKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiKey);
         var apimKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey);
+        var useAzureAdStr = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiUseAzureAd);
+        var useAzureAd = useAzureAdStr?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(deployment))
         {
@@ -119,7 +122,37 @@ public class OllamaRecommendationService : IAiRecommendationService
             };
         }
 
-        // Check if we have either API key or APIM subscription key
+        // Check authentication based on UseAzureAD setting
+        if (useAzureAd)
+        {
+            var tenantId = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiTenantId);
+            var clientId = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiClientId);
+            var clientSecret = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiClientSecret);
+
+            var hasAzureAdConfig = !string.IsNullOrWhiteSpace(tenantId) &&
+                                   !string.IsNullOrWhiteSpace(clientId) &&
+                                   !string.IsNullOrWhiteSpace(clientSecret);
+
+            if (!hasAzureAdConfig)
+            {
+                return new AiServiceStatus
+                {
+                    IsAvailable = false,
+                    Provider = "Azure OpenAI (Azure AD)",
+                    Model = deployment,
+                    Error = "Azure AD credentials (TenantId, ClientId, ClientSecret) not configured"
+                };
+            }
+
+            return new AiServiceStatus
+            {
+                IsAvailable = true,
+                Provider = "Azure OpenAI (Azure AD)",
+                Model = deployment
+            };
+        }
+
+        // Check if we have API key auth
         var hasAuth = !string.IsNullOrWhiteSpace(apiKey) || !string.IsNullOrWhiteSpace(apimKey);
         if (!hasAuth)
         {
@@ -368,11 +401,59 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
             var apiKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiKey);
             var apiVersion = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApiVersion) ?? DefaultAzureApiVersion;
             var apimKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey);
+            var useAzureAdStr = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiUseAzureAd);
+            var useAzureAd = useAzureAdStr?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+            _logger.LogInformation("Azure OpenAI config - Endpoint: {Endpoint}, Deployment: {Deployment}, ApiVersion: {ApiVersion}, UseAzureAD: {UseAzureAD}",
+                endpoint, deployment, apiVersion, useAzureAd);
 
             if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(deployment))
             {
                 _logger.LogWarning("Azure OpenAI not configured");
                 return null;
+            }
+
+            // Get authentication header
+            string? authHeaderValue = null;
+            bool useApiKeyAuth = true;
+
+            if (useAzureAd)
+            {
+                var tenantId = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiTenantId);
+                var clientId = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiClientId);
+                var clientSecret = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiClientSecret);
+
+                _logger.LogInformation("Azure AD auth - TenantId: {TenantId}, ClientId: {ClientId}, HasSecret: {HasSecret}",
+                    tenantId, clientId, !string.IsNullOrWhiteSpace(clientSecret));
+
+                if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+                {
+                    _logger.LogWarning("Azure AD credentials (TenantId, ClientId, ClientSecret) not configured");
+                    return null;
+                }
+
+                try
+                {
+                    var credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+                    var tokenResult = await credential.GetTokenAsync(new Azure.Core.TokenRequestContext(new[] { "https://cognitiveservices.azure.com/.default" }));
+                    authHeaderValue = tokenResult.Token;
+                    useApiKeyAuth = false;
+                    _logger.LogInformation("Azure AD token acquired successfully, expires: {ExpiresOn}", tokenResult.ExpiresOn);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to acquire Azure AD token");
+                    return null;
+                }
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(apiKey) && string.IsNullOrWhiteSpace(apimKey))
+                {
+                    _logger.LogWarning("Azure OpenAI API key not configured");
+                    return null;
+                }
+                authHeaderValue = apiKey;
             }
 
             var messages = new List<OpenAIChatMessage>();
@@ -388,24 +469,33 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
             };
 
             var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
-            _logger.LogDebug("Calling Azure OpenAI: {Url}", url);
+            _logger.LogInformation("Azure OpenAI request URL: {Url}", url);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
 
-            // Add authentication
-            if (!string.IsNullOrWhiteSpace(apiKey))
+            // Add authentication based on method
+            if (useApiKeyAuth)
             {
-                httpRequest.Headers.Add("api-key", apiKey);
+                if (!string.IsNullOrWhiteSpace(authHeaderValue))
+                {
+                    httpRequest.Headers.Add("api-key", authHeaderValue);
+                }
+            }
+            else
+            {
+                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
             }
 
-            // Add APIM subscription key if configured
+            // Add APIM subscription key if configured (works with both auth methods)
             if (!string.IsNullOrWhiteSpace(apimKey))
             {
                 httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", apimKey);
+                _logger.LogInformation("Added APIM subscription key header");
             }
 
             httpRequest.Headers.Add("User-Agent", "LifecycleDashboard/1.0");
 
+            // Use StringContent without charset suffix to match expected Content-Type
             var jsonContent = JsonSerializer.Serialize(requestBody, SnakeCaseOptions);
             httpRequest.Content = new StringContent(jsonContent, Encoding.UTF8);
             httpRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
@@ -416,7 +506,7 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("Azure OpenAI returned {StatusCode}: {Error}", response.StatusCode, errorContent);
+                _logger.LogError("Azure OpenAI returned {StatusCode}: {Error}", response.StatusCode, errorContent);
                 return null;
             }
 
@@ -425,7 +515,7 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to call Azure OpenAI");
+            _logger.LogError(ex, "Failed to call Azure OpenAI");
             return null;
         }
     }

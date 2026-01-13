@@ -1245,8 +1245,17 @@
                             }
                         </div>
 
-                        <details class="azure-ad-section">
-                            <summary><i class="bi bi-shield-lock"></i> Azure AD Authentication (Optional)</summary>
+                        <div class="form-group use-azure-ad-toggle">
+                            <label class="toggle-label">
+                                <input type="checkbox" @bind="_useAzureAd" />
+                                <span class="toggle-slider-inline"></span>
+                                <span>Use Azure AD Authentication</span>
+                            </label>
+                            <span class="hint">Enable to use service principal authentication instead of API key</span>
+                        </div>
+
+                        <details class="azure-ad-section" open="@_useAzureAd">
+                            <summary><i class="bi bi-shield-lock"></i> Azure AD Credentials</summary>
                             <div class="azure-ad-fields">
                                 <div class="form-group">
                                     <label>Tenant ID</label>
@@ -1711,6 +1720,7 @@
     private string _azureOpenAiTenantId = "";
     private string _azureOpenAiClientId = "";
     private string _azureOpenAiClientSecret = "";
+    private bool _useAzureAd;
     private string _selectedAiProvider = "ollama";
     private bool _hasAzureOpenAiEndpoint;
     private bool _hasAzureOpenAiKey;
@@ -2959,6 +2969,9 @@
         if (!string.IsNullOrEmpty(savedClientId))
             _azureOpenAiClientId = savedClientId;
 
+        var savedUseAzureAd = await SecureStorage.GetSecretAsync(SecretKeys.AzureOpenAiUseAzureAd);
+        _useAzureAd = savedUseAzureAd?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
         // Test AI connection on load
         await TestAiConnection();
     }
@@ -3059,6 +3072,9 @@
             {
                 await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiClientId, _azureOpenAiClientId);
             }
+
+            // Save UseAzureAD setting
+            await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiUseAzureAd, _useAzureAd ? "true" : "false");
 
             // Test the connection after saving
             await TestAiConnection();
