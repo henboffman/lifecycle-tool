@@ -739,15 +739,25 @@ public class DatabaseDataService : IMockDataService
         return EntityToFrameworkVersion(entity);
     }
 
-    public async Task DeleteFrameworkVersionAsync(string id)
+    public async Task<bool> DeleteFrameworkVersionAsync(string id, bool allowSystemDataDeletion = false)
     {
         await using var context = await _contextFactory.CreateDbContextAsync();
         var entity = await context.FrameworkVersions.FirstOrDefaultAsync(f => f.Id == id);
-        if (entity != null)
+        if (entity == null)
         {
-            context.FrameworkVersions.Remove(entity);
-            await context.SaveChangesAsync();
+            return true; // Already deleted
         }
+
+        // Protect system data from non-admin deletion
+        if (entity.IsSystemData && !allowSystemDataDeletion)
+        {
+            _logger.LogWarning("Attempted to delete system framework data {Id} without admin permission", id);
+            return false;
+        }
+
+        context.FrameworkVersions.Remove(entity);
+        await context.SaveChangesAsync();
+        return true;
     }
 
     public async Task<FrameworkEolSummary> GetFrameworkEolSummaryAsync()
@@ -898,7 +908,8 @@ public class DatabaseDataService : IMockDataService
             LatestPatchVersion = entity.LatestPatchVersion,
             Notes = entity.Notes,
             RecommendedUpgradePath = entity.RecommendedUpgradePath,
-            LastUpdated = entity.UpdatedAt ?? entity.CreatedAt
+            LastUpdated = entity.UpdatedAt ?? entity.CreatedAt,
+            IsSystemData = entity.IsSystemData
         };
     }
 
@@ -915,6 +926,7 @@ public class DatabaseDataService : IMockDataService
         entity.LatestPatchVersion = version.LatestPatchVersion;
         entity.Notes = version.Notes;
         entity.RecommendedUpgradePath = version.RecommendedUpgradePath;
+        entity.IsSystemData = version.IsSystemData;
     }
 
     #endregion

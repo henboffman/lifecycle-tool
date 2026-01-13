@@ -169,8 +169,11 @@ public interface IMockDataService
 
     /// <summary>
     /// Deletes a framework version record.
+    /// Returns true if deleted, false if denied (system data and not admin).
     /// </summary>
-    Task DeleteFrameworkVersionAsync(string id);
+    /// <param name="id">Framework version ID</param>
+    /// <param name="allowSystemDataDeletion">Set to true if caller is admin and allowed to delete system data</param>
+    Task<bool> DeleteFrameworkVersionAsync(string id, bool allowSystemDataDeletion = false);
 
     /// <summary>
     /// Gets applications using a specific framework version.

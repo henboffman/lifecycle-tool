@@ -148,7 +148,8 @@ public class EolDataService : IEolDataService
                         Status = version.Status,
                         IsLts = version.IsLts,
                         LatestPatchVersion = version.LatestPatchVersion,
-                        LastUpdated = DateTimeOffset.UtcNow
+                        LastUpdated = DateTimeOffset.UtcNow,
+                        IsSystemData = true  // Mark as system data when updated from endoflife.date
                     };
 
                     await _dataService.UpdateFrameworkVersionAsync(updated);
@@ -214,7 +215,8 @@ public class EolDataService : IEolDataService
             LatestPatchVersion = entry.Latest,
             Notes = null,
             RecommendedUpgradePath = null,
-            LastUpdated = DateTimeOffset.UtcNow
+            LastUpdated = DateTimeOffset.UtcNow,
+            IsSystemData = true  // Data from endoflife.date is system data
         };
     }
 

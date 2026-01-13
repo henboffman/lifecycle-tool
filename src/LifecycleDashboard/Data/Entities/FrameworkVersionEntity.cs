@@ -72,6 +72,12 @@ public class FrameworkVersionEntity
     /// </summary>
     public string? TargetFrameworkMoniker { get; set; }
 
+    /// <summary>
+    /// Whether this is system-seeded data from endoflife.date.
+    /// System data can only be deleted by admin users.
+    /// </summary>
+    public bool IsSystemData { get; set; }
+
     // Audit fields
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }

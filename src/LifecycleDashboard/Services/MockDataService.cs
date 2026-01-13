@@ -1887,10 +1887,22 @@ public class MockDataService : IMockDataService
         return Task.FromResult(newVersion);
     }
 
-    public Task DeleteFrameworkVersionAsync(string id)
+    public Task<bool> DeleteFrameworkVersionAsync(string id, bool allowSystemDataDeletion = false)
     {
+        var framework = FrameworkVersions.FirstOrDefault(f => f.Id == id);
+        if (framework == null)
+        {
+            return Task.FromResult(true); // Already deleted
+        }
+
+        // Protect system data from non-admin deletion
+        if (framework.IsSystemData && !allowSystemDataDeletion)
+        {
+            return Task.FromResult(false);
+        }
+
         FrameworkVersions.RemoveAll(f => f.Id == id);
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<IReadOnlyList<Application>> GetApplicationsByFrameworkAsync(string frameworkVersionId)

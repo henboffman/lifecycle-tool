@@ -536,26 +536,59 @@
         <!-- Delete Confirmation Modal -->
         @if (_showDeleteConfirm)
         {
-            <div class="modal-overlay" @onclick="() => _showDeleteConfirm = false">
+            <div class="modal-overlay" @onclick="CancelDeleteFramework">
                 <div class="modal-content modal-small" @onclick:stopPropagation="true">
                     <h2>Delete Framework Version</h2>
-                    <p>Are you sure you want to delete <strong>@_frameworkToDelete?.DisplayName</strong>?</p>
-                    @{
-                        var deleteAppCount = _frameworkToDelete != null ? GetFrameworkAppCount(_frameworkToDelete.Id) : 0;
-                    }
-                    @if (deleteAppCount > 0)
+                    @if (_deleteSystemDataDenied)
                     {
-                        <p class="warning-text">
-                            <i class="bi bi-exclamation-triangle"></i>
-                            This version is used by @deleteAppCount application(s).
+                        <p class="error-text">
+                            <i class="bi bi-shield-x"></i>
+                            <strong>Deletion denied.</strong> This is system data from endoflife.date and can only be deleted by an administrator.
                         </p>
+                        <div class="modal-actions">
+                            <button class="btn btn-outline" @onclick="CancelDeleteFramework">Close</button>
+                        </div>
                     }
-                    <div class="modal-actions">
-                        <button class="btn btn-outline" @onclick="() => _showDeleteConfirm = false">Cancel</button>
-                        <button class="btn btn-danger" @onclick="ConfirmDeleteFramework">
-                            <i class="bi bi-trash"></i> Delete
-                        </button>
-                    </div>
+                    else
+                    {
+                        <p>Are you sure you want to delete <strong>@_frameworkToDelete?.DisplayName</strong>?</p>
+                        @if (_frameworkToDelete != null && GetFrameworkAppCount(_frameworkToDelete.Id) > 0)
+                        {
+                            <p class="warning-text">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                This version is used by @GetFrameworkAppCount(_frameworkToDelete.Id) application(s).
+                            </p>
+                        }
+                        @if (_frameworkToDelete?.IsSystemData == true)
+                        {
+                            <p class="@(IsAdmin ? "warning-text" : "error-text")">
+                                <i class="bi bi-@(IsAdmin ? "exclamation-triangle" : "shield-lock")"></i>
+                                @if (IsAdmin)
+                                {
+                                    <span>This is system data from endoflife.date. Deleting it may affect EOL tracking accuracy.</span>
+                                }
+                                else
+                                {
+                                    <span>This is system data and requires administrator privileges to delete.</span>
+                                }
+                            </p>
+                        }
+                        <div class="modal-actions">
+                            <button class="btn btn-outline" @onclick="CancelDeleteFramework">Cancel</button>
+                            @if (_frameworkToDelete?.IsSystemData == true && !IsAdmin)
+                            {
+                                <button class="btn btn-danger" disabled title="Administrator privileges required">
+                                    <i class="bi bi-lock"></i> Admin Only
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-danger" @onclick="ConfirmDeleteFramework">
+                                    <i class="bi bi-trash"></i> Delete
+                                </button>
+                            }
+                        </div>
+                    }
                 </div>
             </div>
         }
@@ -1468,6 +1501,10 @@
     private string? _highlightedDataSource;
     private string? _scrollToDataSource;
 
+    // Current user state
+    private User? _currentUser;
+    private bool IsAdmin => _currentUser?.Role is SystemRole.Administrator or SystemRole.SecurityAdministrator;
+
     // Framework Versions state
     private List<FrameworkVersion> _frameworkVersions = [];
     private List<FrameworkVersion> _filteredFrameworkVersions = [];
@@ -1476,6 +1513,7 @@
     private string _frameworkStatusFilter = "";
     private bool _showFrameworkModal;
     private bool _showDeleteConfirm;
+    private bool _deleteSystemDataDenied;
     private FrameworkVersion? _editingFramework;
     private FrameworkVersion? _frameworkToDelete;
     private bool _isRefreshingEol;
@@ -1660,6 +1698,7 @@
             _highlightedDataSource = sourceValue;
         }
 
+        _currentUser = await DataService.GetCurrentUserAsync();
         _users = (await DataService.GetUsersAsync()).ToList();
         _applications = (await DataService.GetApplicationsAsync()).ToList();
         _frameworkVersions = (await DataService.GetAllFrameworkVersionsAsync()).ToList();
@@ -1824,20 +1863,39 @@
     private void DeleteFramework(FrameworkVersion version)
     {
         _frameworkToDelete = version;
+        _deleteSystemDataDenied = false;
         _showDeleteConfirm = true;
+    }
+
+    private void CancelDeleteFramework()
+    {
+        _showDeleteConfirm = false;
+        _frameworkToDelete = null;
+        _deleteSystemDataDenied = false;
     }
 
     private async Task ConfirmDeleteFramework()
     {
         if (_frameworkToDelete != null)
         {
-            await DataService.DeleteFrameworkVersionAsync(_frameworkToDelete.Id);
+            // For system data, only admins can delete
+            var allowSystemDelete = _frameworkToDelete.IsSystemData && IsAdmin;
+            var deleted = await DataService.DeleteFrameworkVersionAsync(_frameworkToDelete.Id, allowSystemDelete);
+
+            if (!deleted)
+            {
+                // Deletion was denied (non-admin trying to delete system data)
+                _deleteSystemDataDenied = true;
+                return;
+            }
+
             _frameworkVersions.RemoveAll(v => v.Id == _frameworkToDelete.Id);
             _frameworkAppCounts.Remove(_frameworkToDelete.Id);
             FilterFrameworks();
         }
         _showDeleteConfirm = false;
         _frameworkToDelete = null;
+        _deleteSystemDataDenied = false;
     }
 
     private async Task RefreshEolData()

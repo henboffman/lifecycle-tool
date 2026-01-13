@@ -72,6 +72,12 @@ public record FrameworkVersion
     public DateTimeOffset LastUpdated { get; init; }
 
     /// <summary>
+    /// Whether this is system-seeded data from endoflife.date.
+    /// System data can only be deleted by admin users.
+    /// </summary>
+    public bool IsSystemData { get; init; }
+
+    /// <summary>
     /// Calculate days until EOL (negative if already EOL)
     /// </summary>
     public int? DaysUntilEol => EndOfLifeDate.HasValue
