@@ -173,6 +173,332 @@ public class OllamaRecommendationService : IAiRecommendationService
         };
     }
 
+    public async Task<AiConnectionTestResult> TestConnectionAsync()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var provider = await _secureStorage.GetSecretAsync(SecretKeys.AiProvider) ?? "ollama";
+
+        if (provider.Equals("azureopenai", StringComparison.OrdinalIgnoreCase))
+        {
+            return await TestAzureOpenAiConnectionAsync(sw);
+        }
+
+        return await TestOllamaConnectionAsync(sw);
+    }
+
+    private async Task<AiConnectionTestResult> TestOllamaConnectionAsync(System.Diagnostics.Stopwatch sw)
+    {
+        var checks = new Dictionary<string, bool>();
+        var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.OllamaEndpoint) ?? DefaultOllamaEndpoint;
+        var model = await _secureStorage.GetSecretAsync(SecretKeys.OllamaModel) ?? DefaultOllamaModel;
+
+        checks["Endpoint configured"] = !string.IsNullOrWhiteSpace(endpoint);
+        checks["Model configured"] = !string.IsNullOrWhiteSpace(model);
+
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(endpoint), Timeout = TimeSpan.FromSeconds(30) };
+
+            // First check if Ollama is reachable
+            var tagsResponse = await client.GetAsync("/api/tags");
+            checks["Ollama reachable"] = tagsResponse.IsSuccessStatusCode;
+
+            if (!tagsResponse.IsSuccessStatusCode)
+            {
+                sw.Stop();
+                return new AiConnectionTestResult
+                {
+                    Success = false,
+                    Provider = "Ollama",
+                    Model = model,
+                    Error = $"Cannot connect to Ollama at {endpoint}",
+                    ErrorDetails = $"Status: {tagsResponse.StatusCode}",
+                    ResponseTime = sw.Elapsed,
+                    ConfigurationChecks = checks
+                };
+            }
+
+            // Now make an actual generation request
+            var testRequest = new OllamaRequest { Model = model, Prompt = "Say 'test successful'", Stream = false };
+            var response = await client.PostAsJsonAsync("/api/generate", testRequest);
+            checks["Model available"] = response.IsSuccessStatusCode;
+
+            sw.Stop();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                return new AiConnectionTestResult
+                {
+                    Success = false,
+                    Provider = "Ollama",
+                    Model = model,
+                    Error = $"Model '{model}' may not be available",
+                    ErrorDetails = errorContent,
+                    ResponseTime = sw.Elapsed,
+                    ConfigurationChecks = checks
+                };
+            }
+
+            return new AiConnectionTestResult
+            {
+                Success = true,
+                Provider = "Ollama",
+                Model = model,
+                ResponseTime = sw.Elapsed,
+                ConfigurationChecks = checks
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new AiConnectionTestResult
+            {
+                Success = false,
+                Provider = "Ollama",
+                Model = model,
+                Error = "Connection failed",
+                ErrorDetails = ex.Message,
+                ResponseTime = sw.Elapsed,
+                ConfigurationChecks = checks
+            };
+        }
+    }
+
+    private async Task<AiConnectionTestResult> TestAzureOpenAiConnectionAsync(System.Diagnostics.Stopwatch sw)
+    {
+        var checks = new Dictionary<string, bool>();
+
+        // Load all configuration
+        var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiEndpoint);
+        var deployment = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiDeployment);
+        var apiKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiKey);
+        var apiVersion = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApiVersion) ?? DefaultAzureApiVersion;
+        var apimKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey);
+        var useAzureAdStr = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiUseAzureAd);
+        var useAzureAd = useAzureAdStr?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+        // Record configuration checks
+        checks["Endpoint configured"] = !string.IsNullOrWhiteSpace(endpoint);
+        checks["Deployment configured"] = !string.IsNullOrWhiteSpace(deployment);
+        checks["API Version configured"] = !string.IsNullOrWhiteSpace(apiVersion);
+        checks["Azure AD enabled"] = useAzureAd;
+        checks["API Key configured"] = !string.IsNullOrWhiteSpace(apiKey);
+        checks["APIM Subscription Key configured"] = !string.IsNullOrWhiteSpace(apimKey);
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(deployment))
+        {
+            sw.Stop();
+            return new AiConnectionTestResult
+            {
+                Success = false,
+                Provider = "Azure OpenAI",
+                Model = deployment,
+                Error = "Missing required configuration",
+                ErrorDetails = "Endpoint and Deployment Name are required",
+                ResponseTime = sw.Elapsed,
+                ConfigurationChecks = checks
+            };
+        }
+
+        // Check Azure AD config if enabled
+        string? authHeaderValue = null;
+        bool useApiKeyAuth = true;
+
+        if (useAzureAd)
+        {
+            var tenantId = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiTenantId);
+            var clientId = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiClientId);
+            var clientSecret = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiClientSecret);
+
+            checks["Tenant ID configured"] = !string.IsNullOrWhiteSpace(tenantId);
+            checks["Client ID configured"] = !string.IsNullOrWhiteSpace(clientId);
+            checks["Client Secret configured"] = !string.IsNullOrWhiteSpace(clientSecret);
+
+            if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+            {
+                sw.Stop();
+                return new AiConnectionTestResult
+                {
+                    Success = false,
+                    Provider = "Azure OpenAI (Azure AD)",
+                    Model = deployment,
+                    Error = "Missing Azure AD credentials",
+                    ErrorDetails = "TenantId, ClientId, and ClientSecret are required when Azure AD is enabled",
+                    ResponseTime = sw.Elapsed,
+                    ConfigurationChecks = checks
+                };
+            }
+
+            try
+            {
+                var credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+                var tokenResult = await credential.GetTokenAsync(new Azure.Core.TokenRequestContext(new[] { "https://cognitiveservices.azure.com/.default" }));
+                authHeaderValue = tokenResult.Token;
+                useApiKeyAuth = false;
+                checks["Azure AD token acquired"] = true;
+                _logger.LogInformation("Test: Azure AD token acquired, expires: {ExpiresOn}", tokenResult.ExpiresOn);
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                checks["Azure AD token acquired"] = false;
+                return new AiConnectionTestResult
+                {
+                    Success = false,
+                    Provider = "Azure OpenAI (Azure AD)",
+                    Model = deployment,
+                    Error = "Failed to acquire Azure AD token",
+                    ErrorDetails = ex.Message,
+                    ResponseTime = sw.Elapsed,
+                    ConfigurationChecks = checks
+                };
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                sw.Stop();
+                return new AiConnectionTestResult
+                {
+                    Success = false,
+                    Provider = "Azure OpenAI",
+                    Model = deployment,
+                    Error = "Missing API Key",
+                    ErrorDetails = "API Key is required when Azure AD is disabled",
+                    ResponseTime = sw.Elapsed,
+                    ConfigurationChecks = checks
+                };
+            }
+            authHeaderValue = apiKey;
+        }
+
+        // Build and send test request
+        try
+        {
+            var messages = new List<OpenAIChatMessage>
+            {
+                new() { Role = "user", Content = "Say 'test successful' in exactly those two words." }
+            };
+
+            var requestBody = new OpenAIChatRequest
+            {
+                Messages = messages,
+                Temperature = 0.1,
+                MaxTokens = 10
+            };
+
+            var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+            _logger.LogInformation("Test: Azure OpenAI URL: {Url}", url);
+
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+
+            // Add authentication
+            if (useApiKeyAuth)
+            {
+                httpRequest.Headers.Add("api-key", authHeaderValue);
+                _logger.LogInformation("Test: Using api-key authentication");
+            }
+            else
+            {
+                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
+                _logger.LogInformation("Test: Using Bearer token authentication");
+            }
+
+            // Add APIM subscription key
+            if (!string.IsNullOrWhiteSpace(apimKey))
+            {
+                httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", apimKey);
+                _logger.LogInformation("Test: Added Ocp-Apim-Subscription-Key header (length: {Length})", apimKey.Length);
+            }
+            else
+            {
+                _logger.LogWarning("Test: APIM Subscription Key is NOT configured - requests to APIM gateway will fail!");
+            }
+
+            httpRequest.Headers.Add("User-Agent", "LifecycleDashboard/1.0");
+
+            var jsonContent = JsonSerializer.Serialize(requestBody, SnakeCaseOptions);
+            httpRequest.Content = new StringContent(jsonContent, Encoding.UTF8);
+            httpRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            var response = await client.SendAsync(httpRequest);
+
+            sw.Stop();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Test: Azure OpenAI returned {StatusCode}: {Error}", response.StatusCode, errorContent);
+
+                string errorMessage;
+                string errorDetails = errorContent;
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    if (errorContent.Contains("subscription key", StringComparison.OrdinalIgnoreCase))
+                    {
+                        errorMessage = "Missing or invalid APIM Subscription Key";
+                        errorDetails = "The Ocp-Apim-Subscription-Key header is required. Please configure the APIM Subscription Key in the settings.";
+                    }
+                    else
+                    {
+                        errorMessage = "Authentication failed";
+                        errorDetails = useAzureAd ? "Azure AD token was rejected" : "API Key was rejected";
+                    }
+                }
+                else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    errorMessage = "Access forbidden";
+                    errorDetails = "Check that your credentials have access to this Azure OpenAI resource";
+                }
+                else
+                {
+                    errorMessage = $"Request failed with status {(int)response.StatusCode}";
+                }
+
+                return new AiConnectionTestResult
+                {
+                    Success = false,
+                    Provider = useAzureAd ? "Azure OpenAI (Azure AD)" : "Azure OpenAI",
+                    Model = deployment,
+                    Error = errorMessage,
+                    ErrorDetails = errorDetails,
+                    ResponseTime = sw.Elapsed,
+                    ConfigurationChecks = checks
+                };
+            }
+
+            checks["API call successful"] = true;
+
+            return new AiConnectionTestResult
+            {
+                Success = true,
+                Provider = useAzureAd ? "Azure OpenAI (Azure AD)" : "Azure OpenAI",
+                Model = deployment,
+                ResponseTime = sw.Elapsed,
+                ConfigurationChecks = checks
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, "Test: Failed to call Azure OpenAI");
+            return new AiConnectionTestResult
+            {
+                Success = false,
+                Provider = useAzureAd ? "Azure OpenAI (Azure AD)" : "Azure OpenAI",
+                Model = deployment,
+                Error = "Connection failed",
+                ErrorDetails = ex.Message,
+                ResponseTime = sw.Elapsed,
+                ConfigurationChecks = checks
+            };
+        }
+    }
+
     public async Task<PortfolioInsights> GeneratePortfolioInsightsAsync(
         IEnumerable<Application> applications,
         IEnumerable<LifecycleTask> tasks)
@@ -404,8 +730,8 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
             var useAzureAdStr = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiUseAzureAd);
             var useAzureAd = useAzureAdStr?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
 
-            _logger.LogInformation("Azure OpenAI config - Endpoint: {Endpoint}, Deployment: {Deployment}, ApiVersion: {ApiVersion}, UseAzureAD: {UseAzureAD}",
-                endpoint, deployment, apiVersion, useAzureAd);
+            _logger.LogInformation("Azure OpenAI config - Endpoint: {Endpoint}, Deployment: {Deployment}, ApiVersion: {ApiVersion}, UseAzureAD: {UseAzureAD}, HasApiKey: {HasApiKey}, HasApimKey: {HasApimKey}",
+                endpoint, deployment, apiVersion, useAzureAd, !string.IsNullOrWhiteSpace(apiKey), !string.IsNullOrWhiteSpace(apimKey));
 
             if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(deployment))
             {
@@ -490,7 +816,11 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
             if (!string.IsNullOrWhiteSpace(apimKey))
             {
                 httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", apimKey);
-                _logger.LogInformation("Added APIM subscription key header");
+                _logger.LogInformation("Added APIM subscription key header (key length: {KeyLength})", apimKey.Length);
+            }
+            else
+            {
+                _logger.LogWarning("APIM subscription key is NOT configured - requests to APIM gateway will fail!");
             }
 
             httpRequest.Headers.Add("User-Agent", "LifecycleDashboard/1.0");

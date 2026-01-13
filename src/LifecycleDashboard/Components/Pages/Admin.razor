@@ -1289,17 +1289,70 @@
                             </div>
                         </details>
 
-                        <button class="btn btn-sm btn-primary" @onclick="SaveAzureOpenAiConfig" disabled="@_aiConfigSaving">
-                            @if (_aiConfigSaving)
-                            {
-                                <span class="spinner-sm"></span>
-                            }
-                            else
-                            {
-                                <i class="bi bi-check-lg"></i>
-                            }
-                            Save
-                        </button>
+                        <div class="button-group">
+                            <button class="btn btn-sm btn-primary" @onclick="SaveAzureOpenAiConfig" disabled="@_aiConfigSaving">
+                                @if (_aiConfigSaving)
+                                {
+                                    <span class="spinner-sm"></span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-check-lg"></i>
+                                }
+                                Save
+                            </button>
+                            <button class="btn btn-sm btn-outline" @onclick="TestAzureOpenAiConnection" disabled="@_aiConfigTesting">
+                                @if (_aiConfigTesting)
+                                {
+                                    <span class="spinner-sm"></span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-plug"></i>
+                                }
+                                Test Connection
+                            </button>
+                        </div>
+
+                        @if (_connectionTestResult != null)
+                        {
+                            <div class="connection-test-result @(_connectionTestResult.Success ? "success" : "error")">
+                                <div class="test-result-header">
+                                    @if (_connectionTestResult.Success)
+                                    {
+                                        <i class="bi bi-check-circle-fill"></i>
+                                        <span>Connection successful!</span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-x-circle-fill"></i>
+                                        <span>@_connectionTestResult.Error</span>
+                                    }
+                                    @if (_connectionTestResult.ResponseTime.HasValue)
+                                    {
+                                        <span class="response-time">@_connectionTestResult.ResponseTime.Value.TotalMilliseconds.ToString("N0")ms</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrEmpty(_connectionTestResult.ErrorDetails))
+                                {
+                                    <div class="test-result-details">
+                                        @_connectionTestResult.ErrorDetails
+                                    </div>
+                                }
+                                <details class="config-checks">
+                                    <summary>Configuration Checks</summary>
+                                    <ul>
+                                        @foreach (var check in _connectionTestResult.ConfigurationChecks)
+                                        {
+                                            <li class="@(check.Value ? "pass" : "fail")">
+                                                <i class="bi @(check.Value ? "bi-check" : "bi-x")"></i>
+                                                @check.Key
+                                            </li>
+                                        }
+                                    </ul>
+                                </details>
+                            </div>
+                        }
                     </div>
                 </div>
             </div>
@@ -1731,6 +1784,8 @@
     private bool _editAzureOpenAiApimKey;
     private bool _editAzureOpenAiClientSecret;
     private bool _aiConfigSaving;
+    private bool _aiConfigTesting;
+    private AiConnectionTestResult? _connectionTestResult;
 
     private enum AdminSection
     {
@@ -3076,12 +3131,40 @@
             // Save UseAzureAD setting
             await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiUseAzureAd, _useAzureAd ? "true" : "false");
 
-            // Test the connection after saving
-            await TestAiConnection();
+            // Clear any previous test results
+            _connectionTestResult = null;
         }
         finally
         {
             _aiConfigSaving = false;
+        }
+    }
+
+    private async Task TestAzureOpenAiConnection()
+    {
+        _aiConfigTesting = true;
+        _connectionTestResult = null;
+        StateHasChanged();
+
+        try
+        {
+            _connectionTestResult = await AiService.TestConnectionAsync();
+        }
+        catch (Exception ex)
+        {
+            _connectionTestResult = new AiConnectionTestResult
+            {
+                Success = false,
+                Provider = "Azure OpenAI",
+                Error = "Test failed",
+                ErrorDetails = ex.Message,
+                ConfigurationChecks = new Dictionary<string, bool>()
+            };
+        }
+        finally
+        {
+            _aiConfigTesting = false;
+            StateHasChanged();
         }
     }
 

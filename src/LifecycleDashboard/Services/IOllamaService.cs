@@ -54,6 +54,23 @@ public interface IAiRecommendationService
     Task<IncidentAnalysisResult> AnalyzePortfolioIncidentsAsync(
         IEnumerable<ServiceNowIncident> incidents,
         IEnumerable<Application> applications);
+
+    /// <summary>
+    /// Tests the connection to the AI provider by making an actual API call.
+    /// Returns detailed information about what succeeded or failed.
+    /// </summary>
+    Task<AiConnectionTestResult> TestConnectionAsync();
+}
+
+public record AiConnectionTestResult
+{
+    public bool Success { get; init; }
+    public string Provider { get; init; } = "";
+    public string? Model { get; init; }
+    public string? Error { get; init; }
+    public string? ErrorDetails { get; init; }
+    public TimeSpan? ResponseTime { get; init; }
+    public Dictionary<string, bool> ConfigurationChecks { get; init; } = new();
 }
 
 public record AiServiceStatus
