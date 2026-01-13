@@ -445,16 +445,18 @@
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
             var content = await reader.ReadToEndAsync();
-            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-            if (lines.Length == 0)
+            // Parse CSV using RFC 4180 compliant parser (handles embedded newlines and escaped quotes)
+            var allRows = ParseCsvContent(content);
+
+            if (allRows.Count == 0)
             {
                 _uploadError = "CSV file is empty.";
                 return;
             }
 
-            // Parse header row
-            _detectedColumns = ParseCsvLine(lines[0]).ToList();
+            // First row is headers
+            _detectedColumns = allRows[0];
 
             if (_detectedColumns.Count == 0)
             {
@@ -464,10 +466,10 @@
 
             // Parse data rows
             _csvRows.Clear();
-            for (int i = 1; i < lines.Length; i++)
+            for (int i = 1; i < allRows.Count; i++)
             {
-                var values = ParseCsvLine(lines[i]);
-                if (values.Count > 0)
+                var values = allRows[i];
+                if (values.Count > 0 && values.Any(v => !string.IsNullOrWhiteSpace(v)))
                 {
                     var row = new Dictionary<string, string>();
                     for (int j = 0; j < Math.Min(_detectedColumns.Count, values.Count); j++)
@@ -497,31 +499,103 @@
         }
     }
 
-    private List<string> ParseCsvLine(string line)
+    /// <summary>
+    /// RFC 4180 compliant CSV parser that handles:
+    /// - Quoted fields with embedded commas
+    /// - Escaped quotes ("" becomes ")
+    /// - Embedded newlines within quoted fields
+    /// </summary>
+    private List<List<string>> ParseCsvContent(string content)
     {
-        var values = new List<string>();
-        var current = new StringBuilder();
+        var rows = new List<List<string>>();
+        var currentRow = new List<string>();
+        var currentField = new StringBuilder();
         bool inQuotes = false;
+        int i = 0;
 
-        foreach (char c in line)
+        while (i < content.Length)
         {
-            if (c == '"')
+            char c = content[i];
+
+            if (inQuotes)
             {
-                inQuotes = !inQuotes;
+                if (c == '"')
+                {
+                    // Check if this is an escaped quote ("") or end of quoted field
+                    if (i + 1 < content.Length && content[i + 1] == '"')
+                    {
+                        // Escaped quote - add single quote and skip next char
+                        currentField.Append('"');
+                        i += 2;
+                        continue;
+                    }
+                    else
+                    {
+                        // End of quoted field
+                        inQuotes = false;
+                        i++;
+                        continue;
+                    }
+                }
+                else
+                {
+                    // Regular character inside quotes (including newlines)
+                    currentField.Append(c);
+                    i++;
+                }
             }
-            else if (c == ',' && !inQuotes)
+            else
             {
-                values.Add(current.ToString().Trim());
-                current.Clear();
-            }
-            else if (c != '\r')
-            {
-                current.Append(c);
+                if (c == '"')
+                {
+                    // Start of quoted field
+                    inQuotes = true;
+                    i++;
+                }
+                else if (c == ',')
+                {
+                    // Field separator
+                    currentRow.Add(currentField.ToString().Trim());
+                    currentField.Clear();
+                    i++;
+                }
+                else if (c == '\r')
+                {
+                    // Skip carriage return
+                    i++;
+                }
+                else if (c == '\n')
+                {
+                    // End of row
+                    currentRow.Add(currentField.ToString().Trim());
+                    currentField.Clear();
+                    if (currentRow.Count > 0)
+                    {
+                        rows.Add(currentRow);
+                    }
+                    currentRow = new List<string>();
+                    i++;
+                }
+                else
+                {
+                    // Regular character
+                    currentField.Append(c);
+                    i++;
+                }
             }
         }
 
-        values.Add(current.ToString().Trim());
-        return values;
+        // Don't forget the last field/row
+        if (currentField.Length > 0 || currentRow.Count > 0)
+        {
+            currentRow.Add(currentField.ToString().Trim());
+            if (currentRow.Count > 0 && currentRow.Any(f => !string.IsNullOrEmpty(f)))
+            {
+                rows.Add(currentRow);
+            }
+        }
+
+        return rows;
     }
 
     private void LoadMappingFromSaved(ServiceNowIncidentColumnMapping mapping)
