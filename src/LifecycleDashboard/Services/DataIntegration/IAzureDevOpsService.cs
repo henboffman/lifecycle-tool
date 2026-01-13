@@ -349,6 +349,12 @@ public record SecurityAlertSummary
     /// <summary>Number of dependency alerts (vulnerable dependencies).</summary>
     public int DependencyAlerts { get; init; }
 
+    /// <summary>Individual security alerts with full details.</summary>
+    public List<SecurityAlert> Alerts { get; init; } = [];
+
+    /// <summary>Exposed secret alerts with full details.</summary>
+    public List<SecurityAlert> SecretAlerts { get; init; } = [];
+
     /// <summary>Total open vulnerabilities.</summary>
     public int TotalOpen => OpenCritical + OpenHigh + OpenMedium + OpenLow;
 
@@ -357,4 +363,61 @@ public record SecurityAlertSummary
 
     /// <summary>Whether there are any critical or high severity open vulnerabilities.</summary>
     public bool HasCriticalIssues => OpenCritical > 0 || OpenHigh > 0 || ExposedSecrets > 0;
+}
+
+/// <summary>
+/// Individual security alert from Azure DevOps Advanced Security.
+/// </summary>
+public record SecurityAlert
+{
+    /// <summary>Alert ID from Azure DevOps.</summary>
+    public int AlertId { get; init; }
+
+    /// <summary>Type of alert (code, dependency, secret).</summary>
+    public string AlertType { get; init; } = "";
+
+    /// <summary>Severity level (critical, high, medium, low).</summary>
+    public string Severity { get; init; } = "";
+
+    /// <summary>Alert state (active, dismissed, fixed).</summary>
+    public string State { get; init; } = "";
+
+    /// <summary>Title or rule name for the alert.</summary>
+    public string Title { get; init; } = "";
+
+    /// <summary>Description of the vulnerability or issue.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>File path where the issue was found.</summary>
+    public string? FilePath { get; init; }
+
+    /// <summary>Line number in the file.</summary>
+    public int? LineNumber { get; init; }
+
+    /// <summary>When the alert was first detected.</summary>
+    public DateTimeOffset? FirstSeenDate { get; init; }
+
+    /// <summary>When the alert was last seen/updated.</summary>
+    public DateTimeOffset? LastSeenDate { get; init; }
+
+    /// <summary>When the alert was fixed (if fixed).</summary>
+    public DateTimeOffset? FixedDate { get; init; }
+
+    /// <summary>Confidence level for secret detection.</summary>
+    public string? ConfidenceLevel { get; init; }
+
+    /// <summary>Rule ID that triggered the alert.</summary>
+    public string? RuleId { get; init; }
+
+    /// <summary>Rule description with more details.</summary>
+    public string? RuleDescription { get; init; }
+
+    /// <summary>URL to view the alert in Azure DevOps.</summary>
+    public string? AlertUrl { get; init; }
+
+    /// <summary>Tool that generated the alert (e.g., CodeQL, dependency scanning).</summary>
+    public string? Tool { get; init; }
+
+    /// <summary>Whether this is an open/active alert.</summary>
+    public bool IsOpen => State?.ToLowerInvariant() is "active" or "open" or "new";
 }

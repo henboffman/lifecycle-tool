@@ -791,14 +791,16 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             // Advanced Security API base URL is different from regular DevOps API
             // Format: https://advsec.dev.azure.com/{organization}/{project}/_apis/alert/repositories/{repositoryName}/alerts
             var advSecBaseUrl = $"https://advsec.dev.azure.com/{Uri.EscapeDataString(organization)}/";
-            var alertsUrl = $"{advSecBaseUrl}{Uri.EscapeDataString(projectName)}/_apis/alert/repositories/{Uri.EscapeDataString(repositoryName)}/alerts?top=2000";
+            var alertsBaseUrl = $"{advSecBaseUrl}{Uri.EscapeDataString(projectName)}/_apis/alert/repositories/{Uri.EscapeDataString(repositoryName)}/alerts";
 
-            _logger.LogDebug("Fetching security alerts from: {Url}", alertsUrl);
+            // Fetch code/dependency alerts (alertType=1 for code scanning)
+            var codeAlertsUrl = $"{alertsBaseUrl}?top=2000&criteria.alertType=1&criteria.states=1";
+            _logger.LogDebug("Fetching code security alerts from: {Url}", codeAlertsUrl);
 
-            var response = await SendRequestAsync(alertsUrl, auth);
+            var codeResponse = await SendRequestAsync(codeAlertsUrl, auth);
 
             // If we get a 404, Advanced Security might not be enabled
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            if (codeResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 _logger.LogDebug("Advanced Security not enabled or no alerts for repository {RepositoryName}", repositoryName);
                 return DataSyncResult<SecurityAlertSummary>.Succeeded(
@@ -810,80 +812,82 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                     });
             }
 
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("Failed to get security alerts for repo {RepositoryName}: {Status} - {Content}",
-                    repositoryName, response.StatusCode, errorContent);
-                return DataSyncResult<SecurityAlertSummary>.Failed(
-                    DataSourceType.AzureDevOps, startTime, $"API returned {response.StatusCode}");
-            }
-
-            var content = await response.Content.ReadAsStringAsync();
-            var jsonDoc = JsonDocument.Parse(content);
-
-            // Parse alerts and count by severity and state
+            var alerts = new List<SecurityAlert>();
+            var secretAlerts = new List<SecurityAlert>();
             int openCritical = 0, openHigh = 0, openMedium = 0, openLow = 0;
             int closedCritical = 0, closedHigh = 0, closedMedium = 0, closedLow = 0;
-            int exposedSecrets = 0, dependencyAlerts = 0;
+            int dependencyAlerts = 0;
             DateTimeOffset? lastScanDate = null;
 
-            if (jsonDoc.RootElement.TryGetProperty("value", out var alertsArray))
+            // Parse code/dependency alerts
+            if (codeResponse.IsSuccessStatusCode)
             {
-                foreach (var alert in alertsArray.EnumerateArray())
+                var content = await codeResponse.Content.ReadAsStringAsync();
+                using var jsonDoc = JsonDocument.Parse(content);
+                ParseAlerts(jsonDoc, alerts, ref openCritical, ref openHigh, ref openMedium, ref openLow,
+                    ref closedCritical, ref closedHigh, ref closedMedium, ref closedLow,
+                    ref dependencyAlerts, ref lastScanDate, organization, projectName, repositoryName);
+            }
+            else
+            {
+                var errorContent = await codeResponse.Content.ReadAsStringAsync();
+                _logger.LogWarning("Failed to get code alerts for repo {RepositoryName}: {Status} - {Content}",
+                    repositoryName, codeResponse.StatusCode, errorContent);
+            }
+
+            // Fetch dependency alerts separately (alertType=3)
+            var depAlertsUrl = $"{alertsBaseUrl}?top=2000&criteria.alertType=3&criteria.states=1";
+            _logger.LogDebug("Fetching dependency alerts from: {Url}", depAlertsUrl);
+
+            var depResponse = await SendRequestAsync(depAlertsUrl, auth);
+            if (depResponse.IsSuccessStatusCode)
+            {
+                var content = await depResponse.Content.ReadAsStringAsync();
+                using var jsonDoc = JsonDocument.Parse(content);
+                ParseAlerts(jsonDoc, alerts, ref openCritical, ref openHigh, ref openMedium, ref openLow,
+                    ref closedCritical, ref closedHigh, ref closedMedium, ref closedLow,
+                    ref dependencyAlerts, ref lastScanDate, organization, projectName, repositoryName);
+            }
+
+            // Fetch secret alerts with all confidence levels (alertType=2)
+            // states=1 means active/open alerts
+            var secretsUrl = $"{alertsBaseUrl}?top=2000&orderBy=severity&criteria.alertType=2&criteria.states=1";
+            _logger.LogDebug("Fetching secret alerts from: {Url}", secretsUrl);
+
+            var secretsResponse = await SendRequestAsync(secretsUrl, auth);
+            int exposedSecrets = 0;
+
+            if (secretsResponse.IsSuccessStatusCode)
+            {
+                var content = await secretsResponse.Content.ReadAsStringAsync();
+                using var jsonDoc = JsonDocument.Parse(content);
+
+                if (jsonDoc.RootElement.TryGetProperty("value", out var alertsArray))
                 {
-                    var state = alert.TryGetProperty("state", out var stateEl) ? stateEl.GetString()?.ToLowerInvariant() : "unknown";
-                    var severity = alert.TryGetProperty("severity", out var sevEl) ? sevEl.GetString()?.ToLowerInvariant() : "unknown";
-                    var alertType = alert.TryGetProperty("alertType", out var typeEl) ? typeEl.GetString()?.ToLowerInvariant() : "unknown";
-
-                    // Track last scan/update date
-                    if (alert.TryGetProperty("lastSeenDate", out var lastSeenEl) &&
-                        DateTimeOffset.TryParse(lastSeenEl.GetString(), out var lastSeen))
+                    foreach (var alert in alertsArray.EnumerateArray())
                     {
-                        if (!lastScanDate.HasValue || lastSeen > lastScanDate)
-                            lastScanDate = lastSeen;
-                    }
-
-                    // Check alert type for secrets and dependencies
-                    if (alertType == "secret" || alertType == "secretscanning")
-                    {
-                        if (state == "active" || state == "open")
-                            exposedSecrets++;
-                        continue;
-                    }
-
-                    if (alertType == "dependency" || alertType == "dependencyscanning")
-                    {
-                        if (state == "active" || state == "open")
-                            dependencyAlerts++;
-                        // Still count as vulnerability by severity
-                    }
-
-                    // Count by severity and state
-                    var isOpen = state == "active" || state == "open" || state == "new";
-                    var isClosed = state == "fixed" || state == "closed" || state == "dismissed";
-
-                    if (isOpen)
-                    {
-                        switch (severity)
+                        var parsedAlert = ParseSingleAlert(alert, organization, projectName, repositoryName);
+                        if (parsedAlert != null)
                         {
-                            case "critical": openCritical++; break;
-                            case "high": openHigh++; break;
-                            case "medium": openMedium++; break;
-                            case "low": openLow++; break;
-                        }
-                    }
-                    else if (isClosed)
-                    {
-                        switch (severity)
-                        {
-                            case "critical": closedCritical++; break;
-                            case "high": closedHigh++; break;
-                            case "medium": closedMedium++; break;
-                            case "low": closedLow++; break;
+                            secretAlerts.Add(parsedAlert);
+                            if (parsedAlert.IsOpen)
+                                exposedSecrets++;
+
+                            // Track last scan date
+                            if (parsedAlert.LastSeenDate.HasValue &&
+                                (!lastScanDate.HasValue || parsedAlert.LastSeenDate > lastScanDate))
+                            {
+                                lastScanDate = parsedAlert.LastSeenDate;
+                            }
                         }
                     }
                 }
+            }
+            else
+            {
+                var errorContent = await secretsResponse.Content.ReadAsStringAsync();
+                _logger.LogWarning("Failed to get secret alerts for repo {RepositoryName}: {Status} - {Content}",
+                    repositoryName, secretsResponse.StatusCode, errorContent);
             }
 
             var summary = new SecurityAlertSummary
@@ -900,11 +904,13 @@ public partial class AzureDevOpsService : IAzureDevOpsService
                 ClosedMedium = closedMedium,
                 ClosedLow = closedLow,
                 ExposedSecrets = exposedSecrets,
-                DependencyAlerts = dependencyAlerts
+                DependencyAlerts = dependencyAlerts,
+                Alerts = alerts,
+                SecretAlerts = secretAlerts
             };
 
-            _logger.LogInformation("Security alerts for repo {RepositoryName}: {OpenTotal} open ({Critical} critical, {High} high), {Secrets} secrets, {Dependencies} dependency alerts",
-                repositoryName, summary.TotalOpen, openCritical, openHigh, exposedSecrets, dependencyAlerts);
+            _logger.LogInformation("Security alerts for repo {RepositoryName}: {AlertCount} code/dep alerts ({Critical} critical, {High} high, {Medium} medium, {Low} low), {SecretCount} secret alerts",
+                repositoryName, alerts.Count, openCritical, openHigh, openMedium, openLow, secretAlerts.Count);
 
             return DataSyncResult<SecurityAlertSummary>.Succeeded(DataSourceType.AzureDevOps, summary);
         }
@@ -912,6 +918,176 @@ public partial class AzureDevOpsService : IAzureDevOpsService
         {
             _logger.LogError(ex, "Error getting security alerts for repository {RepositoryName}", repositoryName);
             return DataSyncResult<SecurityAlertSummary>.Failed(DataSourceType.AzureDevOps, startTime, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Parses alerts from API response and adds to the alerts list while updating counts.
+    /// </summary>
+    private void ParseAlerts(JsonDocument jsonDoc, List<SecurityAlert> alerts,
+        ref int openCritical, ref int openHigh, ref int openMedium, ref int openLow,
+        ref int closedCritical, ref int closedHigh, ref int closedMedium, ref int closedLow,
+        ref int dependencyAlerts, ref DateTimeOffset? lastScanDate,
+        string organization, string projectName, string repositoryName)
+    {
+        if (!jsonDoc.RootElement.TryGetProperty("value", out var alertsArray))
+            return;
+
+        foreach (var alert in alertsArray.EnumerateArray())
+        {
+            var parsedAlert = ParseSingleAlert(alert, organization, projectName, repositoryName);
+            if (parsedAlert == null)
+                continue;
+
+            alerts.Add(parsedAlert);
+
+            // Track last scan date
+            if (parsedAlert.LastSeenDate.HasValue &&
+                (!lastScanDate.HasValue || parsedAlert.LastSeenDate > lastScanDate))
+            {
+                lastScanDate = parsedAlert.LastSeenDate;
+            }
+
+            // Count dependencies
+            if (parsedAlert.AlertType.Equals("dependency", StringComparison.OrdinalIgnoreCase) && parsedAlert.IsOpen)
+            {
+                dependencyAlerts++;
+            }
+
+            // Count by severity and state
+            var severity = parsedAlert.Severity.ToLowerInvariant();
+
+            if (parsedAlert.IsOpen)
+            {
+                switch (severity)
+                {
+                    case "critical": openCritical++; break;
+                    case "high": openHigh++; break;
+                    case "medium": openMedium++; break;
+                    case "low": openLow++; break;
+                }
+            }
+            else
+            {
+                switch (severity)
+                {
+                    case "critical": closedCritical++; break;
+                    case "high": closedHigh++; break;
+                    case "medium": closedMedium++; break;
+                    case "low": closedLow++; break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parses a single alert from the API response into a SecurityAlert object.
+    /// </summary>
+    private SecurityAlert? ParseSingleAlert(JsonElement alert, string organization, string projectName, string repositoryName)
+    {
+        try
+        {
+            var alertId = alert.TryGetProperty("alertId", out var idEl) ? idEl.GetInt32() : 0;
+            var alertType = alert.TryGetProperty("alertType", out var typeEl) ? typeEl.GetString() ?? "" : "";
+            var severity = alert.TryGetProperty("severity", out var sevEl) ? sevEl.GetString() ?? "" : "";
+            var state = alert.TryGetProperty("state", out var stateEl) ? stateEl.GetString() ?? "" : "";
+            var title = alert.TryGetProperty("title", out var titleEl) ? titleEl.GetString() ?? "" : "";
+
+            // Get description from tools array if available
+            string? description = null;
+            string? ruleId = null;
+            string? ruleDescription = null;
+            string? tool = null;
+
+            if (alert.TryGetProperty("tools", out var toolsArray) && toolsArray.GetArrayLength() > 0)
+            {
+                var firstTool = toolsArray[0];
+                tool = firstTool.TryGetProperty("name", out var toolNameEl) ? toolNameEl.GetString() : null;
+
+                if (firstTool.TryGetProperty("rules", out var rulesArray) && rulesArray.GetArrayLength() > 0)
+                {
+                    var firstRule = rulesArray[0];
+                    ruleId = firstRule.TryGetProperty("id", out var ruleIdEl) ? ruleIdEl.GetString() : null;
+                    description = firstRule.TryGetProperty("description", out var descEl) ? descEl.GetString() : null;
+                    ruleDescription = firstRule.TryGetProperty("fullDescription", out var fullDescEl) ? fullDescEl.GetString() : null;
+                }
+            }
+
+            // Get file location
+            string? filePath = null;
+            int? lineNumber = null;
+
+            if (alert.TryGetProperty("physicalLocations", out var locationsArray) && locationsArray.GetArrayLength() > 0)
+            {
+                var firstLocation = locationsArray[0];
+                if (firstLocation.TryGetProperty("filePath", out var filePathEl))
+                {
+                    filePath = filePathEl.GetString();
+                }
+                if (firstLocation.TryGetProperty("region", out var regionEl) &&
+                    regionEl.TryGetProperty("startLine", out var lineEl))
+                {
+                    lineNumber = lineEl.GetInt32();
+                }
+            }
+
+            // Parse dates
+            DateTimeOffset? firstSeenDate = null;
+            DateTimeOffset? lastSeenDate = null;
+            DateTimeOffset? fixedDate = null;
+
+            if (alert.TryGetProperty("firstSeenDate", out var firstSeenEl) &&
+                DateTimeOffset.TryParse(firstSeenEl.GetString(), out var firstSeen))
+            {
+                firstSeenDate = firstSeen;
+            }
+
+            if (alert.TryGetProperty("lastSeenDate", out var lastSeenEl) &&
+                DateTimeOffset.TryParse(lastSeenEl.GetString(), out var lastSeen))
+            {
+                lastSeenDate = lastSeen;
+            }
+
+            if (alert.TryGetProperty("fixedDate", out var fixedEl) &&
+                DateTimeOffset.TryParse(fixedEl.GetString(), out var fixedParsed))
+            {
+                fixedDate = fixedParsed;
+            }
+
+            // Get confidence level for secrets
+            string? confidenceLevel = null;
+            if (alert.TryGetProperty("confidence", out var confEl))
+            {
+                confidenceLevel = confEl.GetString();
+            }
+
+            // Build alert URL
+            var alertUrl = $"https://dev.azure.com/{Uri.EscapeDataString(organization)}/{Uri.EscapeDataString(projectName)}/_git/{Uri.EscapeDataString(repositoryName)}/alerts/{alertId}";
+
+            return new SecurityAlert
+            {
+                AlertId = alertId,
+                AlertType = alertType,
+                Severity = severity,
+                State = state,
+                Title = title,
+                Description = description,
+                FilePath = filePath,
+                LineNumber = lineNumber,
+                FirstSeenDate = firstSeenDate,
+                LastSeenDate = lastSeenDate,
+                FixedDate = fixedDate,
+                ConfidenceLevel = confidenceLevel,
+                RuleId = ruleId,
+                RuleDescription = ruleDescription,
+                AlertUrl = alertUrl,
+                Tool = tool
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse security alert");
+            return null;
         }
     }
 

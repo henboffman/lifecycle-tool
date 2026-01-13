@@ -897,12 +897,15 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                             ClosedMediumVulnerabilities = securityResult.Data.ClosedMedium,
                             ClosedLowVulnerabilities = securityResult.Data.ClosedLow,
                             ExposedSecretsCount = securityResult.Data.ExposedSecrets,
-                            DependencyAlertCount = securityResult.Data.DependencyAlerts
+                            DependencyAlertCount = securityResult.Data.DependencyAlerts,
+                            SecurityAlerts = securityResult.Data.Alerts,
+                            SecretAlerts = securityResult.Data.SecretAlerts
                         };
                         securitySuccess++;
-                        _logger.LogDebug("Security data for {RepoName}: AdvSec={Enabled}, Open={Open}, Closed={Closed}",
+                        _logger.LogDebug("Security data for {RepoName}: AdvSec={Enabled}, {AlertCount} alerts ({Critical} crit, {High} high), {SecretCount} secrets",
                             repo.Name, securityResult.Data.AdvancedSecurityEnabled,
-                            securityResult.Data.TotalOpen, securityResult.Data.TotalClosed);
+                            securityResult.Data.Alerts.Count, securityResult.Data.OpenCritical, securityResult.Data.OpenHigh,
+                            securityResult.Data.SecretAlerts.Count);
                     }
                     else
                     {

@@ -63,6 +63,8 @@ public class SyncedRepositoryEntity
     public string LanguagesJson { get; set; } = "[]";
     public string ContributorsJson { get; set; } = "[]";
     public string PackagesJson { get; set; } = "[]";
+    public string SecurityAlertsJson { get; set; } = "[]";
+    public string SecretAlertsJson { get; set; } = "[]";
 
     // Audit fields
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

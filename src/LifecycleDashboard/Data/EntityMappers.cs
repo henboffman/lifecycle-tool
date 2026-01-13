@@ -2,6 +2,7 @@ using System.Text.Json;
 using LifecycleDashboard.Data.Entities;
 using LifecycleDashboard.Models;
 using LifecycleDashboard.Services;
+using LifecycleDashboard.Services.DataIntegration;
 
 namespace LifecycleDashboard.Data;
 
@@ -489,6 +490,8 @@ public static class EntityMappers
             ClosedLowVulnerabilities = entity.ClosedLowVulnerabilities,
             ExposedSecretsCount = entity.ExposedSecretsCount,
             DependencyAlertCount = entity.DependencyAlertCount,
+            SecurityAlerts = JsonSerializer.Deserialize<List<SecurityAlert>>(entity.SecurityAlertsJson, JsonOptions) ?? [],
+            SecretAlerts = JsonSerializer.Deserialize<List<SecurityAlert>>(entity.SecretAlertsJson, JsonOptions) ?? [],
             LinkedApplicationId = entity.LinkedApplicationId,
             LinkedApplicationName = entity.LinkedApplicationName
         };
@@ -534,6 +537,8 @@ public static class EntityMappers
         entity.ClosedLowVulnerabilities = model.ClosedLowVulnerabilities;
         entity.ExposedSecretsCount = model.ExposedSecretsCount;
         entity.DependencyAlertCount = model.DependencyAlertCount;
+        entity.SecurityAlertsJson = JsonSerializer.Serialize(model.SecurityAlerts, JsonOptions);
+        entity.SecretAlertsJson = JsonSerializer.Serialize(model.SecretAlerts, JsonOptions);
         entity.LinkedApplicationId = model.LinkedApplicationId;
         entity.LinkedApplicationName = model.LinkedApplicationName;
         entity.UpdatedAt = DateTimeOffset.UtcNow;

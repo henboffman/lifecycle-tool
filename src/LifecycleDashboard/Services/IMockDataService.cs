@@ -616,6 +616,12 @@ public record SyncedRepository
     public int ExposedSecretsCount { get; init; }
     public int DependencyAlertCount { get; init; }
 
+    /// <summary>Individual security alerts (code scanning, dependency scanning).</summary>
+    public List<DataIntegration.SecurityAlert> SecurityAlerts { get; init; } = [];
+
+    /// <summary>Exposed secret alerts.</summary>
+    public List<DataIntegration.SecurityAlert> SecretAlerts { get; init; } = [];
+
     /// <summary>Total open vulnerabilities across all severities.</summary>
     public int TotalOpenVulnerabilities => OpenCriticalVulnerabilities + OpenHighVulnerabilities + OpenMediumVulnerabilities + OpenLowVulnerabilities;
 
