@@ -1,6 +1,7 @@
 @page "/recommendations"
 @using LifecycleDashboard.Models
 @using LifecycleDashboard.Services
+@using LifecycleDashboard.Components.Shared
 @inject IMockDataService DataService
 @inject IAiRecommendationService AiService
 @inject NavigationManager Navigation
@@ -250,7 +251,7 @@
                 <!-- Portfolio Summary -->
                 <div class="portfolio-summary-card">
                     <h3>Portfolio Summary</h3>
-                    <p>@_portfolioInsights.Summary</p>
+                    <MarkdownContent Content="@_portfolioInsights.Summary" />
                     <div class="confidence-indicator">
                         <span>Confidence: @_portfolioInsights.ConfidenceScore%</span>
                         <span class="generated-at">Generated @_portfolioInsights.GeneratedAt.LocalDateTime.ToString("MMM d, h:mm tt")</span>
@@ -271,7 +272,7 @@
                                         <span class="insight-severity @insight.Severity.ToLower()">@insight.Severity</span>
                                     </div>
                                     <h5>@insight.Title</h5>
-                                    <p>@insight.Description</p>
+                                    <MarkdownContent Content="@insight.Description" />
                                     @if (insight.AffectedApplications.Count > 0)
                                     {
                                         <div class="affected-apps" title="@string.Join(", ", insight.AffectedApplications)">
@@ -311,7 +312,7 @@
                                     <div class="trend-content">
                                         <span class="trend-metric">@trend.Metric</span>
                                         <span class="trend-timeframe">@trend.Timeframe</span>
-                                        <p>@trend.Reasoning</p>
+                                        <MarkdownContent Content="@trend.Reasoning" />
                                         <span class="trend-confidence">@trend.Confidence% confidence</span>
                                     </div>
                                 </div>
@@ -326,7 +327,7 @@
             {
                 <div class="risk-predictions">
                     <h4><i class="bi bi-exclamation-diamond"></i> At-Risk Applications</h4>
-                    <p class="risk-summary">@_riskPrediction.OverallAssessment</p>
+                    <div class="risk-summary"><MarkdownContent Content="@_riskPrediction.OverallAssessment" /></div>
                     <div class="risk-table">
                         <table>
                             <thead>
@@ -371,7 +372,7 @@
                             </span>
                         }
                     </div>
-                    <p class="action-summary">@_actionPlan.Summary</p>
+                    <div class="action-summary"><MarkdownContent Content="@_actionPlan.Summary" /></div>
                     <div class="action-list">
                         @foreach (var action in _actionPlan.Actions.OrderBy(a => a.Priority))
                         {
@@ -381,7 +382,7 @@
                                 </div>
                                 <div class="action-content">
                                     <h5 class="action-title">@action.Action</h5>
-                                    <p class="action-rationale">@action.Rationale</p>
+                                    <div class="action-rationale"><MarkdownContent Content="@action.Rationale" /></div>
                                     @if (action.TargetApplications.Count > 0)
                                     {
                                         <div class="action-targets">
