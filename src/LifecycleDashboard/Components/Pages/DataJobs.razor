@@ -91,7 +91,7 @@
                                 </div>
                                 <div class="stat">
                                     <span class="stat-label">Records</span>
-                                    <span class="stat-value">@source.RecordCount.ToString("N0")</span>
+                                    <span class="stat-value">@(source.RecordLabel ?? source.RecordCount.ToString("N0"))</span>
                                 </div>
                                 <div class="stat">
                                     <span class="stat-label">Next Run</span>
@@ -385,6 +385,7 @@
         _devModeEnabled = config.DevModeRepoLimit > 0;
 
         InitializeDataSources();
+        await LoadDataSourceStatsAsync();
         await CheckConnectionStatusAsync();
         await LoadJobHistoryAsync();
         CalculateStatistics();
@@ -597,6 +598,100 @@
         };
 
         _allJobs = [];
+    }
+
+    private async Task LoadDataSourceStatsAsync()
+    {
+        try
+        {
+            // Load data source configs for last sync times
+            var configs = await DataService.GetDataSourceConfigsAsync();
+            foreach (var config in configs)
+            {
+                var source = _dataSources.FirstOrDefault(d =>
+                    d.Name == config.Name ||
+                    (config.Type == Services.DataSourceType.AzureDevOps && d.Name == "Azure DevOps") ||
+                    (config.Type == Services.DataSourceType.SharePoint && d.Name == "SharePoint") ||
+                    (config.Type == Services.DataSourceType.ServiceNow && d.Name == "ServiceNow") ||
+                    (config.Type == Services.DataSourceType.IisDatabase && d.Name == "IIS Database"));
+
+                if (source != null && config.LastSyncTime.HasValue)
+                {
+                    source.LastSync = config.LastSyncTime;
+                    if (config.LastSyncRecordCount.HasValue)
+                    {
+                        source.RecordCount = config.LastSyncRecordCount.Value;
+                    }
+                }
+            }
+
+            // For ServiceNow, calculate meaningful stats from imported data
+            var snSource = _dataSources.FirstOrDefault(d => d.Name == "ServiceNow");
+            if (snSource != null)
+            {
+                var importedApps = await DataService.GetImportedServiceNowApplicationsAsync();
+                var incidents = await DataService.GetServiceNowIncidentsAsync();
+
+                // Show count of apps being tracked (or incidents if more relevant)
+                var appCount = importedApps.Count;
+                var incidentCount = incidents.Count;
+
+                // Determine last sync from import timestamps (most recent import)
+                DateTimeOffset? lastAppImport = importedApps.Count > 0
+                    ? importedApps.Max(a => a.ImportedAt)
+                    : null;
+                DateTimeOffset? lastIncidentImport = incidents.Count > 0
+                    ? incidents.Max(i => i.ImportedAt)
+                    : null;
+
+                // Use the most recent import time as LastSync
+                if (lastAppImport.HasValue || lastIncidentImport.HasValue)
+                {
+                    var candidates = new List<DateTimeOffset>();
+                    if (lastAppImport.HasValue) candidates.Add(lastAppImport.Value);
+                    if (lastIncidentImport.HasValue) candidates.Add(lastIncidentImport.Value);
+                    snSource.LastSync = candidates.Max();
+                }
+
+                // Show combined count: apps + incidents
+                snSource.RecordCount = appCount + incidentCount;
+                snSource.RecordLabel = appCount > 0 && incidentCount > 0
+                    ? $"{appCount} apps, {incidentCount} incidents"
+                    : appCount > 0
+                        ? $"{appCount} apps"
+                        : incidentCount > 0
+                            ? $"{incidentCount} incidents"
+                            : "0";
+            }
+
+            // For Azure DevOps, count synced repositories and get last sync time
+            var adoSource = _dataSources.FirstOrDefault(d => d.Name == "Azure DevOps");
+            if (adoSource != null)
+            {
+                var repos = await DataService.GetSyncedRepositoriesAsync();
+                adoSource.RecordCount = repos.Count;
+                if (repos.Count > 0 && adoSource.LastSync == null)
+                {
+                    adoSource.LastSync = repos.Max(r => r.SyncedAt);
+                }
+            }
+
+            // For SharePoint, count discovered folders and get last sync time
+            var spSource = _dataSources.FirstOrDefault(d => d.Name == "SharePoint");
+            if (spSource != null)
+            {
+                var folders = await DataService.GetDiscoveredSharePointFoldersAsync();
+                spSource.RecordCount = folders.Count;
+                if (folders.Count > 0 && spSource.LastSync == null)
+                {
+                    spSource.LastSync = folders.Max(f => f.SyncedAt);
+                }
+            }
+        }
+        catch
+        {
+            // If loading stats fails, just continue with defaults
+        }
     }
 
     private void CalculateStatistics()
@@ -832,6 +927,7 @@
         public DateTimeOffset? LastSync { get; set; }
         public DateTimeOffset? NextRun { get; set; }
         public int RecordCount { get; set; }
+        public string? RecordLabel { get; set; } // Optional custom label (e.g., "X apps, Y incidents")
         public DataIntegration.DataSourceType DataSourceType { get; set; }
     }
 

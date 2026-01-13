@@ -678,7 +678,9 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
         var systemPrompt = @"You are an IT portfolio management expert helping prioritize remediation actions.
 Analyze the provided critical applications and overdue tasks to create a prioritized action plan.
 Be specific, actionable, and focus on the highest-impact items first.
-Consider dependencies between actions and group related work where possible.";
+Consider dependencies between actions and group related work where possible.
+
+IMPORTANT: Respond with valid JSON only, no markdown or other text.";
 
         var appDetails = apps.Take(8).Select(app =>
         {
@@ -704,20 +706,71 @@ CRITICAL APPLICATIONS ({apps.Count} total):
 OVERDUE TASKS ({tasks.Count} total):
 {string.Join("\n", taskDetails)}
 
-Provide:
-1. A 2-3 sentence executive summary of the situation and recommended approach
-2. Top 5 prioritized actions with:
-   - Clear action title
-   - Rationale for priority
-   - Target application(s)
-   - Expected outcome
-3. Overall estimated impact on portfolio health
+Respond with this exact JSON structure:
+{{
+  ""summary"": ""2-3 sentence executive summary of the situation and recommended approach"",
+  ""estimatedImpact"": ""Overall estimated impact on portfolio health"",
+  ""actions"": [
+    {{
+      ""priority"": 1,
+      ""action"": ""Clear, specific action title"",
+      ""rationale"": ""Why this is important and why this priority"",
+      ""targetApplications"": [""AppName1""],
+      ""expectedOutcome"": ""What will improve after this action""
+    }}
+  ]
+}}
 
-Be concise and actionable.";
+Provide 3-5 prioritized actions. Be specific about application names and concrete outcomes.";
 
         var aiResponse = await CallAiAsync(prompt, systemPrompt);
 
-        // Generate actions - enhanced with AI insights if available
+        // Try to parse AI response as JSON
+        if (!string.IsNullOrEmpty(aiResponse))
+        {
+            try
+            {
+                // Extract JSON from response (in case there's extra text)
+                var jsonStart = aiResponse.IndexOf('{');
+                var jsonEnd = aiResponse.LastIndexOf('}');
+                if (jsonStart >= 0 && jsonEnd > jsonStart)
+                {
+                    var jsonStr = aiResponse[jsonStart..(jsonEnd + 1)];
+                    var aiPlan = JsonSerializer.Deserialize<AiActionPlanResponse>(jsonStr, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+
+                    if (aiPlan != null && aiPlan.Actions?.Count > 0)
+                    {
+                        return new ActionPlan
+                        {
+                            Summary = aiPlan.Summary ?? "AI-generated action plan based on portfolio analysis.",
+                            EstimatedImpact = aiPlan.EstimatedImpact ?? $"Addressing {aiPlan.Actions.Count} priority actions",
+                            Actions = aiPlan.Actions.Select((a, idx) => new PrioritizedAction
+                            {
+                                Priority = a.Priority > 0 ? a.Priority : idx + 1,
+                                Action = a.Action ?? "Review and remediate",
+                                Rationale = a.Rationale ?? "Priority action identified by AI analysis",
+                                TargetApplications = a.TargetApplications ?? [],
+                                ExpectedOutcome = a.ExpectedOutcome ?? "Improved application health"
+                            }).ToList()
+                        };
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse AI action plan response as JSON, falling back to deterministic generation");
+            }
+        }
+
+        // Fallback: Generate deterministic actions if AI fails or returns invalid response
+        return GenerateDeterministicActionPlan(apps, tasks);
+    }
+
+    private ActionPlan GenerateDeterministicActionPlan(List<Application> apps, List<LifecycleTask> tasks)
+    {
         var actions = new List<PrioritizedAction>();
         var priority = 1;
 
@@ -728,7 +781,6 @@ Be concise and actionable.";
             var highVulns = app.SecurityFindings.Count(f => !f.IsResolved && f.Severity == SecuritySeverity.High);
             var hasDocGaps = !app.Documentation.HasArchitectureDiagram || !app.Documentation.HasSystemDocumentation;
 
-            // Determine the primary action based on the app's issues
             string action, rationale, outcome;
             if (criticalVulns > 0)
             {
@@ -752,7 +804,7 @@ Be concise and actionable.";
             {
                 action = $"Conduct health review for {app.Name}";
                 rationale = $"Health score of {app.HealthScore} indicates multiple issues requiring investigation and remediation planning.";
-                outcome = $"Identify root causes and create targeted improvement plan";
+                outcome = "Identify root causes and create targeted improvement plan";
             }
 
             actions.Add(new PrioritizedAction
@@ -779,29 +831,9 @@ Be concise and actionable.";
             });
         }
 
-        // Use AI response for summary if available, otherwise generate deterministically
-        string summary;
-        string estimatedImpact;
-
-        if (!string.IsNullOrEmpty(aiResponse))
-        {
-            // Clean and use AI response as summary (first paragraph or first 300 chars)
-            var cleanedResponse = CleanMarkdown(aiResponse);
-            var firstParagraph = cleanedResponse.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? cleanedResponse;
-            summary = firstParagraph.Length > 400 ? firstParagraph[..400] + "..." : firstParagraph;
-
-            // Extract impact estimate from AI or generate based on data
-            var totalVulns = apps.Sum(a => a.SecurityFindings.Count(f => !f.IsResolved && (f.Severity == SecuritySeverity.Critical || f.Severity == SecuritySeverity.High)));
-            estimatedImpact = totalVulns > 0
-                ? $"Addressing these {actions.Count} actions could resolve {totalVulns} critical/high vulnerabilities and improve average portfolio health by {Math.Min(25, apps.Count * 5 + tasks.Count * 2)}%"
-                : $"Completing these {actions.Count} actions is expected to improve portfolio health by {Math.Min(20, apps.Count * 4 + tasks.Count * 2)}%";
-        }
-        else
-        {
-            summary = $"Your portfolio has {apps.Count} critical application{(apps.Count == 1 ? "" : "s")} and {tasks.Count} overdue task{(tasks.Count == 1 ? "" : "s")} requiring attention. " +
+        var summary = $"Your portfolio has {apps.Count} critical application{(apps.Count == 1 ? "" : "s")} and {tasks.Count} overdue task{(tasks.Count == 1 ? "" : "s")} requiring attention. " +
                       "Prioritize security vulnerabilities first, then address overdue compliance tasks to stabilize portfolio health.";
-            estimatedImpact = $"Expected portfolio health improvement: {Math.Min(20, apps.Count * 4 + tasks.Count * 2)}%";
-        }
+        var estimatedImpact = $"Expected portfolio health improvement: {Math.Min(20, apps.Count * 4 + tasks.Count * 2)}%";
 
         return new ActionPlan
         {
@@ -809,6 +841,23 @@ Be concise and actionable.";
             Actions = actions,
             EstimatedImpact = estimatedImpact
         };
+    }
+
+    // Helper class for parsing AI response
+    private class AiActionPlanResponse
+    {
+        public string? Summary { get; set; }
+        public string? EstimatedImpact { get; set; }
+        public List<AiActionItem>? Actions { get; set; }
+    }
+
+    private class AiActionItem
+    {
+        public int Priority { get; set; }
+        public string? Action { get; set; }
+        public string? Rationale { get; set; }
+        public List<string>? TargetApplications { get; set; }
+        public string? ExpectedOutcome { get; set; }
     }
 
     private async Task<string?> CallAiAsync(string prompt, string? systemPrompt = null)
