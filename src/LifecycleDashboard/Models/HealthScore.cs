@@ -93,6 +93,11 @@ public record HealthScoreBreakdown
     /// Details about incident impact.
     /// </summary>
     public IncidentScoreDetails? IncidentDetails { get; init; }
+
+    /// <summary>
+    /// Details about documentation completeness impact.
+    /// </summary>
+    public DocumentationScoreDetails? DocumentationDetails { get; init; }
 }
 
 /// <summary>
@@ -160,6 +165,88 @@ public record IncidentScoreDetails
 
         return recentPenalty + repeatPenalty;
     }
+}
+
+/// <summary>
+/// Details about documentation impact on health score.
+/// </summary>
+public record DocumentationScoreDetails
+{
+    /// <summary>
+    /// Whether the repository has a README.md file.
+    /// </summary>
+    public bool HasReadme { get; init; }
+
+    /// <summary>
+    /// README quality score (0-100 based on content analysis).
+    /// </summary>
+    public int? ReadmeQualityScore { get; init; }
+
+    /// <summary>
+    /// Points awarded/penalized for README status.
+    /// </summary>
+    public int ReadmeAdjustment { get; init; }
+
+    /// <summary>
+    /// Whether architecture diagram documentation exists in SharePoint.
+    /// </summary>
+    public bool HasArchitectureDiagram { get; init; }
+
+    /// <summary>
+    /// Points for architecture diagram.
+    /// </summary>
+    public int ArchitectureAdjustment { get; init; }
+
+    /// <summary>
+    /// Whether system documentation exists in SharePoint.
+    /// </summary>
+    public bool HasSystemDocumentation { get; init; }
+
+    /// <summary>
+    /// Points for system documentation.
+    /// </summary>
+    public int SystemDocsAdjustment { get; init; }
+
+    /// <summary>
+    /// Whether user documentation exists in SharePoint.
+    /// </summary>
+    public bool HasUserDocumentation { get; init; }
+
+    /// <summary>
+    /// Points for user documentation.
+    /// </summary>
+    public int UserDocsAdjustment { get; init; }
+
+    /// <summary>
+    /// Whether support documentation exists in SharePoint.
+    /// </summary>
+    public bool HasSupportDocumentation { get; init; }
+
+    /// <summary>
+    /// Points for support documentation.
+    /// </summary>
+    public int SupportDocsAdjustment { get; init; }
+
+    /// <summary>
+    /// Whether project documents exist in SharePoint.
+    /// </summary>
+    public bool HasProjectDocuments { get; init; }
+
+    /// <summary>
+    /// Points for project documents.
+    /// </summary>
+    public int ProjectDocsAdjustment { get; init; }
+
+    /// <summary>
+    /// Total adjustment before limits are applied.
+    /// </summary>
+    public int RawTotal => ReadmeAdjustment + ArchitectureAdjustment + SystemDocsAdjustment
+                         + UserDocsAdjustment + SupportDocsAdjustment + ProjectDocsAdjustment;
+
+    /// <summary>
+    /// Final adjustment after applying min/max limits.
+    /// </summary>
+    public int FinalAdjustment { get; init; }
 }
 
 /// <summary>

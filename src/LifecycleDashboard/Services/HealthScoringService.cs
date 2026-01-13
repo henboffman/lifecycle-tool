@@ -199,6 +199,81 @@ public class HealthScoringService : IHealthScoringService
         };
     }
 
+    public (int Adjustment, DocumentationScoreDetails Details) CalculateDocumentationAdjustment(
+        DocumentationStatus documentation,
+        bool hasReadme,
+        int? readmeQualityScore,
+        DocumentationScoringWeights? weights = null)
+    {
+        weights ??= new DocumentationScoringWeights();
+
+        // Calculate README adjustment
+        int readmeAdjustment;
+        if (hasReadme)
+        {
+            readmeAdjustment = weights.ReadmePresent;
+            // Add quality bonus if README is high quality (score >= 70)
+            if (readmeQualityScore.HasValue && readmeQualityScore.Value >= 70)
+            {
+                readmeAdjustment += weights.ReadmeQuality;
+            }
+        }
+        else
+        {
+            readmeAdjustment = weights.ReadmeMissing;
+        }
+
+        // Calculate SharePoint documentation adjustments
+        var architectureAdjustment = documentation.HasArchitectureDiagram
+            ? weights.ArchitectureDiagram
+            : weights.ArchitectureMissing;
+
+        var systemDocsAdjustment = documentation.HasSystemDocumentation
+            ? weights.SystemDocumentation
+            : weights.SystemDocsMissing;
+
+        var userDocsAdjustment = documentation.HasUserDocumentation
+            ? weights.UserDocumentation
+            : 0; // No penalty for missing user docs
+
+        var supportDocsAdjustment = documentation.HasSupportDocumentation
+            ? weights.SupportDocumentation
+            : 0; // No penalty for missing support docs
+
+        // For project documents, we don't have a direct flag, but we can use HasUserDocumentation
+        // or consider this as always 0 for now (would need SharePoint folder checking)
+        var projectDocsAdjustment = 0;
+
+        // Calculate total
+        var rawTotal = readmeAdjustment + architectureAdjustment + systemDocsAdjustment
+                     + userDocsAdjustment + supportDocsAdjustment + projectDocsAdjustment;
+
+        // Apply limits
+        var finalAdjustment = rawTotal > 0
+            ? Math.Min(rawTotal, weights.MaxBonus)
+            : Math.Max(rawTotal, weights.MaxPenalty);
+
+        var details = new DocumentationScoreDetails
+        {
+            HasReadme = hasReadme,
+            ReadmeQualityScore = readmeQualityScore,
+            ReadmeAdjustment = readmeAdjustment,
+            HasArchitectureDiagram = documentation.HasArchitectureDiagram,
+            ArchitectureAdjustment = architectureAdjustment,
+            HasSystemDocumentation = documentation.HasSystemDocumentation,
+            SystemDocsAdjustment = systemDocsAdjustment,
+            HasUserDocumentation = documentation.HasUserDocumentation,
+            UserDocsAdjustment = userDocsAdjustment,
+            HasSupportDocumentation = documentation.HasSupportDocumentation,
+            SupportDocsAdjustment = supportDocsAdjustment,
+            HasProjectDocuments = false, // Would need SharePoint integration
+            ProjectDocsAdjustment = projectDocsAdjustment,
+            FinalAdjustment = finalAdjustment
+        };
+
+        return (finalAdjustment, details);
+    }
+
     public int CalculateOverdueTaskPenalty(IEnumerable<LifecycleTask> tasks)
     {
         var overdueTasks = tasks.Where(t => t.IsOverdue).ToList();

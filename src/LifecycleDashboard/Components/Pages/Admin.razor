@@ -217,6 +217,99 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Documentation Weights -->
+                <div class="config-card documentation-weights">
+                    <h3>Documentation Scoring</h3>
+                    <p class="config-desc">Points for documentation completeness</p>
+                    <div class="config-items">
+                        <div class="config-subsection">
+                            <h4>Repository README</h4>
+                            <div class="config-item">
+                                <label>README Present</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.ReadmePresent" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label>Quality Bonus</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.ReadmeQuality" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label>README Missing</label>
+                                <div class="config-value penalty">
+                                    <input type="number" value="@_documentationWeights.ReadmeMissing" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="config-subsection">
+                            <h4>SharePoint Documentation</h4>
+                            <div class="config-item">
+                                <label>Architecture Diagram</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.ArchitectureDiagram" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label>System Documentation</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.SystemDocumentation" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label>User Documentation</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.UserDocumentation" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label>Support Documentation</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.SupportDocumentation" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label>Project Documents</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.ProjectDocuments" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="config-subsection">
+                            <h4>Limits</h4>
+                            <div class="config-item">
+                                <label>Max Bonus</label>
+                                <div class="config-value">
+                                    <input type="number" value="@_documentationWeights.MaxBonus" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label>Max Penalty</label>
+                                <div class="config-value penalty">
+                                    <input type="number" value="@_documentationWeights.MaxPenalty" disabled />
+                                    <span class="unit">pts</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="config-footer">
+                        <button class="btn btn-sm" @onclick='() => OpenHealthConfigModal("documentation")'>
+                            <i class="bi bi-pencil"></i>
+                            Edit Weights
+                        </button>
+                    </div>
+                </div>
             </div>
         </section>
     }
@@ -1696,6 +1789,102 @@
                 </div>
                 <p class="threshold-note">Critical category is automatically 0 to @(_editThresholds.AtRiskMin - 1)</p>
             }
+            else if (_healthConfigType == "documentation")
+            {
+                <div class="doc-weights-modal">
+                    <h4>Repository README</h4>
+                    <div class="form-group">
+                        <label>README Present</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.ReadmePresent" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Quality Bonus (high-quality README)</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.ReadmeQuality" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>README Missing Penalty</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.ReadmeMissing" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+
+                    <h4>SharePoint Documentation</h4>
+                    <div class="form-group">
+                        <label>Architecture Diagram</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.ArchitectureDiagram" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>System Documentation</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.SystemDocumentation" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>User Documentation</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.UserDocumentation" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Support Documentation</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.SupportDocumentation" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Project Documents</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.ProjectDocuments" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+
+                    <h4>Missing Documentation Penalties</h4>
+                    <div class="form-group">
+                        <label>Architecture Missing</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.ArchitectureMissing" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>System Docs Missing</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.SystemDocsMissing" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+
+                    <h4>Limits</h4>
+                    <div class="form-group">
+                        <label>Maximum Bonus</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.MaxBonus" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Maximum Penalty</label>
+                        <div class="input-group">
+                            <input type="number" @bind="_editDocumentationWeights.MaxPenalty" />
+                            <span class="unit">pts</span>
+                        </div>
+                    </div>
+                </div>
+            }
 
             <div class="modal-actions">
                 <button class="btn btn-outline" @onclick="CloseHealthConfigModal">Cancel</button>
@@ -1821,6 +2010,8 @@
     private UsageWeights _editUsageWeights = new();
     private MaintenanceWeights _editMaintenanceWeights = new();
     private CategoryThresholds _editThresholds = new();
+    private DocumentationWeights _documentationWeights = new();
+    private DocumentationWeights _editDocumentationWeights = new();
 
     // AI Configuration state
     private AiServiceStatus? _aiStatus;
@@ -1908,6 +2099,29 @@
         public int HealthyMin { get; set; } = 80;
         public int AttentionMin { get; set; } = 60;
         public int AtRiskMin { get; set; } = 40;
+    }
+
+    private class DocumentationWeights
+    {
+        // Repository README
+        public int ReadmePresent { get; set; } = 5;
+        public int ReadmeQuality { get; set; } = 5; // Bonus for quality README (based on quality score)
+        public int ReadmeMissing { get; set; } = -10;
+
+        // SharePoint Documentation (higher value = more important)
+        public int ArchitectureDiagram { get; set; } = 8;
+        public int SystemDocumentation { get; set; } = 8;
+        public int UserDocumentation { get; set; } = 3;
+        public int SupportDocumentation { get; set; } = 3;
+        public int ProjectDocuments { get; set; } = 2;
+
+        // Penalties for missing docs
+        public int ArchitectureMissing { get; set; } = -8;
+        public int SystemDocsMissing { get; set; } = -8;
+
+        // Maximum total adjustment (prevents extreme scores)
+        public int MaxBonus { get; set; } = 20;
+        public int MaxPenalty { get; set; } = -25;
     }
 
     protected override async Task OnInitializedAsync()
@@ -3011,6 +3225,23 @@
                     AtRiskMin = _thresholds.AtRiskMin
                 };
                 break;
+            case "documentation":
+                _editDocumentationWeights = new DocumentationWeights
+                {
+                    ReadmePresent = _documentationWeights.ReadmePresent,
+                    ReadmeQuality = _documentationWeights.ReadmeQuality,
+                    ReadmeMissing = _documentationWeights.ReadmeMissing,
+                    ArchitectureDiagram = _documentationWeights.ArchitectureDiagram,
+                    SystemDocumentation = _documentationWeights.SystemDocumentation,
+                    UserDocumentation = _documentationWeights.UserDocumentation,
+                    SupportDocumentation = _documentationWeights.SupportDocumentation,
+                    ProjectDocuments = _documentationWeights.ProjectDocuments,
+                    ArchitectureMissing = _documentationWeights.ArchitectureMissing,
+                    SystemDocsMissing = _documentationWeights.SystemDocsMissing,
+                    MaxBonus = _documentationWeights.MaxBonus,
+                    MaxPenalty = _documentationWeights.MaxPenalty
+                };
+                break;
         }
 
         _showHealthConfigModal = true;
@@ -3058,6 +3289,23 @@
                     AtRiskMin = _editThresholds.AtRiskMin
                 };
                 break;
+            case "documentation":
+                _documentationWeights = new DocumentationWeights
+                {
+                    ReadmePresent = _editDocumentationWeights.ReadmePresent,
+                    ReadmeQuality = _editDocumentationWeights.ReadmeQuality,
+                    ReadmeMissing = _editDocumentationWeights.ReadmeMissing,
+                    ArchitectureDiagram = _editDocumentationWeights.ArchitectureDiagram,
+                    SystemDocumentation = _editDocumentationWeights.SystemDocumentation,
+                    UserDocumentation = _editDocumentationWeights.UserDocumentation,
+                    SupportDocumentation = _editDocumentationWeights.SupportDocumentation,
+                    ProjectDocuments = _editDocumentationWeights.ProjectDocuments,
+                    ArchitectureMissing = _editDocumentationWeights.ArchitectureMissing,
+                    SystemDocsMissing = _editDocumentationWeights.SystemDocsMissing,
+                    MaxBonus = _editDocumentationWeights.MaxBonus,
+                    MaxPenalty = _editDocumentationWeights.MaxPenalty
+                };
+                break;
         }
 
         _healthConfigSaved = true;
@@ -3070,6 +3318,7 @@
         "usage" => "Edit Usage Adjustments",
         "maintenance" => "Edit Maintenance Activity Weights",
         "thresholds" => "Edit Category Thresholds",
+        "documentation" => "Edit Documentation Scoring",
         _ => "Edit Configuration"
     };
 

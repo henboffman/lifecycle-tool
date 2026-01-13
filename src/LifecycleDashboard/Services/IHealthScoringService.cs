@@ -3,12 +3,38 @@ using LifecycleDashboard.Models;
 namespace LifecycleDashboard.Services;
 
 /// <summary>
+/// Configurable weights for documentation health scoring.
+/// </summary>
+public record DocumentationScoringWeights
+{
+    // Repository README
+    public int ReadmePresent { get; init; } = 5;
+    public int ReadmeQuality { get; init; } = 5;
+    public int ReadmeMissing { get; init; } = -10;
+
+    // SharePoint Documentation
+    public int ArchitectureDiagram { get; init; } = 8;
+    public int SystemDocumentation { get; init; } = 8;
+    public int UserDocumentation { get; init; } = 3;
+    public int SupportDocumentation { get; init; } = 3;
+    public int ProjectDocuments { get; init; } = 2;
+
+    // Penalties for missing critical docs
+    public int ArchitectureMissing { get; init; } = -8;
+    public int SystemDocsMissing { get; init; } = -8;
+
+    // Limits
+    public int MaxBonus { get; init; } = 20;
+    public int MaxPenalty { get; init; } = -25;
+}
+
+/// <summary>
 /// Service for calculating and managing application health scores.
 /// Implements the scoring algorithm from requirements:
 /// - Security vulnerabilities: Critical -15, High -8, Medium -2, Low -0.5
 /// - Usage: None -20, VeryLow -10, Low -5, Moderate 0, High +5
 /// - Maintenance: Recent +10, Moderate +5, Low 0, Inactive -5, Stale -10
-/// - Documentation: Both +10, One missing -10, Both missing -15
+/// - Documentation: Configurable weights for README, architecture, system docs, etc.
 /// - Overdue tasks: -3 each, -5 if 30+ days overdue
 /// - Incidents: -2 per recent incident (max -20), -3 per repeat pattern (max -15)
 /// </summary>
@@ -45,9 +71,23 @@ public interface IHealthScoringService
     int CalculateMaintenanceAdjustment(DateTimeOffset? lastActivityDate);
 
     /// <summary>
-    /// Calculates documentation adjustment.
+    /// Calculates documentation adjustment using default weights.
     /// </summary>
     int CalculateDocumentationAdjustment(DocumentationStatus documentation);
+
+    /// <summary>
+    /// Calculates documentation adjustment with configurable weights and README info.
+    /// </summary>
+    /// <param name="documentation">SharePoint documentation status.</param>
+    /// <param name="hasReadme">Whether repository has README.md.</param>
+    /// <param name="readmeQualityScore">README quality score (0-100), null if no README.</param>
+    /// <param name="weights">Configurable weights for each documentation type.</param>
+    /// <returns>Tuple of final adjustment and detailed breakdown.</returns>
+    (int Adjustment, DocumentationScoreDetails Details) CalculateDocumentationAdjustment(
+        DocumentationStatus documentation,
+        bool hasReadme,
+        int? readmeQualityScore,
+        DocumentationScoringWeights? weights = null);
 
     /// <summary>
     /// Calculates overdue task penalty.
