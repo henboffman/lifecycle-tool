@@ -421,7 +421,7 @@ public class OllamaRecommendationService : IAiRecommendationService
             var requestBody = new OpenAIChatRequest
             {
                 Messages = messages,
-                Temperature = 0.1,
+                Temperature = 1.0,
                 MaxCompletionTokens = 10
             };
 
@@ -440,6 +440,13 @@ public class OllamaRecommendationService : IAiRecommendationService
             {
                 httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
                 _logger.LogInformation("Test: Using Bearer token authentication");
+            }
+
+            // Always add api-key header if we have an API key (required by some Azure configurations)
+            if (!string.IsNullOrWhiteSpace(apiKey) && !useApiKeyAuth)
+            {
+                httpRequest.Headers.Add("api-key", apiKey);
+                _logger.LogInformation("Test: Added api-key header alongside Bearer auth");
             }
 
             // Add APIM subscription key
@@ -926,7 +933,7 @@ Be concise and actionable.";
             var requestBody = new OpenAIChatRequest
             {
                 Messages = messages,
-                Temperature = 0.7,
+                Temperature = 1.0,
                 MaxCompletionTokens = 2000
             };
 
@@ -946,6 +953,12 @@ Be concise and actionable.";
             else
             {
                 httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
+            }
+
+            // Always add api-key header if we have an API key (required by some Azure configurations)
+            if (!string.IsNullOrWhiteSpace(apiKey) && !useApiKeyAuth)
+            {
+                httpRequest.Headers.Add("api-key", apiKey);
             }
 
             // Add APIM subscription key if configured (works with both auth methods)
@@ -1334,7 +1347,7 @@ Be concise and focus on actionable insights.";
         public List<OpenAIChatMessage> Messages { get; set; } = [];
 
         [JsonPropertyName("temperature")]
-        public double Temperature { get; set; } = 0.7;
+        public double Temperature { get; set; } = 1.0;
 
         [JsonPropertyName("max_completion_tokens")]
         public int MaxCompletionTokens { get; set; } = 2000;
