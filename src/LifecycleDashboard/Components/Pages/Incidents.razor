@@ -1,7 +1,9 @@
 @page "/incidents"
 @using LifecycleDashboard.Services
+@using LifecycleDashboard.Models
 @using System.Text.Json
 @inject IMockDataService DataService
+@inject IAiRecommendationService AiService
 @inject NavigationManager Navigation
 
 <PageTitle>Incidents - Lifecycle Dashboard</PageTitle>
@@ -168,6 +170,172 @@
                         }
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- AI Analysis Section -->
+        <section class="ai-analysis-section">
+            <div class="ai-analysis-card">
+                <div class="ai-header">
+                    <div class="ai-title">
+                        <i class="bi bi-robot"></i>
+                        <h3>AI Incident Analysis</h3>
+                    </div>
+                    <div class="ai-status">
+                        @if (_aiStatus != null)
+                        {
+                            @if (_aiStatus.IsAvailable)
+                            {
+                                <span class="status-badge available">
+                                    <i class="bi bi-check-circle"></i> @_aiStatus.Provider: @_aiStatus.Model
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="status-badge unavailable" title="@_aiStatus.Error">
+                                    <i class="bi bi-x-circle"></i> AI Unavailable
+                                </span>
+                            }
+                        }
+                    </div>
+                </div>
+
+                @if (_analysisResult == null)
+                {
+                    <div class="ai-empty">
+                        <p>Use AI to analyze incident patterns, identify root causes, and get actionable recommendations.</p>
+                        <button class="btn btn-primary" @onclick="RunAiAnalysis" disabled="@(_analyzing || _aiStatus?.IsAvailable != true)">
+                            @if (_analyzing)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Analyzing...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-magic"></i>
+                                <span>Analyze All Incidents</span>
+                            }
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="ai-results">
+                        <div class="ai-summary">
+                            <h4>Summary</h4>
+                            <p>@_analysisResult.Summary</p>
+                            <div class="analysis-meta">
+                                <span><i class="bi bi-clock"></i> @_analysisResult.GeneratedAt.LocalDateTime.ToString("g")</span>
+                                <span><i class="bi bi-ticket-detailed"></i> @_analysisResult.IncidentsAnalyzed incidents analyzed</span>
+                                @if (_analysisResult.ConfidenceScore > 0)
+                                {
+                                    <span><i class="bi bi-speedometer2"></i> @_analysisResult.ConfidenceScore% confidence</span>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_analysisResult.CommonThemes.Count > 0)
+                        {
+                            <div class="ai-themes">
+                                <h4>Common Themes</h4>
+                                <div class="theme-tags">
+                                    @foreach (var theme in _analysisResult.CommonThemes)
+                                    {
+                                        <span class="theme-tag">@theme</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        @if (_analysisResult.QuickWins.Count > 0)
+                        {
+                            <div class="ai-quick-wins">
+                                <h4>Quick Wins</h4>
+                                <div class="quick-wins-list">
+                                    @foreach (var quickWin in _analysisResult.QuickWins)
+                                    {
+                                        <div class="quick-win-item">
+                                            <div class="quick-win-header">
+                                                <i class="bi bi-lightning"></i>
+                                                <span class="quick-win-title">@quickWin.Title</span>
+                                                <span class="effort-badge @quickWin.Effort.ToLower()">@quickWin.Effort effort</span>
+                                            </div>
+                                            <p class="quick-win-desc">@quickWin.Description</p>
+                                            @if (!string.IsNullOrEmpty(quickWin.EstimatedImpact))
+                                            {
+                                                <span class="quick-win-impact">Impact: @quickWin.EstimatedImpact</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        @if (_analysisResult.Recommendations.Count > 0)
+                        {
+                            <div class="ai-recommendations">
+                                <h4>Recommendations (@_analysisResult.Recommendations.Count)</h4>
+                                <div class="recommendations-list">
+                                    @foreach (var rec in _analysisResult.Recommendations.OrderBy(r => r.Priority).Take(_showAllRecommendations ? 100 : 5))
+                                    {
+                                        <div class="recommendation-card priority-@rec.Priority">
+                                            <div class="rec-header">
+                                                <span class="priority-badge">P@rec.Priority</span>
+                                                <span class="rec-type">@FormatRecommendationType(rec.Type)</span>
+                                                @if (rec.IncidentCount > 0)
+                                                {
+                                                    <span class="rec-count">@rec.IncidentCount incidents</span>
+                                                }
+                                            </div>
+                                            <h5>@rec.Title</h5>
+                                            <p class="rec-description">@rec.Description</p>
+                                            @if (!string.IsNullOrEmpty(rec.RootCauseAnalysis))
+                                            {
+                                                <div class="rec-root-cause">
+                                                    <strong>Root Cause:</strong> @rec.RootCauseAnalysis
+                                                </div>
+                                            }
+                                            <div class="rec-action">
+                                                <strong>Recommended Action:</strong> @rec.RecommendedAction
+                                            </div>
+                                            @if (!string.IsNullOrEmpty(rec.ExpectedImpact))
+                                            {
+                                                <div class="rec-impact">
+                                                    <strong>Expected Impact:</strong> @rec.ExpectedImpact
+                                                </div>
+                                            }
+                                            @if (rec.RelatedCloseCodes.Count > 0)
+                                            {
+                                                <div class="rec-close-codes">
+                                                    @foreach (var closeCode in rec.RelatedCloseCodes.Take(3))
+                                                    {
+                                                        <span class="code-tag">@closeCode</span>
+                                                    }
+                                                    @if (rec.RelatedCloseCodes.Count > 3)
+                                                    {
+                                                        <span class="code-tag more">+@(rec.RelatedCloseCodes.Count - 3)</span>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                @if (_analysisResult.Recommendations.Count > 5 && !_showAllRecommendations)
+                                {
+                                    <button class="btn btn-outline btn-sm show-more" @onclick="() => _showAllRecommendations = true">
+                                        Show all @_analysisResult.Recommendations.Count recommendations
+                                    </button>
+                                }
+                            </div>
+                        }
+
+                        <div class="ai-actions">
+                            <button class="btn btn-outline btn-sm" @onclick="RunAiAnalysis" disabled="@_analyzing">
+                                <i class="bi bi-arrow-clockwise"></i> Re-analyze
+                            </button>
+                        </div>
+                    </div>
+                }
             </div>
         </section>
 
@@ -477,6 +645,12 @@
     private bool _showDemoData;
     private bool _autoLinking;
 
+    // AI Analysis
+    private AiServiceStatus? _aiStatus;
+    private IncidentAnalysisResult? _analysisResult;
+    private bool _analyzing;
+    private bool _showAllRecommendations;
+
     // Filters
     private string _searchTerm = "";
     private string _filterLinkStatus = "";
@@ -497,7 +671,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Load AI status in parallel with data
+        var aiStatusTask = AiService.GetServiceStatusAsync();
         await LoadData();
+        _aiStatus = await aiStatusTask;
     }
 
     private async Task LoadData()
@@ -727,6 +904,50 @@
             ConfigItemLinkStatus.MissingConfigItem => "status-missing",
             ConfigItemLinkStatus.NoMatchingApplication => "status-no-match",
             _ => ""
+        };
+    }
+
+    private async Task RunAiAnalysis()
+    {
+        if (_analyzing || _incidents.Count == 0) return;
+
+        _analyzing = true;
+        _showAllRecommendations = false;
+        StateHasChanged();
+
+        try
+        {
+            _analysisResult = await AiService.AnalyzePortfolioIncidentsAsync(_incidents, _applications);
+        }
+        catch (Exception ex)
+        {
+            // Create a result with the error
+            _analysisResult = new IncidentAnalysisResult
+            {
+                Summary = $"Analysis failed: {ex.Message}",
+                IncidentsAnalyzed = _incidents.Count,
+                ConfidenceScore = 0
+            };
+        }
+        finally
+        {
+            _analyzing = false;
+        }
+    }
+
+    private static string FormatRecommendationType(IncidentRecommendationType type)
+    {
+        return type switch
+        {
+            IncidentRecommendationType.RepeatPattern => "Repeat Pattern",
+            IncidentRecommendationType.HighVolume => "High Volume",
+            IncidentRecommendationType.ClosureAnalysis => "Closure Analysis",
+            IncidentRecommendationType.WorkNotePattern => "Work Notes",
+            IncidentRecommendationType.GeneralImprovement => "Improvement",
+            IncidentRecommendationType.ProcessImprovement => "Process",
+            IncidentRecommendationType.TrainingNeed => "Training",
+            IncidentRecommendationType.TechnicalDebt => "Tech Debt",
+            _ => type.ToString()
         };
     }
 }

@@ -40,6 +40,20 @@ public interface IAiRecommendationService
     Task<ActionPlan> GenerateActionPlanAsync(
         IEnumerable<Application> criticalApps,
         IEnumerable<LifecycleTask> overdueTasks);
+
+    /// <summary>
+    /// Analyzes incidents for an application to identify patterns, root causes, and recommendations.
+    /// </summary>
+    Task<IncidentAnalysisResult> AnalyzeIncidentsAsync(
+        Application application,
+        IEnumerable<ServiceNowIncident> incidents);
+
+    /// <summary>
+    /// Analyzes all incidents across the portfolio to identify common patterns and quick wins.
+    /// </summary>
+    Task<IncidentAnalysisResult> AnalyzePortfolioIncidentsAsync(
+        IEnumerable<ServiceNowIncident> incidents,
+        IEnumerable<Application> applications);
 }
 
 public record AiServiceStatus

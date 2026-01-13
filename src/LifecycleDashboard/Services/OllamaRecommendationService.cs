@@ -1,4 +1,6 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LifecycleDashboard.Models;
@@ -6,8 +8,8 @@ using LifecycleDashboard.Models;
 namespace LifecycleDashboard.Services;
 
 /// <summary>
-/// AI recommendation service using local Ollama instance.
-/// Provides portfolio analysis, pattern detection, and actionable recommendations.
+/// AI recommendation service supporting both local Ollama and Azure OpenAI.
+/// Provides portfolio analysis, pattern detection, incident analysis, and actionable recommendations.
 /// </summary>
 public class OllamaRecommendationService : IAiRecommendationService
 {
@@ -15,8 +17,23 @@ public class OllamaRecommendationService : IAiRecommendationService
     private readonly ISecureStorageService _secureStorage;
     private readonly ILogger<OllamaRecommendationService> _logger;
 
-    private const string DefaultEndpoint = "http://localhost:11434";
-    private const string DefaultModel = "llama3.2";
+    private const string DefaultOllamaEndpoint = "http://localhost:11434";
+    private const string DefaultOllamaModel = "llama3.2";
+    private const string DefaultAzureApiVersion = "2024-02-01";
+
+    private static readonly JsonSerializerOptions SnakeCaseOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    private static readonly JsonSerializerOptions CamelCaseOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     public OllamaRecommendationService(
         HttpClient httpClient,
@@ -30,15 +47,27 @@ public class OllamaRecommendationService : IAiRecommendationService
 
     public async Task<AiServiceStatus> GetServiceStatusAsync()
     {
-        var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.OllamaEndpoint) ?? DefaultEndpoint;
-        var model = await _secureStorage.GetSecretAsync(SecretKeys.OllamaModel) ?? DefaultModel;
+        var provider = await _secureStorage.GetSecretAsync(SecretKeys.AiProvider) ?? "ollama";
+
+        if (provider.Equals("azureopenai", StringComparison.OrdinalIgnoreCase))
+        {
+            return await GetAzureOpenAiStatusAsync();
+        }
+
+        return await GetOllamaStatusAsync();
+    }
+
+    private async Task<AiServiceStatus> GetOllamaStatusAsync()
+    {
+        var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.OllamaEndpoint) ?? DefaultOllamaEndpoint;
+        var model = await _secureStorage.GetSecretAsync(SecretKeys.OllamaModel) ?? DefaultOllamaModel;
 
         try
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            _httpClient.BaseAddress = new Uri(endpoint);
+            using var client = new HttpClient { BaseAddress = new Uri(endpoint) };
 
-            var response = await _httpClient.GetAsync("/api/tags");
+            var response = await client.GetAsync("/api/tags");
             sw.Stop();
 
             if (response.IsSuccessStatusCode)
@@ -72,6 +101,45 @@ public class OllamaRecommendationService : IAiRecommendationService
         }
     }
 
+    private async Task<AiServiceStatus> GetAzureOpenAiStatusAsync()
+    {
+        var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiEndpoint);
+        var deployment = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiDeployment);
+        var apiKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiKey);
+        var apimKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey);
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(deployment))
+        {
+            return new AiServiceStatus
+            {
+                IsAvailable = false,
+                Provider = "Azure OpenAI",
+                Model = deployment ?? "Not configured",
+                Error = "Azure OpenAI endpoint or deployment not configured"
+            };
+        }
+
+        // Check if we have either API key or APIM subscription key
+        var hasAuth = !string.IsNullOrWhiteSpace(apiKey) || !string.IsNullOrWhiteSpace(apimKey);
+        if (!hasAuth)
+        {
+            return new AiServiceStatus
+            {
+                IsAvailable = false,
+                Provider = "Azure OpenAI",
+                Model = deployment,
+                Error = "Azure OpenAI API key or APIM subscription key not configured"
+            };
+        }
+
+        return new AiServiceStatus
+        {
+            IsAvailable = true,
+            Provider = "Azure OpenAI",
+            Model = deployment
+        };
+    }
+
     public async Task<PortfolioInsights> GeneratePortfolioInsightsAsync(
         IEnumerable<Application> applications,
         IEnumerable<LifecycleTask> tasks)
@@ -80,7 +148,7 @@ public class OllamaRecommendationService : IAiRecommendationService
         var taskList = tasks.ToList();
 
         var prompt = BuildPortfolioPrompt(appList, taskList);
-        var response = await CallOllamaAsync(prompt);
+        var response = await CallAiAsync(prompt);
 
         if (string.IsNullOrEmpty(response))
         {
@@ -112,7 +180,7 @@ Provide a brief analysis with:
 
 Be concise and specific.";
 
-        var response = await CallOllamaAsync(prompt);
+        var response = await CallAiAsync(prompt);
 
         // Parse or generate fallback
         return new ApplicationAnalysis
@@ -142,7 +210,7 @@ Identify:
 
 Focus on actionable patterns where fixing one root cause helps multiple apps.";
 
-        var response = await CallOllamaAsync(prompt);
+        var response = await CallAiAsync(prompt);
 
         return new PatternAnalysis
         {
@@ -177,7 +245,7 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
 
         var prompt = $@"Given {atRisk.Count} applications predicted to decline in health, provide a 2-sentence overall risk assessment for the portfolio.";
 
-        var response = await CallOllamaAsync(prompt);
+        var response = await CallAiAsync(prompt);
 
         return new RiskPrediction
         {
@@ -242,22 +310,36 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
         };
     }
 
-    private async Task<string?> CallOllamaAsync(string prompt)
+    private async Task<string?> CallAiAsync(string prompt, string? systemPrompt = null)
+    {
+        var provider = await _secureStorage.GetSecretAsync(SecretKeys.AiProvider) ?? "ollama";
+
+        if (provider.Equals("azureopenai", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CallAzureOpenAiAsync(prompt, systemPrompt);
+        }
+
+        return await CallOllamaAsync(prompt, systemPrompt);
+    }
+
+    private async Task<string?> CallOllamaAsync(string prompt, string? systemPrompt = null)
     {
         try
         {
-            var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.OllamaEndpoint) ?? DefaultEndpoint;
-            var model = await _secureStorage.GetSecretAsync(SecretKeys.OllamaModel) ?? DefaultModel;
+            var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.OllamaEndpoint) ?? DefaultOllamaEndpoint;
+            var model = await _secureStorage.GetSecretAsync(SecretKeys.OllamaModel) ?? DefaultOllamaModel;
+
+            var fullPrompt = string.IsNullOrEmpty(systemPrompt) ? prompt : $"{systemPrompt}\n\n{prompt}";
 
             var request = new OllamaRequest
             {
                 Model = model,
-                Prompt = prompt,
+                Prompt = fullPrompt,
                 Stream = false
             };
 
             using var client = new HttpClient { BaseAddress = new Uri(endpoint) };
-            client.Timeout = TimeSpan.FromSeconds(60);
+            client.Timeout = TimeSpan.FromSeconds(90);
 
             var response = await client.PostAsJsonAsync("/api/generate", request);
 
@@ -273,6 +355,77 @@ Focus on actionable patterns where fixing one root cause helps multiple apps.";
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to call Ollama");
+            return null;
+        }
+    }
+
+    private async Task<string?> CallAzureOpenAiAsync(string prompt, string? systemPrompt = null)
+    {
+        try
+        {
+            var endpoint = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiEndpoint);
+            var deployment = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiDeployment);
+            var apiKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiKey);
+            var apiVersion = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApiVersion) ?? DefaultAzureApiVersion;
+            var apimKey = await _secureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey);
+
+            if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(deployment))
+            {
+                _logger.LogWarning("Azure OpenAI not configured");
+                return null;
+            }
+
+            var messages = new List<OpenAIChatMessage>();
+            if (!string.IsNullOrWhiteSpace(systemPrompt))
+                messages.Add(new OpenAIChatMessage { Role = "system", Content = systemPrompt });
+            messages.Add(new OpenAIChatMessage { Role = "user", Content = prompt });
+
+            var requestBody = new OpenAIChatRequest
+            {
+                Messages = messages,
+                Temperature = 0.7,
+                MaxTokens = 2000
+            };
+
+            var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+            _logger.LogDebug("Calling Azure OpenAI: {Url}", url);
+
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+
+            // Add authentication
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                httpRequest.Headers.Add("api-key", apiKey);
+            }
+
+            // Add APIM subscription key if configured
+            if (!string.IsNullOrWhiteSpace(apimKey))
+            {
+                httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", apimKey);
+            }
+
+            httpRequest.Headers.Add("User-Agent", "LifecycleDashboard/1.0");
+
+            var jsonContent = JsonSerializer.Serialize(requestBody, SnakeCaseOptions);
+            httpRequest.Content = new StringContent(jsonContent, Encoding.UTF8);
+            httpRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+            var response = await client.SendAsync(httpRequest);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Azure OpenAI returned {StatusCode}: {Error}", response.StatusCode, errorContent);
+                return null;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<OpenAIChatResponse>(CamelCaseOptions);
+            return result?.Choices.FirstOrDefault()?.Message.Content;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to call Azure OpenAI");
             return null;
         }
     }
@@ -617,4 +770,440 @@ Be concise and focus on actionable insights.";
         [JsonPropertyName("response")]
         public string? Response { get; set; }
     }
+
+    // OpenAI-compatible request/response classes for Azure OpenAI
+    private class OpenAIChatRequest
+    {
+        [JsonPropertyName("messages")]
+        public List<OpenAIChatMessage> Messages { get; set; } = [];
+
+        [JsonPropertyName("temperature")]
+        public double Temperature { get; set; } = 0.7;
+
+        [JsonPropertyName("max_tokens")]
+        public int MaxTokens { get; set; } = 2000;
+    }
+
+    private class OpenAIChatMessage
+    {
+        [JsonPropertyName("role")]
+        public string Role { get; set; } = "";
+
+        [JsonPropertyName("content")]
+        public string Content { get; set; } = "";
+    }
+
+    private class OpenAIChatResponse
+    {
+        [JsonPropertyName("choices")]
+        public List<OpenAIChatChoice> Choices { get; set; } = [];
+    }
+
+    private class OpenAIChatChoice
+    {
+        [JsonPropertyName("message")]
+        public OpenAIChatMessage Message { get; set; } = new();
+    }
+
+    #region Incident Analysis
+
+    public async Task<IncidentAnalysisResult> AnalyzeIncidentsAsync(
+        Application application,
+        IEnumerable<ServiceNowIncident> incidents)
+    {
+        var incidentList = incidents.ToList();
+
+        if (incidentList.Count == 0)
+        {
+            return new IncidentAnalysisResult
+            {
+                ApplicationId = application.Id,
+                Summary = $"No incidents found for {application.Name}.",
+                IncidentsAnalyzed = 0,
+                ConfidenceScore = 100
+            };
+        }
+
+        // Build prompt with incident data
+        var systemPrompt = @"You are an IT support analyst expert at identifying patterns in incident data and recommending improvements.
+Analyze the provided incidents and identify:
+1. Common root causes across incidents
+2. Quick wins that could prevent multiple incidents
+3. Process improvements to reduce incident volume
+4. Specific technical fixes that would have the highest impact
+
+Respond in a structured format with clear recommendations. Be concise and actionable.";
+
+        var incidentSummaries = incidentList.Take(25).Select(i =>
+            $"- [{i.IncidentNumber}] {i.ShortDescription ?? "No description"} | Close: {i.CloseCode ?? "N/A"} | Notes: {TruncateText(i.CloseNotes, 100)}");
+
+        var closeCodeCounts = incidentList
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .OrderByDescending(g => g.Count())
+            .Take(5)
+            .Select(g => $"- {g.Key}: {g.Count()} incidents");
+
+        var prompt = $@"Analyze incidents for application: {application.Name}
+
+Total Incidents: {incidentList.Count}
+Recent Incidents (last 90 days): {incidentList.Count(i => i.ImportedAt >= DateTimeOffset.UtcNow.AddDays(-90))}
+
+Top Close Codes:
+{string.Join("\n", closeCodeCounts)}
+
+Sample Incidents:
+{string.Join("\n", incidentSummaries)}
+
+Based on this data, provide:
+1. A 2-3 sentence summary of the incident patterns
+2. Top 3 root cause hypotheses
+3. 2-3 specific recommendations to reduce incidents
+4. Estimated impact if recommendations are implemented";
+
+        var response = await CallAiAsync(prompt, systemPrompt);
+
+        // Generate recommendations from AI response and incident data
+        var recommendations = GenerateIncidentRecommendations(application, incidentList, response);
+
+        return new IncidentAnalysisResult
+        {
+            ApplicationId = application.Id,
+            Summary = response ?? $"Analysis of {incidentList.Count} incidents for {application.Name} identified patterns in close codes and resolution notes.",
+            Recommendations = recommendations,
+            CommonThemes = ExtractCommonThemes(incidentList),
+            QuickWins = IdentifyQuickWins(incidentList),
+            IncidentsAnalyzed = incidentList.Count,
+            ConfidenceScore = response != null ? 85 : 70
+        };
+    }
+
+    public async Task<IncidentAnalysisResult> AnalyzePortfolioIncidentsAsync(
+        IEnumerable<ServiceNowIncident> incidents,
+        IEnumerable<Application> applications)
+    {
+        var incidentList = incidents.ToList();
+        var appList = applications.ToList();
+
+        if (incidentList.Count == 0)
+        {
+            return new IncidentAnalysisResult
+            {
+                Summary = "No incidents in the portfolio to analyze.",
+                IncidentsAnalyzed = 0,
+                ConfidenceScore = 100
+            };
+        }
+
+        var systemPrompt = @"You are an IT portfolio analyst specializing in incident trend analysis and operational improvement.
+Analyze the portfolio-wide incident data and identify:
+1. Cross-application patterns indicating systemic issues
+2. Applications that are incident hotspots
+3. Common themes across the organization
+4. Strategic recommendations for reducing overall incident volume
+
+Focus on high-impact opportunities that affect multiple applications.";
+
+        var appIncidentCounts = incidentList
+            .Where(i => !string.IsNullOrEmpty(i.LinkedApplicationId))
+            .GroupBy(i => i.LinkedApplicationName ?? i.LinkedApplicationId!)
+            .OrderByDescending(g => g.Count())
+            .Take(10)
+            .Select(g => $"- {g.Key}: {g.Count()} incidents");
+
+        var topCloseCodes = incidentList
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .OrderByDescending(g => g.Count())
+            .Take(10)
+            .Select(g => $"- {g.Key}: {g.Count()} incidents");
+
+        var prompt = $@"Analyze portfolio-wide incident data:
+
+Total Incidents: {incidentList.Count}
+Linked to Applications: {incidentList.Count(i => !string.IsNullOrEmpty(i.LinkedApplicationId))}
+Total Applications with Incidents: {incidentList.Select(i => i.LinkedApplicationId).Distinct().Count()}
+
+Top Applications by Incident Count:
+{string.Join("\n", appIncidentCounts)}
+
+Most Common Close Codes:
+{string.Join("\n", topCloseCodes)}
+
+Provide:
+1. A 2-3 sentence portfolio-wide assessment
+2. Top 3 systemic issues affecting multiple applications
+3. Strategic recommendations for reducing portfolio-wide incident volume
+4. Quick wins that could have immediate impact";
+
+        var response = await CallAiAsync(prompt, systemPrompt);
+
+        // Generate portfolio-wide recommendations
+        var recommendations = GeneratePortfolioRecommendations(incidentList, appList, response);
+
+        return new IncidentAnalysisResult
+        {
+            Summary = response ?? $"Portfolio analysis of {incidentList.Count} incidents across {appList.Count} applications.",
+            Recommendations = recommendations,
+            CommonThemes = ExtractPortfolioThemes(incidentList),
+            QuickWins = IdentifyPortfolioQuickWins(incidentList, appList),
+            IncidentsAnalyzed = incidentList.Count,
+            ConfidenceScore = response != null ? 82 : 68
+        };
+    }
+
+    private List<IncidentRecommendation> GenerateIncidentRecommendations(
+        Application app,
+        List<ServiceNowIncident> incidents,
+        string? aiResponse)
+    {
+        var recommendations = new List<IncidentRecommendation>();
+
+        // Analyze close code patterns
+        var closeCodeGroups = incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .Where(g => g.Count() >= 2)
+            .OrderByDescending(g => g.Count())
+            .Take(3);
+
+        foreach (var group in closeCodeGroups)
+        {
+            var isRepeatPattern = group.Count() >= 3;
+            recommendations.Add(new IncidentRecommendation
+            {
+                Id = $"rec-{app.Id}-{Guid.NewGuid():N}",
+                ApplicationId = app.Id,
+                ApplicationName = app.Name,
+                Type = isRepeatPattern ? IncidentRecommendationType.RepeatPattern : IncidentRecommendationType.ClosureAnalysis,
+                Priority = isRepeatPattern ? 1 : 2,
+                Title = $"Address recurring issue: {group.Key}",
+                Description = $"This close code has appeared {group.Count()} times, indicating a recurring issue pattern.",
+                RootCauseAnalysis = aiResponse != null ? "AI-identified pattern from closure notes analysis." : null,
+                RecommendedAction = $"Investigate the root cause of '{group.Key}' issues and implement a permanent fix.",
+                ExpectedImpact = $"Could prevent up to {group.Count()} similar incidents in the future.",
+                EstimatedEffort = group.Count() >= 5 ? "Medium" : "Low",
+                RelatedCloseCodes = [group.Key],
+                RelatedIncidentNumbers = group.Select(i => i.IncidentNumber).Take(5).ToList(),
+                IncidentCount = group.Count(),
+                ConfidenceScore = aiResponse != null ? 85 : 75
+            });
+        }
+
+        // Check for band-aid fixes
+        var bandaidIncidents = incidents.Where(i =>
+            i.CloseCode?.Contains("Band-aid", StringComparison.OrdinalIgnoreCase) == true ||
+            i.CloseCode?.Contains("Workaround", StringComparison.OrdinalIgnoreCase) == true ||
+            i.CloseCode?.Contains("Temporary", StringComparison.OrdinalIgnoreCase) == true).ToList();
+
+        if (bandaidIncidents.Count >= 2)
+        {
+            recommendations.Add(new IncidentRecommendation
+            {
+                Id = $"rec-{app.Id}-bandaid-{Guid.NewGuid():N}",
+                ApplicationId = app.Id,
+                ApplicationName = app.Name,
+                Type = IncidentRecommendationType.TechnicalDebt,
+                Priority = 2,
+                Title = $"Technical debt: {bandaidIncidents.Count} temporary fixes need permanent solutions",
+                Description = "Multiple incidents have been closed with temporary fixes or workarounds, accumulating technical debt.",
+                RecommendedAction = "Schedule time to implement permanent solutions for these workarounds.",
+                ExpectedImpact = "Reduce recurring incidents and improve system stability.",
+                EstimatedEffort = "Medium",
+                RelatedIncidentNumbers = bandaidIncidents.Select(i => i.IncidentNumber).Take(5).ToList(),
+                IncidentCount = bandaidIncidents.Count,
+                ConfidenceScore = 90
+            });
+        }
+
+        // High volume recommendation
+        var recentCount = incidents.Count(i => i.ImportedAt >= DateTimeOffset.UtcNow.AddDays(-90));
+        if (recentCount >= 5)
+        {
+            recommendations.Add(new IncidentRecommendation
+            {
+                Id = $"rec-{app.Id}-volume-{Guid.NewGuid():N}",
+                ApplicationId = app.Id,
+                ApplicationName = app.Name,
+                Type = IncidentRecommendationType.HighVolume,
+                Priority = recentCount >= 10 ? 1 : 2,
+                Title = $"High incident volume requires attention",
+                Description = $"{recentCount} incidents in the last 90 days suggests systemic issues with this application.",
+                RootCauseAnalysis = aiResponse,
+                RecommendedAction = "Conduct a root cause analysis workshop to identify and address systemic issues.",
+                ExpectedImpact = $"Reducing incident rate by 50% would save approximately {recentCount / 2} incidents per quarter.",
+                EstimatedEffort = "High",
+                IncidentCount = recentCount,
+                ConfidenceScore = 85
+            });
+        }
+
+        return recommendations;
+    }
+
+    private List<IncidentRecommendation> GeneratePortfolioRecommendations(
+        List<ServiceNowIncident> incidents,
+        List<Application> apps,
+        string? aiResponse)
+    {
+        var recommendations = new List<IncidentRecommendation>();
+
+        // Find cross-application patterns
+        var topCloseCodes = incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .Where(g => g.Count() >= 5)
+            .OrderByDescending(g => g.Count())
+            .Take(3);
+
+        foreach (var group in topCloseCodes)
+        {
+            var affectedApps = group
+                .Where(i => !string.IsNullOrEmpty(i.LinkedApplicationName))
+                .Select(i => i.LinkedApplicationName!)
+                .Distinct()
+                .Take(5)
+                .ToList();
+
+            if (affectedApps.Count >= 2)
+            {
+                recommendations.Add(new IncidentRecommendation
+                {
+                    Id = $"rec-portfolio-{Guid.NewGuid():N}",
+                    Type = IncidentRecommendationType.ProcessImprovement,
+                    Priority = 1,
+                    Title = $"Cross-application issue: {group.Key}",
+                    Description = $"'{group.Key}' appears {group.Count()} times across {affectedApps.Count} applications, suggesting a systemic issue.",
+                    RootCauseAnalysis = aiResponse,
+                    RecommendedAction = "Investigate common infrastructure or configuration issues affecting multiple applications.",
+                    ExpectedImpact = $"Fixing root cause could prevent incidents across {affectedApps.Count} applications.",
+                    EstimatedEffort = "Medium",
+                    RelatedCloseCodes = [group.Key],
+                    IncidentCount = group.Count(),
+                    ConfidenceScore = aiResponse != null ? 82 : 72
+                });
+            }
+        }
+
+        // Find hotspot applications
+        var hotspots = incidents
+            .Where(i => !string.IsNullOrEmpty(i.LinkedApplicationId))
+            .GroupBy(i => i.LinkedApplicationId!)
+            .Where(g => g.Count() >= 10)
+            .OrderByDescending(g => g.Count())
+            .Take(3);
+
+        foreach (var hotspot in hotspots)
+        {
+            var app = apps.FirstOrDefault(a => a.Id == hotspot.Key);
+            recommendations.Add(new IncidentRecommendation
+            {
+                Id = $"rec-hotspot-{Guid.NewGuid():N}",
+                ApplicationId = hotspot.Key,
+                ApplicationName = app?.Name ?? hotspot.Key,
+                Type = IncidentRecommendationType.HighVolume,
+                Priority = 1,
+                Title = $"Incident hotspot: {app?.Name ?? hotspot.Key}",
+                Description = $"This application has {hotspot.Count()} incidents, making it a priority for improvement.",
+                RecommendedAction = "Prioritize stability improvements for this high-volume incident source.",
+                ExpectedImpact = "Significant reduction in overall portfolio incident volume.",
+                EstimatedEffort = "High",
+                IncidentCount = hotspot.Count(),
+                ConfidenceScore = 88
+            });
+        }
+
+        return recommendations;
+    }
+
+    private List<string> ExtractCommonThemes(List<ServiceNowIncident> incidents)
+    {
+        var themes = new List<string>();
+
+        var topCloseCodes = incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .OrderByDescending(g => g.Count())
+            .Take(3)
+            .Select(g => g.Key);
+
+        themes.AddRange(topCloseCodes);
+        return themes;
+    }
+
+    private List<string> ExtractPortfolioThemes(List<ServiceNowIncident> incidents)
+    {
+        var themes = new List<string>();
+
+        // Most common close codes
+        var topCodes = incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .OrderByDescending(g => g.Count())
+            .Take(5)
+            .Select(g => $"{g.Key} ({g.Count()})");
+
+        themes.AddRange(topCodes);
+        return themes;
+    }
+
+    private List<QuickWin> IdentifyQuickWins(List<ServiceNowIncident> incidents)
+    {
+        var quickWins = new List<QuickWin>();
+
+        // Look for simple repeat patterns
+        var repeatPatterns = incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode))
+            .GroupBy(i => i.CloseCode!)
+            .Where(g => g.Count() >= 3)
+            .Take(2);
+
+        foreach (var pattern in repeatPatterns)
+        {
+            quickWins.Add(new QuickWin
+            {
+                Title = $"Fix recurring '{pattern.Key}' issues",
+                Description = $"Addressing root cause could prevent {pattern.Count()} similar incidents.",
+                EstimatedImpact = $"{pattern.Count()} incidents prevented",
+                Effort = pattern.Count() >= 5 ? "Medium" : "Low"
+            });
+        }
+
+        return quickWins;
+    }
+
+    private List<QuickWin> IdentifyPortfolioQuickWins(List<ServiceNowIncident> incidents, List<Application> apps)
+    {
+        var quickWins = new List<QuickWin>();
+
+        // Cross-app patterns
+        var crossAppPatterns = incidents
+            .Where(i => !string.IsNullOrEmpty(i.CloseCode) && !string.IsNullOrEmpty(i.LinkedApplicationId))
+            .GroupBy(i => i.CloseCode!)
+            .Where(g => g.Select(i => i.LinkedApplicationId).Distinct().Count() >= 2 && g.Count() >= 5)
+            .Take(2);
+
+        foreach (var pattern in crossAppPatterns)
+        {
+            var appCount = pattern.Select(i => i.LinkedApplicationId).Distinct().Count();
+            quickWins.Add(new QuickWin
+            {
+                Title = $"Address '{pattern.Key}' across {appCount} apps",
+                Description = $"Common fix could resolve {pattern.Count()} incidents across multiple applications.",
+                EstimatedImpact = $"{pattern.Count()} incidents across {appCount} apps",
+                Effort = "Medium"
+            });
+        }
+
+        return quickWins;
+    }
+
+    private static string TruncateText(string? text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+        if (text.Length <= maxLength) return text;
+        return text[..maxLength] + "...";
+    }
+
+    #endregion
 }

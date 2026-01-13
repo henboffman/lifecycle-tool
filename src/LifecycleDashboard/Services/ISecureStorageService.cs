@@ -74,10 +74,15 @@ public static class SecretKeys
     // IIS Database
     public const string IisDatabaseConnectionString = "lifecycle:datasource:iisdb:connectionstring";
 
+    // AI Provider Selection
+    public const string AiProvider = "lifecycle:ai:provider"; // "ollama" or "azureopenai"
+
     // Azure OpenAI
     public const string AzureOpenAiEndpoint = "lifecycle:ai:azureopenai:endpoint";
     public const string AzureOpenAiKey = "lifecycle:ai:azureopenai:key";
     public const string AzureOpenAiDeployment = "lifecycle:ai:azureopenai:deployment";
+    public const string AzureOpenAiApiVersion = "lifecycle:ai:azureopenai:apiversion";
+    public const string AzureOpenAiApimSubscriptionKey = "lifecycle:ai:azureopenai:apimsubscriptionkey";
 
     // Ollama (local)
     public const string OllamaEndpoint = "lifecycle:ai:ollama:endpoint";
