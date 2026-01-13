@@ -83,6 +83,9 @@ public static class SecretKeys
     public const string AzureOpenAiDeployment = "lifecycle:ai:azureopenai:deployment";
     public const string AzureOpenAiApiVersion = "lifecycle:ai:azureopenai:apiversion";
     public const string AzureOpenAiApimSubscriptionKey = "lifecycle:ai:azureopenai:apimsubscriptionkey";
+    public const string AzureOpenAiTenantId = "lifecycle:ai:azureopenai:tenantid";
+    public const string AzureOpenAiClientId = "lifecycle:ai:azureopenai:clientid";
+    public const string AzureOpenAiClientSecret = "lifecycle:ai:azureopenai:clientsecret";
 
     // Ollama (local)
     public const string OllamaEndpoint = "lifecycle:ai:ollama:endpoint";

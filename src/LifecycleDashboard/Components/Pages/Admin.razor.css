@@ -1558,3 +1558,199 @@
         flex: 1 1 100%;
     }
 }
+
+/* AI Provider Selector */
+.ai-provider-selector {
+    margin-bottom: 1.5rem;
+}
+
+.ai-provider-selector > label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.provider-options {
+    display: flex;
+    gap: 1rem;
+}
+
+.provider-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: var(--color-surface);
+}
+
+.provider-option:hover {
+    border-color: var(--color-accent);
+    background: var(--color-surface-hover);
+}
+
+.provider-option.selected {
+    border-color: var(--color-accent);
+    background: rgba(67, 97, 238, 0.1);
+}
+
+.provider-option input[type="radio"] {
+    display: none;
+}
+
+.provider-option i {
+    font-size: 1.25rem;
+    color: var(--color-accent);
+}
+
+.provider-option span {
+    font-weight: 500;
+}
+
+/* AI Credentials Grid */
+.ai-credentials-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 1.5rem;
+}
+
+.credential-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    transition: opacity 0.2s ease;
+}
+
+.credential-card.inactive {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.credential-card h4 {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 1rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.credential-card h4 i {
+    color: var(--color-accent);
+}
+
+.azure-openai-card {
+    grid-column: span 2;
+}
+
+/* Form Layout */
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.form-group .required {
+    color: var(--color-danger);
+}
+
+.form-group .hint {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    font-weight: 400;
+}
+
+/* Azure AD Section */
+.azure-ad-section {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.azure-ad-section summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    padding: 0.5rem 0;
+}
+
+.azure-ad-section summary:hover {
+    color: var(--color-text);
+}
+
+.azure-ad-section summary i {
+    color: var(--color-accent);
+}
+
+.azure-ad-fields {
+    margin-top: 1rem;
+}
+
+/* Masked Value Display */
+.masked-value {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-surface-hover);
+    border-radius: var(--radius-sm);
+    font-family: monospace;
+    color: var(--color-text-muted);
+}
+
+.masked-value .btn-icon {
+    background: transparent;
+    border: none;
+    color: var(--color-accent);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--radius-sm);
+}
+
+.masked-value .btn-icon:hover {
+    background: var(--color-surface);
+}
+
+/* Spinner */
+.spinner-sm {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Responsive AI Section */
+@media (max-width: 768px) {
+    .provider-options {
+        flex-direction: column;
+    }
+
+    .ai-credentials-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .azure-openai-card {
+        grid-column: span 1;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1136,8 +1136,28 @@
                     }
                 </div>
 
+                <div class="ai-provider-selector">
+                    <label>Active Provider</label>
+                    <div class="provider-options">
+                        <label class="provider-option @(_selectedAiProvider == "ollama" ? "selected" : "")">
+                            <input type="radio" name="aiProvider" value="ollama"
+                                   checked="@(_selectedAiProvider == "ollama")"
+                                   @onchange="@(() => SetAiProvider("ollama"))" />
+                            <i class="bi bi-hdd-network"></i>
+                            <span>Ollama (Local)</span>
+                        </label>
+                        <label class="provider-option @(_selectedAiProvider == "azureopenai" ? "selected" : "")">
+                            <input type="radio" name="aiProvider" value="azureopenai"
+                                   checked="@(_selectedAiProvider == "azureopenai")"
+                                   @onchange="@(() => SetAiProvider("azureopenai"))" />
+                            <i class="bi bi-cloud"></i>
+                            <span>Azure OpenAI</span>
+                        </label>
+                    </div>
+                </div>
+
                 <div class="ai-credentials-grid">
-                    <div class="credential-card">
+                    <div class="credential-card @(_selectedAiProvider != "ollama" ? "inactive" : "")">
                         <h4><i class="bi bi-hdd-network"></i> Ollama Settings</h4>
                         <div class="form-group">
                             <label>Endpoint</label>
@@ -1154,49 +1174,122 @@
                         </button>
                     </div>
 
-                    <div class="credential-card">
+                    <div class="credential-card azure-openai-card @(_selectedAiProvider != "azureopenai" ? "inactive" : "")">
                         <h4><i class="bi bi-cloud"></i> Azure OpenAI</h4>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Endpoint <span class="required">*</span></label>
+                                @if (_hasAzureOpenAiEndpoint && !_editAzureOpenAiEndpoint)
+                                {
+                                    <div class="masked-value">
+                                        <span>••••••••••••••••</span>
+                                        <button class="btn-icon" @onclick="() => _editAzureOpenAiEndpoint = true">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <input type="text" class="form-control" placeholder="https://your-resource.openai.azure.com"
+                                           @bind="_azureOpenAiEndpoint" />
+                                }
+                            </div>
+                            <div class="form-group">
+                                <label>Deployment Name <span class="required">*</span></label>
+                                <input type="text" class="form-control" placeholder="gpt-4o"
+                                       @bind="_azureOpenAiDeployment" />
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>API Version</label>
+                                <input type="text" class="form-control" placeholder="2024-02-01"
+                                       @bind="_azureOpenAiApiVersion" />
+                            </div>
+                            <div class="form-group">
+                                <label>API Key</label>
+                                @if (_hasAzureOpenAiKey && !_editAzureOpenAiKey)
+                                {
+                                    <div class="masked-value">
+                                        <span>••••••••••••••••</span>
+                                        <button class="btn-icon" @onclick="() => _editAzureOpenAiKey = true">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <input type="password" class="form-control" placeholder="API Key"
+                                           @bind="_azureOpenAiKey" />
+                                }
+                            </div>
+                        </div>
+
                         <div class="form-group">
-                            <label>Endpoint</label>
-                            @if (_hasAzureOpenAiEndpoint)
+                            <label>APIM Subscription Key <span class="hint">(if using API Management)</span></label>
+                            @if (_hasAzureOpenAiApimKey && !_editAzureOpenAiApimKey)
                             {
                                 <div class="masked-value">
                                     <span>••••••••••••••••</span>
-                                    <button class="btn-icon" @onclick="() => _editAzureOpenAiEndpoint = true">
+                                    <button class="btn-icon" @onclick="() => _editAzureOpenAiApimKey = true">
                                         <i class="bi bi-pencil"></i>
                                     </button>
                                 </div>
                             }
                             else
                             {
-                                <input type="text" class="form-control" placeholder="https://your-resource.openai.azure.com"
-                                       @bind="_azureOpenAiEndpoint" />
+                                <input type="password" class="form-control" placeholder="Ocp-Apim-Subscription-Key"
+                                       @bind="_azureOpenAiApimKey" />
                             }
                         </div>
-                        <div class="form-group">
-                            <label>API Key</label>
-                            @if (_hasAzureOpenAiKey)
-                            {
-                                <div class="masked-value">
-                                    <span>••••••••••••••••</span>
-                                    <button class="btn-icon" @onclick="() => _editAzureOpenAiKey = true">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
+
+                        <details class="azure-ad-section">
+                            <summary><i class="bi bi-shield-lock"></i> Azure AD Authentication (Optional)</summary>
+                            <div class="azure-ad-fields">
+                                <div class="form-group">
+                                    <label>Tenant ID</label>
+                                    <input type="text" class="form-control" placeholder="00000000-0000-0000-0000-000000000000"
+                                           @bind="_azureOpenAiTenantId" />
                                 </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Client ID</label>
+                                        <input type="text" class="form-control" placeholder="App Registration Client ID"
+                                               @bind="_azureOpenAiClientId" />
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Client Secret</label>
+                                        @if (_hasAzureOpenAiClientSecret && !_editAzureOpenAiClientSecret)
+                                        {
+                                            <div class="masked-value">
+                                                <span>••••••••••••••••</span>
+                                                <button class="btn-icon" @onclick="() => _editAzureOpenAiClientSecret = true">
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <input type="password" class="form-control" placeholder="Client Secret"
+                                                   @bind="_azureOpenAiClientSecret" />
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <button class="btn btn-sm btn-primary" @onclick="SaveAzureOpenAiConfig" disabled="@_aiConfigSaving">
+                            @if (_aiConfigSaving)
+                            {
+                                <span class="spinner-sm"></span>
                             }
                             else
                             {
-                                <input type="password" class="form-control" placeholder="API Key"
-                                       @bind="_azureOpenAiKey" />
+                                <i class="bi bi-check-lg"></i>
                             }
-                        </div>
-                        <div class="form-group">
-                            <label>Deployment Name</label>
-                            <input type="text" class="form-control" placeholder="gpt-4"
-                                   @bind="_azureOpenAiDeployment" />
-                        </div>
-                        <button class="btn btn-sm btn-primary" @onclick="SaveAzureOpenAiConfig">
-                            <i class="bi bi-check-lg"></i> Save
+                            Save
                         </button>
                     </div>
                 </div>
@@ -1613,10 +1706,20 @@
     private string _azureOpenAiEndpoint = "";
     private string _azureOpenAiKey = "";
     private string _azureOpenAiDeployment = "";
+    private string _azureOpenAiApiVersion = "2024-02-01";
+    private string _azureOpenAiApimKey = "";
+    private string _azureOpenAiTenantId = "";
+    private string _azureOpenAiClientId = "";
+    private string _azureOpenAiClientSecret = "";
+    private string _selectedAiProvider = "ollama";
     private bool _hasAzureOpenAiEndpoint;
     private bool _hasAzureOpenAiKey;
+    private bool _hasAzureOpenAiApimKey;
+    private bool _hasAzureOpenAiClientSecret;
     private bool _editAzureOpenAiEndpoint;
     private bool _editAzureOpenAiKey;
+    private bool _editAzureOpenAiApimKey;
+    private bool _editAzureOpenAiClientSecret;
     private bool _aiConfigSaving;
 
     private enum AdminSection
@@ -2819,6 +2922,11 @@
 
     private async Task LoadAiConfiguration()
     {
+        // Load provider selection
+        var savedProvider = await SecureStorage.GetSecretAsync(SecretKeys.AiProvider);
+        if (!string.IsNullOrEmpty(savedProvider))
+            _selectedAiProvider = savedProvider;
+
         // Load Ollama config from secure storage
         var savedEndpoint = await SecureStorage.GetSecretAsync(SecretKeys.OllamaEndpoint);
         if (!string.IsNullOrEmpty(savedEndpoint))
@@ -2828,14 +2936,28 @@
         if (!string.IsNullOrEmpty(savedModel))
             _ollamaModel = savedModel;
 
-        // Check if Azure OpenAI credentials exist (we don't load the actual values)
+        // Check if Azure OpenAI credentials exist (we don't load the actual values for secrets)
         _hasAzureOpenAiEndpoint = await SecureStorage.HasSecretAsync(SecretKeys.AzureOpenAiEndpoint);
         _hasAzureOpenAiKey = await SecureStorage.HasSecretAsync(SecretKeys.AzureOpenAiKey);
+        _hasAzureOpenAiApimKey = await SecureStorage.HasSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey);
+        _hasAzureOpenAiClientSecret = await SecureStorage.HasSecretAsync(SecretKeys.AzureOpenAiClientSecret);
 
-        // Load deployment name (non-sensitive)
+        // Load non-sensitive Azure OpenAI values
         var savedDeployment = await SecureStorage.GetSecretAsync(SecretKeys.AzureOpenAiDeployment);
         if (!string.IsNullOrEmpty(savedDeployment))
             _azureOpenAiDeployment = savedDeployment;
+
+        var savedApiVersion = await SecureStorage.GetSecretAsync(SecretKeys.AzureOpenAiApiVersion);
+        if (!string.IsNullOrEmpty(savedApiVersion))
+            _azureOpenAiApiVersion = savedApiVersion;
+
+        var savedTenantId = await SecureStorage.GetSecretAsync(SecretKeys.AzureOpenAiTenantId);
+        if (!string.IsNullOrEmpty(savedTenantId))
+            _azureOpenAiTenantId = savedTenantId;
+
+        var savedClientId = await SecureStorage.GetSecretAsync(SecretKeys.AzureOpenAiClientId);
+        if (!string.IsNullOrEmpty(savedClientId))
+            _azureOpenAiClientId = savedClientId;
 
         // Test AI connection on load
         await TestAiConnection();
@@ -2881,32 +3003,77 @@
         _aiConfigSaving = true;
         try
         {
-            // Only save if values are provided (not masked)
+            // Save endpoint (sensitive - clear after saving)
             if (!string.IsNullOrEmpty(_azureOpenAiEndpoint))
             {
                 await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiEndpoint, _azureOpenAiEndpoint);
                 _hasAzureOpenAiEndpoint = true;
-                _azureOpenAiEndpoint = ""; // Clear after saving
+                _azureOpenAiEndpoint = "";
                 _editAzureOpenAiEndpoint = false;
             }
 
+            // Save API key (sensitive - clear after saving)
             if (!string.IsNullOrEmpty(_azureOpenAiKey))
             {
                 await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiKey, _azureOpenAiKey);
                 _hasAzureOpenAiKey = true;
-                _azureOpenAiKey = ""; // Clear after saving
+                _azureOpenAiKey = "";
                 _editAzureOpenAiKey = false;
             }
 
+            // Save APIM subscription key (sensitive - clear after saving)
+            if (!string.IsNullOrEmpty(_azureOpenAiApimKey))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiApimSubscriptionKey, _azureOpenAiApimKey);
+                _hasAzureOpenAiApimKey = true;
+                _azureOpenAiApimKey = "";
+                _editAzureOpenAiApimKey = false;
+            }
+
+            // Save client secret (sensitive - clear after saving)
+            if (!string.IsNullOrEmpty(_azureOpenAiClientSecret))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiClientSecret, _azureOpenAiClientSecret);
+                _hasAzureOpenAiClientSecret = true;
+                _azureOpenAiClientSecret = "";
+                _editAzureOpenAiClientSecret = false;
+            }
+
+            // Save non-sensitive values (don't clear)
             if (!string.IsNullOrEmpty(_azureOpenAiDeployment))
             {
                 await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiDeployment, _azureOpenAiDeployment);
             }
+
+            if (!string.IsNullOrEmpty(_azureOpenAiApiVersion))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiApiVersion, _azureOpenAiApiVersion);
+            }
+
+            if (!string.IsNullOrEmpty(_azureOpenAiTenantId))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiTenantId, _azureOpenAiTenantId);
+            }
+
+            if (!string.IsNullOrEmpty(_azureOpenAiClientId))
+            {
+                await SecureStorage.StoreSecretAsync(SecretKeys.AzureOpenAiClientId, _azureOpenAiClientId);
+            }
+
+            // Test the connection after saving
+            await TestAiConnection();
         }
         finally
         {
             _aiConfigSaving = false;
         }
+    }
+
+    private async Task SetAiProvider(string provider)
+    {
+        _selectedAiProvider = provider;
+        await SecureStorage.StoreSecretAsync(SecretKeys.AiProvider, provider);
+        await TestAiConnection();
     }
 
     #endregion
