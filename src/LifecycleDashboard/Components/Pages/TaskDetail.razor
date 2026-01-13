@@ -1,6 +1,7 @@
 @page "/tasks/{Id}"
 @using LifecycleDashboard.Models
 @using LifecycleDashboard.Services
+@using LifecycleDashboard.Components.Shared
 @using TaskStatus = LifecycleDashboard.Models.TaskStatus
 @inject IMockDataService DataService
 @inject NavigationManager Navigation
@@ -97,7 +98,9 @@ else
                 {
                     <section class="content-section">
                         <h2><i class="bi bi-info-circle"></i> Description</h2>
-                        <p class="task-description">@_task.Description</p>
+                        <div class="task-description">
+                            <MarkdownContent Content="@_task.Description" />
+                        </div>
                     </section>
                 }
 
@@ -106,7 +109,9 @@ else
                 {
                     <section class="content-section">
                         <h2><i class="bi bi-list-ol"></i> How to Complete This Task</h2>
-                        <p class="instructions-overview">@_documentation.Description</p>
+                        <div class="instructions-overview">
+                            <MarkdownContent Content="@_documentation.Description" />
+                        </div>
 
                         <div class="instructions-list">
                             @foreach (var instruction in _documentation.Instructions.OrderBy(i => i.StepNumber))
@@ -115,7 +120,9 @@ else
                                     <div class="step-number">@instruction.StepNumber</div>
                                     <div class="step-content">
                                         <h3>@instruction.Title</h3>
-                                        <p>@instruction.Description</p>
+                                        <div class="instruction-description">
+                                            <MarkdownContent Content="@instruction.Description" />
+                                        </div>
                                         @if (!string.IsNullOrEmpty(instruction.SystemReference))
                                         {
                                             <span class="system-ref">
@@ -156,7 +163,9 @@ else
                                             <span class="system-name">@guidance.SystemName</span>
                                             <span class="action-type">@guidance.ActionType</span>
                                         </div>
-                                        <p class="guidance-instructions">@guidance.Instructions</p>
+                                        <div class="guidance-instructions">
+                                            <MarkdownContent Content="@guidance.Instructions" />
+                                        </div>
                                         @if (!string.IsNullOrEmpty(guidance.DirectLink))
                                         {
                                             <a href="@guidance.DirectLink" target="_blank" class="guidance-link">
@@ -287,7 +296,9 @@ else
                             <span>Delegated task</span>
                             @if (!string.IsNullOrEmpty(_task.DelegationReason))
                             {
-                                <p class="delegation-reason">@_task.DelegationReason</p>
+                                <div class="delegation-reason">
+                                    <MarkdownContent Content="@_task.DelegationReason" />
+                                </div>
                             }
                         </div>
                     }
@@ -298,7 +309,9 @@ else
                 {
                     <section class="info-card">
                         <h3>Notes</h3>
-                        <p class="task-notes">@_task.Notes</p>
+                        <div class="task-notes">
+                            <MarkdownContent Content="@_task.Notes" />
+                        </div>
                     </section>
                 }
 
@@ -319,7 +332,9 @@ else
                                         </span>
                                         @if (!string.IsNullOrEmpty(entry.Notes))
                                         {
-                                            <p class="history-notes">@entry.Notes</p>
+                                            <div class="history-notes">
+                                                <MarkdownContent Content="@entry.Notes" />
+                                            </div>
                                         }
                                     </div>
                                 </div>

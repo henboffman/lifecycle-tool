@@ -1,6 +1,7 @@
 @page "/tasks"
 @using LifecycleDashboard.Models
 @using LifecycleDashboard.Services
+@using LifecycleDashboard.Components.Shared
 @inject IMockDataService DataService
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
@@ -163,7 +164,9 @@
 
                             @if (!string.IsNullOrEmpty(task.Description))
                             {
-                                <p class="task-description">@task.Description</p>
+                                <div class="task-description">
+                                    <MarkdownContent Content="@task.Description" />
+                                </div>
                             }
 
                             <div class="task-badges">
