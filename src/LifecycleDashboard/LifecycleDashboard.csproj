@@ -21,6 +21,9 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.Graph" Version="5.78.0" />
+    <PackageReference Include="Microsoft.Identity.Web" Version="3.7.1" />
+    <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="3.7.1" />
   </ItemGroup>
 
 </Project>

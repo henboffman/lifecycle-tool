@@ -1949,9 +1949,10 @@ public class MockDataService : IMockDataService
             TotalApplications = Applications.Count,
             ApplicationsWithEolFrameworks = details.Where(d => d.Framework.IsPastEol).Sum(d => d.ApplicationCount),
             ApplicationsApproachingEol = details.Where(d => d.Framework.IsApproachingEol).Sum(d => d.ApplicationCount),
-            CriticalEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.Critical),
-            HighEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.High),
-            MediumEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.Medium),
+            // Sum application counts, not framework counts
+            CriticalEolCount = details.Where(d => d.Framework.EolUrgency == EolUrgency.Critical).Sum(d => d.ApplicationCount),
+            HighEolCount = details.Where(d => d.Framework.EolUrgency == EolUrgency.High).Sum(d => d.ApplicationCount),
+            MediumEolCount = details.Where(d => d.Framework.EolUrgency == EolUrgency.Medium).Sum(d => d.ApplicationCount),
             Details = details.OrderBy(d => d.Framework.DaysUntilEol ?? int.MaxValue).ToList()
         };
 
@@ -3720,6 +3721,45 @@ public class MockDataService : IMockDataService
             (r.Status == RecommendationStatus.Resolved || r.Status == RecommendationStatus.Dismissed));
 
         return Task.FromResult(countBefore - _incidentRecommendations.Count);
+    }
+
+    #endregion
+
+    #region Entra ID User Matching
+
+    public Task<UserMatchingResult> PerformUserMatchingOnImportsAsync()
+    {
+        // Mock implementation - returns empty result
+        return Task.FromResult(new UserMatchingResult
+        {
+            ApplicationsProcessed = 0,
+            TotalRolesChecked = 0,
+            RolesMatched = 0,
+            RolesUnmatched = 0,
+            AlertsCreated = 0,
+            AliasesDiscovered = 0,
+            PerformedAt = DateTimeOffset.UtcNow,
+            Success = true,
+            MatchDetails = []
+        });
+    }
+
+    public Task<IReadOnlyList<DepartedUserAlert>> GetDepartedUserAlertsAsync()
+    {
+        // Mock implementation - returns empty list
+        return Task.FromResult<IReadOnlyList<DepartedUserAlert>>([]);
+    }
+
+    public Task<IReadOnlyList<DepartedUserAlert>> GetDepartedUserAlertsAsync(Data.Entities.DepartedUserAlertStatus status)
+    {
+        // Mock implementation - returns empty list
+        return Task.FromResult<IReadOnlyList<DepartedUserAlert>>([]);
+    }
+
+    public Task ResolveDepartedUserAlertAsync(string alertId, string? replacementUserId, string? resolutionNotes, string? resolvedByUserId, string? resolvedByName)
+    {
+        // Mock implementation - no-op
+        return Task.CompletedTask;
     }
 
     #endregion

@@ -1,0 +1,3 @@
+# Ideas 1
+
+1. We currently have a report in ServiceNow created that includes our incidents and closer information. it would be nice if we could include this in analysis and reporting so that we can find where we are often doing bandaid fixes, similar fixes, etc, and could propose/recommend future improvement items with data to show the impact of those improvements. We currently have the report, with teh incident number, state configuration item, short description, description, close code, close notes, comments and work notes. the configuration item is a direct match with our servicenow application entries so we could link those together.

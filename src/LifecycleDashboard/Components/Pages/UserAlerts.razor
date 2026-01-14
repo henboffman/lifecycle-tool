@@ -1,0 +1,379 @@
+@page "/user-alerts"
+@using LifecycleDashboard.Services
+@using LifecycleDashboard.Data.Entities
+@using static LifecycleDashboard.Data.Entities.DepartedUserAlertStatus
+@inject IMockDataService DataService
+@inject IEntraIdService EntraIdService
+@inject NavigationManager Navigation
+
+<PageTitle>User Alerts - Lifecycle Dashboard</PageTitle>
+
+<div class="alerts-page">
+    <header class="page-header">
+        <div class="header-content">
+            <h1>Departed User Alerts</h1>
+            <p class="subtitle">Review and resolve users not found in Entra ID directory</p>
+        </div>
+        <div class="header-actions">
+            <select class="filter-select" @bind="_selectedStatus">
+                <option value="">All Statuses</option>
+                <option value="Open">Open</option>
+                <option value="Acknowledged">Acknowledged</option>
+                <option value="Resolved">Resolved</option>
+                <option value="FalsePositive">False Positive</option>
+            </select>
+            <button class="btn btn-outline" @onclick="LoadAlerts">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="loading-state">
+            <span class="spinner"></span>
+            <span>Loading alerts...</span>
+        </div>
+    }
+    else if (_alerts.Count == 0)
+    {
+        <div class="empty-state">
+            <i class="bi bi-check-circle-fill empty-icon"></i>
+            <h2>No Alerts</h2>
+            <p>All users have been matched to Entra ID or resolved.</p>
+        </div>
+    }
+    else
+    {
+        <div class="stats-bar">
+            <div class="stat">
+                <span class="stat-value">@_alerts.Count(a => a.Status == Open)</span>
+                <span class="stat-label">Open</span>
+            </div>
+            <div class="stat acknowledged">
+                <span class="stat-value">@_alerts.Count(a => a.Status == Acknowledged)</span>
+                <span class="stat-label">Acknowledged</span>
+            </div>
+            <div class="stat resolved">
+                <span class="stat-value">@_alerts.Count(a => a.Status == Resolved)</span>
+                <span class="stat-label">Resolved</span>
+            </div>
+            <div class="stat false-positive">
+                <span class="stat-value">@_alerts.Count(a => a.Status == FalsePositive)</span>
+                <span class="stat-label">False Positive</span>
+            </div>
+        </div>
+
+        <div class="alerts-table-container">
+            <table class="alerts-table">
+                <thead>
+                    <tr>
+                        <th>User Name/Email</th>
+                        <th>Type</th>
+                        <th>Application</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Discovered</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var alert in FilteredAlerts)
+                    {
+                        <tr class="@GetRowClass(alert)">
+                            <td class="user-value">
+                                <i class="bi @GetTypeIcon(alert.ValueType)"></i>
+                                @alert.UnmatchedValue
+                            </td>
+                            <td>@alert.ValueType.ToString()</td>
+                            <td>
+                                <a href="/application/@alert.ApplicationId">@alert.ApplicationName</a>
+                            </td>
+                            <td>@FormatRoleType(alert.RoleType)</td>
+                            <td>
+                                <span class="status-badge @alert.Status.ToString().ToLowerInvariant()">@alert.Status</span>
+                            </td>
+                            <td class="date-cell">@alert.DetectedAt.ToString("MMM d, yyyy")</td>
+                            <td class="actions-cell">
+                                @if (alert.Status == Open)
+                                {
+                                    <button class="btn btn-sm btn-secondary" @onclick="() => AcknowledgeAlert(alert)" title="Acknowledge">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-success" @onclick="() => ShowResolveModal(alert)" title="Resolve">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline" @onclick="() => MarkFalsePositive(alert)" title="False Positive">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                }
+                                else if (alert.Status == Acknowledged)
+                                {
+                                    <button class="btn btn-sm btn-success" @onclick="() => ShowResolveModal(alert)" title="Resolve">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline" @onclick="() => MarkFalsePositive(alert)" title="False Positive">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                }
+                                @if (!string.IsNullOrEmpty(alert.LinkedTaskId))
+                                {
+                                    <a href="/tasks?id=@alert.LinkedTaskId" class="btn btn-sm btn-outline" title="View Task">
+                                        <i class="bi bi-list-task"></i>
+                                    </a>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (_showResolveModal && _selectedAlert != null)
+{
+    <div class="modal-backdrop" @onclick="CloseResolveModal">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h3>Resolve Alert</h3>
+                <button class="close-btn" @onclick="CloseResolveModal">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="alert-summary">
+                    <strong>User:</strong> @_selectedAlert.UnmatchedValue<br />
+                    <strong>Application:</strong> @_selectedAlert.ApplicationName<br />
+                    <strong>Role:</strong> @FormatRoleType(_selectedAlert.RoleType)
+                </div>
+
+                <div class="form-group">
+                    <label>Search for replacement user in Entra ID:</label>
+                    <div class="search-input-wrapper">
+                        <input type="text" class="form-control" @bind="_searchTerm" @bind:event="oninput"
+                               placeholder="Search by name or email..." />
+                    </div>
+                </div>
+
+                @if (_searchResults.Count > 0)
+                {
+                    <div class="search-results">
+                        @foreach (var user in _searchResults)
+                        {
+                            <div class="user-result @(_selectedReplacementId == user.Id ? "selected" : "")"
+                                 @onclick="() => SelectReplacement(user)">
+                                <div class="user-info">
+                                    <span class="user-name">@user.DisplayName</span>
+                                    <span class="user-email">@user.UserPrincipalName</span>
+                                </div>
+                                @if (_selectedReplacementId == user.Id)
+                                {
+                                    <i class="bi bi-check-circle-fill"></i>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="form-group">
+                    <label>Resolution Notes (optional):</label>
+                    <textarea class="form-control" @bind="_resolutionNotes" rows="3"
+                              placeholder="Add any notes about this resolution..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" @onclick="CloseResolveModal">Cancel</button>
+                <button class="btn btn-success" @onclick="ResolveAlert" disabled="@_resolving">
+                    @if (_resolving)
+                    {
+                        <span class="spinner-sm"></span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-check-lg"></i>
+                    }
+                    Resolve
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DepartedUserAlert> _alerts = [];
+    private bool _loading = true;
+    private DepartedUserAlertStatus? _selectedStatusFilter;
+
+    // Modal state
+    private bool _showResolveModal;
+    private DepartedUserAlert? _selectedAlert;
+    private string _searchTerm = "";
+    private List<EntraUserInfo> _searchResults = [];
+    private string? _selectedReplacementId;
+    private string _resolutionNotes = "";
+    private bool _resolving;
+
+    private string _selectedStatus
+    {
+        get => _selectedStatusFilter?.ToString() ?? "";
+        set => _selectedStatusFilter = string.IsNullOrEmpty(value) ? null : Enum.Parse<DepartedUserAlertStatus>(value);
+    }
+
+    private IEnumerable<DepartedUserAlert> FilteredAlerts =>
+        _selectedStatusFilter == null
+            ? _alerts
+            : _alerts.Where(a => a.Status == _selectedStatusFilter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAlerts();
+    }
+
+    private async Task LoadAlerts()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var alerts = await DataService.GetDepartedUserAlertsAsync();
+            _alerts = alerts.ToList();
+        }
+        catch
+        {
+            _alerts = [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string FormatRoleType(string roleType)
+    {
+        return roleType switch
+        {
+            "Owner" => "Owner",
+            "ProductManager" => "Product Manager",
+            "BusinessOwner" => "Business Owner",
+            "FunctionalArchitect" => "Functional Architect",
+            "TechnicalArchitect" => "Technical Architect",
+            "TechnicalLead" => "Technical Lead",
+            _ => roleType
+        };
+    }
+
+    private static string GetTypeIcon(AliasType valueType)
+    {
+        return valueType switch
+        {
+            AliasType.Email => "bi-envelope",
+            AliasType.Name => "bi-person",
+            AliasType.EmployeeId => "bi-card-heading",
+            _ => "bi-question-circle"
+        };
+    }
+
+    private static string GetRowClass(DepartedUserAlert alert)
+    {
+        return alert.Status switch
+        {
+            Resolved => "resolved-row",
+            FalsePositive => "false-positive-row",
+            _ => ""
+        };
+    }
+
+    private async Task AcknowledgeAlert(DepartedUserAlert alert)
+    {
+        await DataService.ResolveDepartedUserAlertAsync(
+            alert.Id,
+            replacementUserId: null,
+            resolutionNotes: "Acknowledged for review",
+            resolvedByUserId: null,
+            resolvedByName: "Current User"
+        );
+
+        // Update local state
+        var index = _alerts.FindIndex(a => a.Id == alert.Id);
+        if (index >= 0)
+        {
+            _alerts[index] = alert with { Status = Acknowledged };
+        }
+    }
+
+    private async Task MarkFalsePositive(DepartedUserAlert alert)
+    {
+        await DataService.ResolveDepartedUserAlertAsync(
+            alert.Id,
+            replacementUserId: null,
+            resolutionNotes: "Marked as false positive",
+            resolvedByUserId: null,
+            resolvedByName: "Current User"
+        );
+
+        // Update local state
+        var index = _alerts.FindIndex(a => a.Id == alert.Id);
+        if (index >= 0)
+        {
+            _alerts[index] = alert with { Status = FalsePositive };
+        }
+    }
+
+    private void ShowResolveModal(DepartedUserAlert alert)
+    {
+        _selectedAlert = alert;
+        _showResolveModal = true;
+        _searchTerm = alert.UnmatchedValue;
+        _searchResults = [];
+        _selectedReplacementId = null;
+        _resolutionNotes = "";
+    }
+
+    private void CloseResolveModal()
+    {
+        _showResolveModal = false;
+        _selectedAlert = null;
+    }
+
+    private void SelectReplacement(EntraUserInfo user)
+    {
+        _selectedReplacementId = user.Id;
+    }
+
+    private async Task ResolveAlert()
+    {
+        if (_selectedAlert == null) return;
+
+        _resolving = true;
+        StateHasChanged();
+
+        try
+        {
+            await DataService.ResolveDepartedUserAlertAsync(
+                _selectedAlert.Id,
+                replacementUserId: _selectedReplacementId,
+                resolutionNotes: _resolutionNotes,
+                resolvedByUserId: null,
+                resolvedByName: "Current User"
+            );
+
+            // Update local state
+            var index = _alerts.FindIndex(a => a.Id == _selectedAlert.Id);
+            if (index >= 0)
+            {
+                _alerts[index] = _selectedAlert with { Status = Resolved };
+            }
+
+            CloseResolveModal();
+        }
+        finally
+        {
+            _resolving = false;
+        }
+    }
+
+    // Simple record for search results
+    private record EntraUserInfo(string Id, string DisplayName, string UserPrincipalName);
+}

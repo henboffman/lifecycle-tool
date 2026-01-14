@@ -50,6 +50,20 @@ public class ImportedServiceNowApplicationEntity
     public string? LinkedRepositoryId { get; set; }
     public string? LinkedRepositoryName { get; set; }
 
+    // Entra ID User Matching Results
+    // These store the matched Entra user IDs after user matching is performed
+    public string? OwnerEntraId { get; set; }
+    public string? ProductManagerEntraId { get; set; }
+    public string? BusinessOwnerEntraId { get; set; }
+    public string? FunctionalArchitectEntraId { get; set; }
+    public string? TechnicalArchitectEntraId { get; set; }
+    public string? TechnicalLeadEntraId { get; set; }
+
+    // User matching metadata
+    public DateTimeOffset? UserMatchingPerformedAt { get; set; }
+    public int? UserMatchingMatchedCount { get; set; }
+    public int? UserMatchingUnmatchedCount { get; set; }
+
     // Audit fields
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }

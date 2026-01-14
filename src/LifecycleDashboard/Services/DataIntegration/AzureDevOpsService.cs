@@ -384,7 +384,7 @@ public partial class AzureDevOpsService : IAzureDevOpsService
     }
 
     /// <inheritdoc />
-    public async Task<DataSyncResult<CommitHistory>> GetCommitHistoryAsync(string repositoryId, int daysBefore = 365)
+    public async Task<DataSyncResult<CommitHistory>> GetCommitHistoryAsync(string repositoryId, string? defaultBranch = null, int daysBefore = 365)
     {
         var startTime = DateTimeOffset.UtcNow;
 
@@ -400,13 +400,40 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             var project = Uri.EscapeDataString(await _secureStorage.GetSecretAsync(SecretKeys.AzureDevOpsProject) ?? "");
             var sinceDate = DateTimeOffset.UtcNow.AddDays(-daysBefore).ToString("o");
 
-            var response = await SendRequestAsync(
-                $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/commits?searchCriteria.fromDate={sinceDate}&api-version=7.1", auth);
+            // Build list of branches to try: default branch first, then main, then master
+            var branchesToTry = new List<string>();
+            if (!string.IsNullOrEmpty(defaultBranch)) branchesToTry.Add(defaultBranch);
+            if (!branchesToTry.Contains("main", StringComparer.OrdinalIgnoreCase)) branchesToTry.Add("main");
+            if (!branchesToTry.Contains("master", StringComparer.OrdinalIgnoreCase)) branchesToTry.Add("master");
 
-            if (!response.IsSuccessStatusCode)
+            HttpResponseMessage? response = null;
+            string? successfulBranch = null;
+
+            foreach (var branch in branchesToTry)
+            {
+                var url = $"{baseUrl}{project}/_apis/git/repositories/{repositoryId}/commits" +
+                          $"?searchCriteria.fromDate={sinceDate}" +
+                          $"&searchCriteria.itemVersion.version={Uri.EscapeDataString(branch)}" +
+                          $"&searchCriteria.itemVersion.versionType=branch" +
+                          $"&searchCriteria.$top=100" +
+                          $"&api-version=7.1";
+
+                response = await SendRequestAsync(url, auth);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    successfulBranch = branch;
+                    _logger.LogDebug("Successfully fetched commits from branch {Branch} for repo {RepoId}", branch, repositoryId);
+                    break;
+                }
+
+                _logger.LogDebug("Branch {Branch} not found for repo {RepoId}, trying next...", branch, repositoryId);
+            }
+
+            if (response == null || !response.IsSuccessStatusCode)
             {
                 return DataSyncResult<CommitHistory>.Failed(
-                    DataSourceType.AzureDevOps, startTime, $"Failed to get commits: {response.StatusCode}");
+                    DataSourceType.AzureDevOps, startTime, $"Failed to get commits: No valid branch found (tried: {string.Join(", ", branchesToTry)})");
             }
 
             var content = await response.Content.ReadAsStringAsync();
@@ -695,11 +722,11 @@ public partial class AzureDevOpsService : IAzureDevOpsService
             if (!packagesResult.Success)
                 errors.Add(new SyncError { Message = packagesResult.ErrorMessage ?? "Package detection failed" });
 
-            var commitsResult = await GetCommitHistoryAsync(repo.Id);
+            var commitsResult = await GetCommitHistoryAsync(repo.Id, repo.DefaultBranch);
             if (!commitsResult.Success)
                 errors.Add(new SyncError { Message = commitsResult.ErrorMessage ?? "Commit history failed" });
 
-            var readmeResult = await GetReadmeStatusAsync(repo.Id);
+            var readmeResult = await GetReadmeStatusAsync(repo.Id, repo.DefaultBranch);
             if (!readmeResult.Success)
                 errors.Add(new SyncError { Message = readmeResult.ErrorMessage ?? "README check failed" });
 

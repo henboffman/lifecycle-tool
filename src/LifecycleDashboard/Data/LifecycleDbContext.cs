@@ -29,6 +29,12 @@ public class LifecycleDbContext : DbContext
     public DbSet<ServiceNowIncidentEntity> ServiceNowIncidents => Set<ServiceNowIncidentEntity>();
     public DbSet<IncidentRecommendationEntity> IncidentRecommendations => Set<IncidentRecommendationEntity>();
 
+    // Entra ID / User Management
+    public DbSet<EntraUserEntity> EntraUsers => Set<EntraUserEntity>();
+    public DbSet<UserAliasEntity> UserAliases => Set<UserAliasEntity>();
+    public DbSet<DepartedUserAlertEntity> DepartedUserAlerts => Set<DepartedUserAlertEntity>();
+    public DbSet<ImportTrackingEntity> ImportTracking => Set<ImportTrackingEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -305,6 +311,84 @@ public class LifecycleDbContext : DbContext
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.Priority);
             entity.HasIndex(e => e.GeneratedAt);
+        });
+
+        // Entra User
+        modelBuilder.Entity<EntraUserEntity>(entity =>
+        {
+            entity.ToTable("EntraUsers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserPrincipalName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.GivenName).HasMaxLength(100);
+            entity.Property(e => e.Surname).HasMaxLength(100);
+            entity.Property(e => e.Mail).HasMaxLength(256);
+            entity.Property(e => e.EmployeeId).HasMaxLength(50);
+            entity.Property(e => e.Department).HasMaxLength(200);
+            entity.Property(e => e.JobTitle).HasMaxLength(200);
+            entity.Property(e => e.OfficeLocation).HasMaxLength(200);
+            entity.Property(e => e.ManagerId).HasMaxLength(36);
+            entity.Property(e => e.PhotoContentType).HasMaxLength(50);
+            entity.HasIndex(e => e.UserPrincipalName).IsUnique();
+            entity.HasIndex(e => e.Mail);
+            entity.HasIndex(e => e.DisplayName);
+            entity.HasIndex(e => e.EmployeeId);
+        });
+
+        // User Alias
+        modelBuilder.Entity<UserAliasEntity>(entity =>
+        {
+            entity.ToTable("UserAliases");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EntraUserId).HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Value).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.OriginalValue).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.DiscoveredFrom).HasMaxLength(50).IsRequired();
+            entity.HasIndex(e => e.EntraUserId);
+            entity.HasIndex(e => new { e.Type, e.Value });
+            entity.HasOne(e => e.EntraUser)
+                .WithMany(u => u.Aliases)
+                .HasForeignKey(e => e.EntraUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Departed User Alert
+        modelBuilder.Entity<DepartedUserAlertEntity>(entity =>
+        {
+            entity.ToTable("DepartedUserAlerts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UnmatchedValue).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ApplicationId).HasMaxLength(36).IsRequired();
+            entity.Property(e => e.ApplicationName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.RoleType).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.DataSource).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ResolvedByUserId).HasMaxLength(36);
+            entity.Property(e => e.ResolvedByName).HasMaxLength(256);
+            entity.Property(e => e.ResolutionNotes).HasMaxLength(1000);
+            entity.Property(e => e.ReplacementUserId).HasMaxLength(36);
+            entity.Property(e => e.ReplacementUserName).HasMaxLength(256);
+            entity.Property(e => e.LinkedTaskId).HasMaxLength(36);
+            entity.HasIndex(e => e.ApplicationId);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.DetectedAt);
+            entity.HasIndex(e => new { e.UnmatchedValue, e.ValueType });
+        });
+
+        // Import Tracking
+        modelBuilder.Entity<ImportTrackingEntity>(entity =>
+        {
+            entity.ToTable("ImportTracking");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DataSource).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.FileHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.FileName).HasMaxLength(256);
+            entity.Property(e => e.ImportedByUserId).HasMaxLength(36);
+            entity.Property(e => e.ImportedByName).HasMaxLength(256);
+            entity.Property(e => e.Notes).HasMaxLength(2000);
+            entity.HasIndex(e => e.DataSource);
+            entity.HasIndex(e => e.FileHash);
+            entity.HasIndex(e => e.ImportedAt);
+            entity.HasIndex(e => new { e.DataSource, e.FileHash });
         });
     }
 }

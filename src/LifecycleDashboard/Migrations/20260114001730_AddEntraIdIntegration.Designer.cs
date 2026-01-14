@@ -4,6 +4,7 @@ using LifecycleDashboard.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LifecycleDashboard.Migrations
 {
     [DbContext(typeof(LifecycleDbContext))]
-    partial class LifecycleDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260114001730_AddEntraIdIntegration")]
+    partial class AddEntraIdIntegration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -665,9 +668,6 @@ namespace LifecycleDashboard.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<string>("BusinessOwnerEntraId")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("BusinessOwnerId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -699,9 +699,6 @@ namespace LifecycleDashboard.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<string>("FunctionalArchitectEntraId")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("FunctionalArchitectId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -730,9 +727,6 @@ namespace LifecycleDashboard.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<string>("OwnerEntraId")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("OwnerId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -740,9 +734,6 @@ namespace LifecycleDashboard.Migrations
                     b.Property<string>("OwnerName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("ProductManagerEntraId")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ProductManagerId")
                         .HasMaxLength(100)
@@ -777,9 +768,6 @@ namespace LifecycleDashboard.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<string>("TechnicalArchitectEntraId")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("TechnicalArchitectId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -787,9 +775,6 @@ namespace LifecycleDashboard.Migrations
                     b.Property<string>("TechnicalArchitectName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("TechnicalLeadEntraId")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("TechnicalLeadId")
                         .HasMaxLength(100)
@@ -805,15 +790,6 @@ namespace LifecycleDashboard.Migrations
                     b.Property<string>("UserBase")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<int?>("UserMatchingMatchedCount")
-                        .HasColumnType("int");
-
-                    b.Property<DateTimeOffset?>("UserMatchingPerformedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<int?>("UserMatchingUnmatchedCount")
-                        .HasColumnType("int");
 
                     b.HasKey("Id");
 

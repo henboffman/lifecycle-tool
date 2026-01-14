@@ -218,6 +218,16 @@
                                 <span class="label">Last Commit</span>
                                 <span class="value">@FormatDate(_selectedRepo.LastCommitDate)</span>
                             </div>
+                            @if (!string.IsNullOrEmpty(_selectedRepo.LinkedApplicationId))
+                            {
+                                <div class="detail-item linked-app">
+                                    <span class="label">Linked Application</span>
+                                    <a href="/applications/@_selectedRepo.LinkedApplicationId" class="app-link">
+                                        <i class="bi bi-box-arrow-up-right"></i>
+                                        @(_selectedRepo.LinkedApplicationName ?? "View Application")
+                                    </a>
+                                </div>
+                            }
                         </div>
                     </div>
 

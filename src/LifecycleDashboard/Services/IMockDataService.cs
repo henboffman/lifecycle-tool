@@ -1,3 +1,4 @@
+using LifecycleDashboard.Data.Entities;
 using LifecycleDashboard.Models;
 
 namespace LifecycleDashboard.Services;
@@ -258,6 +259,29 @@ public interface IMockDataService
     /// Returns the number of applications created or updated.
     /// </summary>
     Task<int> CreateApplicationsFromServiceNowImportAsync();
+
+    /// <summary>
+    /// Performs user matching on imported ServiceNow applications using Entra ID.
+    /// Matches user names from ServiceNow to Entra users and stores the Entra IDs.
+    /// Creates departed user alerts for any users that couldn't be matched.
+    /// </summary>
+    /// <returns>Result containing match statistics and any alerts created.</returns>
+    Task<UserMatchingResult> PerformUserMatchingOnImportsAsync();
+
+    /// <summary>
+    /// Gets all departed user alerts.
+    /// </summary>
+    Task<IReadOnlyList<DepartedUserAlert>> GetDepartedUserAlertsAsync();
+
+    /// <summary>
+    /// Gets departed user alerts filtered by status.
+    /// </summary>
+    Task<IReadOnlyList<DepartedUserAlert>> GetDepartedUserAlertsAsync(DepartedUserAlertStatus status);
+
+    /// <summary>
+    /// Resolves a departed user alert.
+    /// </summary>
+    Task ResolveDepartedUserAlertAsync(string alertId, string? replacementUserId, string? resolutionNotes, string? resolvedByUserId, string? resolvedByName);
 
     /// <summary>
     /// Gets the saved ServiceNow CSV column mapping.
@@ -796,6 +820,20 @@ public record ImportedServiceNowApplication
     // Linked repository (if mapped)
     public string? LinkedRepositoryId { get; init; }
     public string? LinkedRepositoryName { get; init; }
+
+    // Entra ID User Matching Results
+    // These store the matched Entra user IDs after user matching is performed
+    public string? OwnerEntraId { get; init; }
+    public string? ProductManagerEntraId { get; init; }
+    public string? BusinessOwnerEntraId { get; init; }
+    public string? FunctionalArchitectEntraId { get; init; }
+    public string? TechnicalArchitectEntraId { get; init; }
+    public string? TechnicalLeadEntraId { get; init; }
+
+    // User matching metadata
+    public DateTimeOffset? UserMatchingPerformedAt { get; init; }
+    public int? UserMatchingMatchedCount { get; init; }
+    public int? UserMatchingUnmatchedCount { get; init; }
 }
 
 /// <summary>
@@ -997,4 +1035,79 @@ public record SharePointConfig
 
     /// <summary>When this configuration was last updated.</summary>
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Result of performing user matching on imported data.
+/// </summary>
+public record UserMatchingResult
+{
+    /// <summary>Number of applications processed.</summary>
+    public int ApplicationsProcessed { get; init; }
+
+    /// <summary>Total number of role fields checked.</summary>
+    public int TotalRolesChecked { get; init; }
+
+    /// <summary>Number of roles successfully matched to Entra users.</summary>
+    public int RolesMatched { get; init; }
+
+    /// <summary>Number of roles that couldn't be matched.</summary>
+    public int RolesUnmatched { get; init; }
+
+    /// <summary>Number of departed user alerts created.</summary>
+    public int AlertsCreated { get; init; }
+
+    /// <summary>Number of user aliases discovered and stored.</summary>
+    public int AliasesDiscovered { get; init; }
+
+    /// <summary>When the matching was performed.</summary>
+    public DateTimeOffset PerformedAt { get; init; }
+
+    /// <summary>Any error message if matching failed.</summary>
+    public string? ErrorMessage { get; init; }
+
+    /// <summary>Whether the matching completed successfully.</summary>
+    public bool Success { get; init; }
+
+    /// <summary>Details of individual match results for review.</summary>
+    public List<RoleMatchDetail> MatchDetails { get; init; } = [];
+}
+
+/// <summary>
+/// Details of a single role match attempt.
+/// </summary>
+public record RoleMatchDetail
+{
+    public required string ApplicationId { get; init; }
+    public required string ApplicationName { get; init; }
+    public required string RoleType { get; init; }
+    public required string OriginalValue { get; init; }
+    public bool Matched { get; init; }
+    public string? MatchedEntraId { get; init; }
+    public string? MatchedDisplayName { get; init; }
+    public MatchConfidence Confidence { get; init; }
+    public string? MatchExplanation { get; init; }
+}
+
+/// <summary>
+/// Departed user alert model for UI display.
+/// </summary>
+public record DepartedUserAlert
+{
+    public required string Id { get; init; }
+    public required string UnmatchedValue { get; init; }
+    public AliasType ValueType { get; init; }
+    public required string ApplicationId { get; init; }
+    public required string ApplicationName { get; init; }
+    public required string RoleType { get; init; }
+    public required string DataSource { get; init; }
+    public DepartedUserAlertStatus Status { get; init; }
+    public string? ResolvedByUserId { get; init; }
+    public string? ResolvedByName { get; init; }
+    public string? ResolutionNotes { get; init; }
+    public string? ReplacementUserId { get; init; }
+    public string? ReplacementUserName { get; init; }
+    public DateTimeOffset DetectedAt { get; init; }
+    public DateTimeOffset? ResolvedAt { get; init; }
+    public string? LinkedTaskId { get; init; }
 }

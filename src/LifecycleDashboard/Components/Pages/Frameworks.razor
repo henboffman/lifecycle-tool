@@ -19,33 +19,34 @@
         </div>
     </header>
 
-    <!-- EOL Summary Cards -->
+    <!-- EOL Summary Cards - Shows APPLICATION counts affected by framework EOL status -->
     @if (_eolSummary != null)
     {
         <section class="eol-summary-cards">
             <div class="summary-card total">
-                <div class="summary-value">@_allVersions.Count</div>
-                <div class="summary-label">Total Tracked</div>
+                <div class="summary-value">@_eolSummary.TotalApplications</div>
+                <div class="summary-label">Total Applications</div>
+                <div class="summary-detail">@_allVersions.Count frameworks tracked</div>
             </div>
             <div class="summary-card past-eol" @onclick="() => FilterByUrgency(EolUrgency.PastEol)">
-                <div class="summary-value">@_allVersions.Count(v => v.IsPastEol)</div>
+                <div class="summary-value">@_eolSummary.ApplicationsWithEolFrameworks</div>
                 <div class="summary-label">Past EOL</div>
-                @if (_eolSummary.ApplicationsWithEolFrameworks > 0)
-                {
-                    <div class="summary-detail">@_eolSummary.ApplicationsWithEolFrameworks apps affected</div>
-                }
+                <div class="summary-detail">@_allVersions.Count(v => v.IsPastEol) frameworks</div>
             </div>
             <div class="summary-card critical" @onclick="() => FilterByUrgency(EolUrgency.Critical)">
-                <div class="summary-value">@_allVersions.Count(v => v.EolUrgency == EolUrgency.Critical)</div>
+                <div class="summary-value">@_eolSummary.CriticalEolCount</div>
                 <div class="summary-label">Critical (&lt;90 days)</div>
+                <div class="summary-detail">@_allVersions.Count(v => v.EolUrgency == EolUrgency.Critical) frameworks</div>
             </div>
             <div class="summary-card approaching" @onclick="() => FilterByUrgency(EolUrgency.Medium)">
-                <div class="summary-value">@_allVersions.Count(v => v.IsApproachingEol)</div>
+                <div class="summary-value">@_eolSummary.ApplicationsApproachingEol</div>
                 <div class="summary-label">Approaching EOL</div>
+                <div class="summary-detail">@_allVersions.Count(v => v.IsApproachingEol) frameworks</div>
             </div>
             <div class="summary-card supported">
-                <div class="summary-value">@_allVersions.Count(v => v.Status == SupportStatus.Active)</div>
-                <div class="summary-label">Actively Supported</div>
+                <div class="summary-value">@GetSupportedAppCount()</div>
+                <div class="summary-label">On Supported</div>
+                <div class="summary-detail">@_allVersions.Count(v => v.Status == SupportStatus.Active) frameworks</div>
             </div>
         </section>
     }
@@ -286,8 +287,17 @@
         _allVersions = (await DataService.GetAllFrameworkVersionsAsync()).ToList();
         _eolSummary = await DataService.GetFrameworkEolSummaryAsync();
 
-        // Pre-calculate app counts
-        foreach (var version in _allVersions)
+        // Pre-calculate app counts from EOL summary details (more reliable than per-framework queries)
+        if (_eolSummary?.Details != null)
+        {
+            foreach (var detail in _eolSummary.Details)
+            {
+                _appCounts[detail.Framework.Id] = detail.ApplicationCount;
+            }
+        }
+
+        // Fall back to individual queries for any frameworks not in the summary
+        foreach (var version in _allVersions.Where(v => !_appCounts.ContainsKey(v.Id)))
         {
             var apps = await DataService.GetApplicationsByFrameworkAsync(version.Id);
             _appCounts[version.Id] = apps.Count;
@@ -389,6 +399,16 @@
     private int GetAppCountForVersion(FrameworkVersion version)
     {
         return _appCounts.TryGetValue(version.Id, out var count) ? count : 0;
+    }
+
+    private int GetSupportedAppCount()
+    {
+        // Calculate apps on supported frameworks (total - EOL - approaching EOL - critical)
+        if (_eolSummary == null) return 0;
+        return Math.Max(0, _eolSummary.TotalApplications
+            - _eolSummary.ApplicationsWithEolFrameworks
+            - _eolSummary.ApplicationsApproachingEol
+            - _eolSummary.CriticalEolCount);
     }
 
     private static string GetRowClass(FrameworkVersion version) => version.EolUrgency switch

@@ -584,7 +584,16 @@ public static class EntityMappers
             ImportedAt = entity.ImportedAt,
             RawCsvValues = JsonSerializer.Deserialize<Dictionary<string, string>>(entity.RawCsvValuesJson, JsonOptions) ?? [],
             LinkedRepositoryId = entity.LinkedRepositoryId,
-            LinkedRepositoryName = entity.LinkedRepositoryName
+            LinkedRepositoryName = entity.LinkedRepositoryName,
+            OwnerEntraId = entity.OwnerEntraId,
+            ProductManagerEntraId = entity.ProductManagerEntraId,
+            BusinessOwnerEntraId = entity.BusinessOwnerEntraId,
+            FunctionalArchitectEntraId = entity.FunctionalArchitectEntraId,
+            TechnicalArchitectEntraId = entity.TechnicalArchitectEntraId,
+            TechnicalLeadEntraId = entity.TechnicalLeadEntraId,
+            UserMatchingPerformedAt = entity.UserMatchingPerformedAt,
+            UserMatchingMatchedCount = entity.UserMatchingMatchedCount,
+            UserMatchingUnmatchedCount = entity.UserMatchingUnmatchedCount
         };
     }
 
@@ -622,6 +631,15 @@ public static class EntityMappers
         entity.RawCsvValuesJson = JsonSerializer.Serialize(model.RawCsvValues, JsonOptions);
         entity.LinkedRepositoryId = model.LinkedRepositoryId;
         entity.LinkedRepositoryName = model.LinkedRepositoryName;
+        entity.OwnerEntraId = model.OwnerEntraId;
+        entity.ProductManagerEntraId = model.ProductManagerEntraId;
+        entity.BusinessOwnerEntraId = model.BusinessOwnerEntraId;
+        entity.FunctionalArchitectEntraId = model.FunctionalArchitectEntraId;
+        entity.TechnicalArchitectEntraId = model.TechnicalArchitectEntraId;
+        entity.TechnicalLeadEntraId = model.TechnicalLeadEntraId;
+        entity.UserMatchingPerformedAt = model.UserMatchingPerformedAt;
+        entity.UserMatchingMatchedCount = model.UserMatchingMatchedCount;
+        entity.UserMatchingUnmatchedCount = model.UserMatchingUnmatchedCount;
         entity.UpdatedAt = DateTimeOffset.UtcNow;
         return entity;
     }

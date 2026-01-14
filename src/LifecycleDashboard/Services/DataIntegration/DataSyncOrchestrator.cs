@@ -770,7 +770,7 @@ public class DataSyncOrchestrator : IDataSyncOrchestrator
                 if (!skipToSecurity)
                 try
                 {
-                    var commitsResult = await _azureDevOpsService.GetCommitHistoryAsync(repo.Id, 365);
+                    var commitsResult = await _azureDevOpsService.GetCommitHistoryAsync(repo.Id, repo.DefaultBranch, 365);
                     if (commitsResult.Success && commitsResult.Data != null)
                     {
                         syncedRepo = syncedRepo with

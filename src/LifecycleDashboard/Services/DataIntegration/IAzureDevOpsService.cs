@@ -36,7 +36,10 @@ public interface IAzureDevOpsService
     /// <summary>
     /// Gets commit history for a repository.
     /// </summary>
-    Task<DataSyncResult<CommitHistory>> GetCommitHistoryAsync(string repositoryId, int daysBefore = 365);
+    /// <param name="repositoryId">Repository ID</param>
+    /// <param name="defaultBranch">Default branch name (e.g., "main", "master"). Falls back to main, then master.</param>
+    /// <param name="daysBefore">Number of days of history to fetch.</param>
+    Task<DataSyncResult<CommitHistory>> GetCommitHistoryAsync(string repositoryId, string? defaultBranch = null, int daysBefore = 365);
 
     /// <summary>
     /// Gets README status for a repository.

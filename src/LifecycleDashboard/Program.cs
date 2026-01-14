@@ -1,8 +1,11 @@
+using Azure.Identity;
 using LifecycleDashboard.Components;
 using LifecycleDashboard.Data;
 using LifecycleDashboard.Services;
 using LifecycleDashboard.Services.DataIntegration;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Graph;
+using Microsoft.Identity.Web;
 
 // Default to Development environment if not explicitly set
 // This must be done BEFORE CreateBuilder so user secrets are loaded
@@ -19,6 +22,47 @@ builder.Services.AddRazorComponents()
 
 // Add Data Protection for secure credential storage
 builder.Services.AddDataProtection();
+
+// Configure Microsoft Entra ID authentication (if configured)
+var entraSection = builder.Configuration.GetSection("AzureAd");
+var tenantId = entraSection["TenantId"];
+var clientId = entraSection["ClientId"];
+var clientSecret = entraSection["ClientSecret"];
+
+GraphServiceClient? graphClient = null;
+
+if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId))
+{
+    // Add authentication with Microsoft Identity Web
+    builder.Services.AddMicrosoftIdentityWebAppAuthentication(builder.Configuration, "AzureAd")
+        .EnableTokenAcquisitionToCallDownstreamApi()
+        .AddMicrosoftGraph(builder.Configuration.GetSection("MicrosoftGraph"))
+        .AddInMemoryTokenCaches();
+
+    // Configure Graph client for service-to-service calls
+    if (!string.IsNullOrEmpty(clientSecret))
+    {
+        var credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        graphClient = new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
+    }
+
+    builder.Services.AddAuthorization();
+    builder.Services.AddCascadingAuthenticationState();
+}
+else
+{
+    Console.WriteLine("Note: Entra ID authentication not configured. Running in anonymous mode.");
+}
+
+// Register Graph client (may be null if not configured)
+if (graphClient != null)
+{
+    builder.Services.AddSingleton(graphClient);
+}
+else
+{
+    builder.Services.AddSingleton<GraphServiceClient?>(sp => null);
+}
 
 // Register database context (required for data persistence)
 var connectionString = builder.Configuration.GetConnectionString("LifecycleDb");
@@ -65,6 +109,9 @@ builder.Services.AddSingleton<IDataSyncOrchestrator, DataSyncOrchestrator>();
 // Register task generation service
 builder.Services.AddSingleton<ITaskGenerationService, TaskGenerationService>();
 
+// Register Entra ID service for user lookup and matching
+builder.Services.AddSingleton<IEntraIdService, EntraIdService>();
+
 var app = builder.Build();
 
 // Seed database with initial data if empty (development only)
@@ -87,6 +134,14 @@ else
 }
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+
+// Add authentication/authorization if configured
+if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId))
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
+
 app.UseAntiforgery();
 
 // Static files configuration

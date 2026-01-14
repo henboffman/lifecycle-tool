@@ -4,6 +4,7 @@
 @using System.Text
 @inject IMockDataService DataService
 @inject DI.IDataSyncOrchestrator SyncOrchestrator
+@inject IEntraIdService EntraIdService
 @inject IJSRuntime JS
 
 <PageTitle>ServiceNow Import - Lifecycle Dashboard</PageTitle>
@@ -231,6 +232,40 @@
                 <i class="bi bi-check-circle-fill success-icon"></i>
                 <h2>Import Complete!</h2>
                 <p>Successfully imported @_importedCount applications from ServiceNow.</p>
+
+                @if (_entraConfigured)
+                {
+                    <div class="user-matching-section">
+                        @if (_matchingResult == null && !_matchingUsers)
+                        {
+                            <p class="matching-prompt">Match imported user names against Entra ID directory?</p>
+                            <button class="btn btn-secondary" @onclick="PerformUserMatching" disabled="@_matchingUsers">
+                                <i class="bi bi-person-check"></i> Match Users with Entra ID
+                            </button>
+                        }
+                        else if (_matchingUsers)
+                        {
+                            <div class="matching-progress">
+                                <span class="spinner-sm"></span>
+                                <span>Matching users against Entra ID...</span>
+                            </div>
+                        }
+                        else if (_matchingResult != null)
+                        {
+                            <div class="matching-results">
+                                <i class="bi bi-check-circle success-icon-sm"></i>
+                                <span>Matched @_matchingResult.RolesMatched of @_matchingResult.TotalRolesChecked roles</span>
+                                @if (_matchingResult.RolesUnmatched > 0)
+                                {
+                                    <a href="/user-alerts" class="btn btn-sm btn-outline-warning">
+                                        <i class="bi bi-exclamation-triangle"></i> @_matchingResult.RolesUnmatched Unmatched
+                                    </a>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
                 <div class="success-actions">
                     <button class="btn btn-outline" @onclick="ResetImport">
                         <i class="bi bi-arrow-repeat"></i> Import Another File
@@ -254,9 +289,36 @@
             <p class="section-description">
                 You have existing ServiceNow data. New imports will update existing records by ServiceNow ID.
             </p>
-            <button class="btn btn-outline btn-sm" @onclick="ClearExistingData">
-                <i class="bi bi-trash"></i> Clear All Imported Data
-            </button>
+            <div class="existing-actions">
+                @if (_entraConfigured)
+                {
+                    @if (_matchingResult == null && !_matchingUsers)
+                    {
+                        <button class="btn btn-secondary btn-sm" @onclick="PerformUserMatching" disabled="@_matchingUsers">
+                            <i class="bi bi-person-check"></i> Match Users with Entra ID
+                        </button>
+                    }
+                    else if (_matchingUsers)
+                    {
+                        <span class="matching-progress-inline">
+                            <span class="spinner-sm"></span> Matching...
+                        </span>
+                    }
+                    else if (_matchingResult != null)
+                    {
+                        <span class="matching-result-inline">
+                            <i class="bi bi-check-circle"></i> @_matchingResult.RolesMatched/@_matchingResult.TotalRolesChecked matched
+                            @if (_matchingResult.RolesUnmatched > 0)
+                            {
+                                <a href="/user-alerts" class="unmatched-link">(@_matchingResult.RolesUnmatched unmatched)</a>
+                            }
+                        </span>
+                    }
+                }
+                <button class="btn btn-outline btn-sm" @onclick="ClearExistingData">
+                    <i class="bi bi-trash"></i> Clear All Imported Data
+                </button>
+            </div>
         </section>
     }
 </div>
@@ -280,6 +342,11 @@
     private bool _importing;
     private bool _importComplete;
     private int _importedCount;
+
+    // Entra ID user matching
+    private bool _entraConfigured;
+    private bool _matchingUsers;
+    private UserMatchingResult? _matchingResult;
 
     private readonly List<MappingField> _mappingFields =
     [
@@ -327,10 +394,33 @@
     {
         _savedMapping = await DataService.GetServiceNowColumnMappingAsync();
         _existingImports = (await DataService.GetImportedServiceNowApplicationsAsync()).ToList();
+        _entraConfigured = await EntraIdService.IsConfiguredAsync();
 
         if (_savedMapping != null)
         {
             LoadMappingFromSaved(_savedMapping);
+        }
+    }
+
+    private async Task PerformUserMatching()
+    {
+        if (_matchingUsers) return;
+
+        _matchingUsers = true;
+        StateHasChanged();
+
+        try
+        {
+            _matchingResult = await DataService.PerformUserMatchingOnImportsAsync();
+        }
+        catch (Exception ex)
+        {
+            _uploadError = $"User matching failed: {ex.Message}";
+        }
+        finally
+        {
+            _matchingUsers = false;
+            StateHasChanged();
         }
     }
 

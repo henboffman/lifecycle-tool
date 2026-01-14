@@ -387,6 +387,33 @@
     font-size: 0.9rem;
 }
 
+.detail-item.linked-app {
+    grid-column: span 2;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.detail-item .app-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-primary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: color 0.2s;
+}
+
+.detail-item .app-link:hover {
+    color: var(--color-primary-light);
+    text-decoration: underline;
+}
+
+.detail-item .app-link i {
+    font-size: 0.75rem;
+}
+
 /* Stack Info */
 .stack-info {
     display: flex;

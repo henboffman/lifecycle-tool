@@ -13,6 +13,7 @@ public class DatabaseDataService : IMockDataService
 {
     private readonly IDbContextFactory<LifecycleDbContext> _contextFactory;
     private readonly IHealthScoringService _healthScoringService;
+    private readonly IEntraIdService _entraIdService;
     private readonly ILogger<DatabaseDataService> _logger;
 
     // In-memory caches for configuration data (not persisted to DB yet)
@@ -32,10 +33,12 @@ public class DatabaseDataService : IMockDataService
     public DatabaseDataService(
         IDbContextFactory<LifecycleDbContext> contextFactory,
         IHealthScoringService healthScoringService,
+        IEntraIdService entraIdService,
         ILogger<DatabaseDataService> logger)
     {
         _contextFactory = contextFactory;
         _healthScoringService = healthScoringService;
+        _entraIdService = entraIdService;
         _logger = logger;
 
         // Initialize default data source configs
@@ -795,9 +798,10 @@ public class DatabaseDataService : IMockDataService
             TotalApplications = applications.Count,
             ApplicationsWithEolFrameworks = details.Where(d => d.Framework.IsPastEol).Sum(d => d.ApplicationCount),
             ApplicationsApproachingEol = details.Where(d => d.Framework.IsApproachingEol && !d.Framework.IsPastEol).Sum(d => d.ApplicationCount),
-            CriticalEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.Critical),
-            HighEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.High),
-            MediumEolCount = details.Count(d => d.Framework.EolUrgency == EolUrgency.Medium),
+            // Sum application counts, not framework counts
+            CriticalEolCount = details.Where(d => d.Framework.EolUrgency == EolUrgency.Critical).Sum(d => d.ApplicationCount),
+            HighEolCount = details.Where(d => d.Framework.EolUrgency == EolUrgency.High).Sum(d => d.ApplicationCount),
+            MediumEolCount = details.Where(d => d.Framework.EolUrgency == EolUrgency.Medium).Sum(d => d.ApplicationCount),
             Details = details.OrderBy(d => d.Framework.DaysUntilEol ?? int.MaxValue).ToList()
         };
     }
@@ -1501,6 +1505,243 @@ public class DatabaseDataService : IMockDataService
     {
         _serviceNowColumnMapping = mapping;
         return Task.CompletedTask;
+    }
+
+    public async Task<UserMatchingResult> PerformUserMatchingOnImportsAsync()
+    {
+        var result = new UserMatchingResult
+        {
+            PerformedAt = DateTimeOffset.UtcNow,
+            Success = true
+        };
+
+        try
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync();
+            var importedApps = await context.ImportedServiceNowApplications.ToListAsync();
+
+            result = result with { ApplicationsProcessed = importedApps.Count };
+
+            var matchDetails = new List<RoleMatchDetail>();
+            var totalRolesChecked = 0;
+            var rolesMatched = 0;
+            var rolesUnmatched = 0;
+            var aliasesDiscovered = 0;
+            var alertsCreated = 0;
+
+            foreach (var app in importedApps)
+            {
+                // Match each role type
+                var roleMatches = new List<(string RoleType, string? Name, string? CurrentEntraId, Action<string?> SetEntraId)>
+                {
+                    ("Owner", app.OwnerName, app.OwnerEntraId, id => app.OwnerEntraId = id),
+                    ("ProductManager", app.ProductManagerName, app.ProductManagerEntraId, id => app.ProductManagerEntraId = id),
+                    ("BusinessOwner", app.BusinessOwnerName, app.BusinessOwnerEntraId, id => app.BusinessOwnerEntraId = id),
+                    ("FunctionalArchitect", app.FunctionalArchitectName, app.FunctionalArchitectEntraId, id => app.FunctionalArchitectEntraId = id),
+                    ("TechnicalArchitect", app.TechnicalArchitectName, app.TechnicalArchitectEntraId, id => app.TechnicalArchitectEntraId = id),
+                    ("TechnicalLead", app.TechnicalLeadName, app.TechnicalLeadEntraId, id => app.TechnicalLeadEntraId = id)
+                };
+
+                foreach (var (roleType, name, currentEntraId, setEntraId) in roleMatches)
+                {
+                    if (string.IsNullOrWhiteSpace(name))
+                        continue;
+
+                    totalRolesChecked++;
+
+                    // Skip if already matched
+                    if (!string.IsNullOrWhiteSpace(currentEntraId))
+                    {
+                        rolesMatched++;
+                        continue;
+                    }
+
+                    // Use Entra service for matching
+                    var matchContext = new MatchContext
+                    {
+                        DataSource = "ServiceNow",
+                        RoleType = roleType,
+                        ApplicationId = app.ServiceNowId,
+                        ApplicationName = app.Name,
+                        CreateAlertsForNoMatch = true
+                    };
+
+                    var matchResult = await _entraIdService.MatchUserAsync(name, matchContext);
+
+                    var detail = new RoleMatchDetail
+                    {
+                        ApplicationId = app.ServiceNowId,
+                        ApplicationName = app.Name,
+                        RoleType = roleType,
+                        OriginalValue = name,
+                        Matched = matchResult.IsMatched,
+                        MatchedEntraId = matchResult.MatchedUser?.Id,
+                        MatchedDisplayName = matchResult.MatchedUser?.DisplayName,
+                        Confidence = matchResult.Confidence,
+                        MatchExplanation = matchResult.MatchExplanation
+                    };
+
+                    matchDetails.Add(detail);
+
+                    if (matchResult.IsMatched && matchResult.MatchedUser != null)
+                    {
+                        setEntraId(matchResult.MatchedUser.Id);
+                        rolesMatched++;
+
+                        // Add discovered alias if it was a fuzzy match
+                        if (matchResult.Method is MatchMethod.DisplayNameFuzzy or MatchMethod.NamePermutation)
+                        {
+                            await _entraIdService.AddUserAliasAsync(
+                                matchResult.MatchedUser.Id,
+                                AliasType.Name,
+                                name,
+                                "ServiceNow");
+                            aliasesDiscovered++;
+                        }
+                    }
+                    else
+                    {
+                        rolesUnmatched++;
+
+                        // Alert is created by the Entra service if CreateAlertsForNoMatch is true
+                        // Check if alert was created
+                        var existingAlert = await context.DepartedUserAlerts
+                            .FirstOrDefaultAsync(a =>
+                                a.UnmatchedValue == name &&
+                                a.ApplicationId == app.ServiceNowId &&
+                                a.RoleType == roleType &&
+                                a.Status == DepartedUserAlertStatus.Open);
+
+                        if (existingAlert != null)
+                        {
+                            alertsCreated++;
+                        }
+                    }
+                }
+
+                // Update metadata
+                app.UserMatchingPerformedAt = DateTimeOffset.UtcNow;
+                app.UserMatchingMatchedCount = roleMatches.Count(r => !string.IsNullOrWhiteSpace(r.Name) && context.Entry(app).Property(r.RoleType + "EntraId").CurrentValue != null);
+                app.UserMatchingUnmatchedCount = roleMatches.Count(r => !string.IsNullOrWhiteSpace(r.Name) && context.Entry(app).Property(r.RoleType + "EntraId").CurrentValue == null);
+            }
+
+            await context.SaveChangesAsync();
+
+            result = result with
+            {
+                TotalRolesChecked = totalRolesChecked,
+                RolesMatched = rolesMatched,
+                RolesUnmatched = rolesUnmatched,
+                AlertsCreated = alertsCreated,
+                AliasesDiscovered = aliasesDiscovered,
+                MatchDetails = matchDetails
+            };
+
+            _logger.LogInformation("User matching completed: {Matched}/{Total} roles matched, {Alerts} alerts created",
+                rolesMatched, totalRolesChecked, alertsCreated);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error performing user matching on imports");
+            result = result with
+            {
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<DepartedUserAlert>> GetDepartedUserAlertsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.DepartedUserAlerts
+            .AsNoTracking()
+            .OrderByDescending(a => a.DetectedAt)
+            .ToListAsync();
+
+        return entities.Select(e => new DepartedUserAlert
+        {
+            Id = e.Id,
+            UnmatchedValue = e.UnmatchedValue,
+            ValueType = e.ValueType,
+            ApplicationId = e.ApplicationId,
+            ApplicationName = e.ApplicationName,
+            RoleType = e.RoleType,
+            DataSource = e.DataSource,
+            Status = e.Status,
+            ResolvedByUserId = e.ResolvedByUserId,
+            ResolvedByName = e.ResolvedByName,
+            ResolutionNotes = e.ResolutionNotes,
+            ReplacementUserId = e.ReplacementUserId,
+            ReplacementUserName = e.ReplacementUserName,
+            DetectedAt = e.DetectedAt,
+            ResolvedAt = e.ResolvedAt,
+            LinkedTaskId = e.LinkedTaskId
+        }).ToList();
+    }
+
+    public async Task<IReadOnlyList<DepartedUserAlert>> GetDepartedUserAlertsAsync(DepartedUserAlertStatus status)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entities = await context.DepartedUserAlerts
+            .AsNoTracking()
+            .Where(a => a.Status == status)
+            .OrderByDescending(a => a.DetectedAt)
+            .ToListAsync();
+
+        return entities.Select(e => new DepartedUserAlert
+        {
+            Id = e.Id,
+            UnmatchedValue = e.UnmatchedValue,
+            ValueType = e.ValueType,
+            ApplicationId = e.ApplicationId,
+            ApplicationName = e.ApplicationName,
+            RoleType = e.RoleType,
+            DataSource = e.DataSource,
+            Status = e.Status,
+            ResolvedByUserId = e.ResolvedByUserId,
+            ResolvedByName = e.ResolvedByName,
+            ResolutionNotes = e.ResolutionNotes,
+            ReplacementUserId = e.ReplacementUserId,
+            ReplacementUserName = e.ReplacementUserName,
+            DetectedAt = e.DetectedAt,
+            ResolvedAt = e.ResolvedAt,
+            LinkedTaskId = e.LinkedTaskId
+        }).ToList();
+    }
+
+    public async Task ResolveDepartedUserAlertAsync(string alertId, string? replacementUserId, string? resolutionNotes, string? resolvedByUserId, string? resolvedByName)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var alert = await context.DepartedUserAlerts.FindAsync(alertId);
+
+        if (alert == null)
+        {
+            _logger.LogWarning("Departed user alert not found: {AlertId}", alertId);
+            return;
+        }
+
+        alert.Status = DepartedUserAlertStatus.Resolved;
+        alert.ReplacementUserId = replacementUserId;
+        alert.ResolutionNotes = resolutionNotes;
+        alert.ResolvedByUserId = resolvedByUserId;
+        alert.ResolvedByName = resolvedByName;
+        alert.ResolvedAt = DateTimeOffset.UtcNow;
+
+        // If a replacement user was specified, get their name
+        if (!string.IsNullOrEmpty(replacementUserId))
+        {
+            var replacementUser = await _entraIdService.GetUserByIdAsync(replacementUserId);
+            if (replacementUser != null)
+            {
+                alert.ReplacementUserName = replacementUser.DisplayName;
+            }
+        }
+
+        await context.SaveChangesAsync();
+        _logger.LogInformation("Resolved departed user alert {AlertId} for {Value}", alertId, alert.UnmatchedValue);
     }
 
     #endregion
