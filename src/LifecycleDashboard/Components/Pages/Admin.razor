@@ -1203,61 +1203,82 @@
         <section class="admin-section">
             <div class="section-header">
                 <h2>System Settings</h2>
-                <p class="section-desc">General application configuration and data source connections</p>
+                <p class="section-desc">General application configuration, AI services, and data source connections</p>
             </div>
 
-            <div class="system-info">
-                <div class="info-card">
-                    <h3>Environment</h3>
-                    <div class="info-items">
-                        <div class="info-item">
-                            <span class="info-label">Mode</span>
-                            <span class="info-value badge-dev">@_systemSettings.EnvironmentMode</span>
+            <!-- System Sub-Navigation -->
+            <div class="system-sub-tabs">
+                <button class="sub-tab @(_systemSubSection == SystemSubSection.Overview ? "active" : "")"
+                        @onclick="() => _systemSubSection = SystemSubSection.Overview">
+                    <i class="bi bi-info-circle"></i> Overview
+                </button>
+                <button class="sub-tab @(_systemSubSection == SystemSubSection.AiServices ? "active" : "")"
+                        @onclick="() => _systemSubSection = SystemSubSection.AiServices">
+                    <i class="bi bi-robot"></i> AI Services
+                </button>
+                <button class="sub-tab @(_systemSubSection == SystemSubSection.DataConnectors ? "active" : "")"
+                        @onclick="() => _systemSubSection = SystemSubSection.DataConnectors">
+                    <i class="bi bi-plug"></i> Data Connectors
+                </button>
+            </div>
+
+            @if (_systemSubSection == SystemSubSection.Overview)
+            {
+                <div class="system-info">
+                    <div class="info-card">
+                        <h3>Environment</h3>
+                        <div class="info-items">
+                            <div class="info-item">
+                                <span class="info-label">Mode</span>
+                                <span class="info-value badge-dev">@_systemSettings.EnvironmentMode</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Data Source</span>
+                                <span class="info-value @(_systemSettings.MockDataEnabled ? "badge-mock" : "badge-live")">
+                                    @(_systemSettings.MockDataEnabled ? "Mock Data" : "Live Data")
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Version</span>
+                                <span class="info-value">@_systemSettings.ApplicationVersion</span>
+                            </div>
                         </div>
-                        <div class="info-item">
-                            <span class="info-label">Data Source</span>
-                            <span class="info-value @(_systemSettings.MockDataEnabled ? "badge-mock" : "badge-live")">
-                                @(_systemSettings.MockDataEnabled ? "Mock Data" : "Live Data")
-                            </span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Version</span>
-                            <span class="info-value">@_systemSettings.ApplicationVersion</span>
+                    </div>
+
+                    <div class="info-card">
+                        <h3>Feature Flags</h3>
+                        <div class="feature-flags">
+                            <div class="feature-flag">
+                                <span class="flag-name">Mock Data Mode</span>
+                                <label class="toggle" title="Toggle mock data mode">
+                                    <input type="checkbox" checked="@_systemSettings.MockDataEnabled"
+                                           @onchange="@(e => ToggleFeatureFlag("MockData", (bool)(e.Value ?? false)))" />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="feature-flag">
+                                <span class="flag-name">Dev Mode Sidebar</span>
+                                <label class="toggle">
+                                    <input type="checkbox" checked="@_systemSettings.DevModeSidebarEnabled"
+                                           @onchange="@(e => ToggleFeatureFlag("DevSidebar", (bool)(e.Value ?? false)))" />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="feature-flag">
+                                <span class="flag-name">AI Recommendations</span>
+                                <label class="toggle">
+                                    <input type="checkbox" checked="@_systemSettings.AiRecommendationsEnabled"
+                                           @onchange="@(e => ToggleFeatureFlag("AiRecommendations", (bool)(e.Value ?? false)))" />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
+            }
 
-                <div class="info-card">
-                    <h3>Feature Flags</h3>
-                    <div class="feature-flags">
-                        <div class="feature-flag">
-                            <span class="flag-name">Mock Data Mode</span>
-                            <label class="toggle" title="Toggle mock data mode">
-                                <input type="checkbox" checked="@_systemSettings.MockDataEnabled"
-                                       @onchange="@(e => ToggleFeatureFlag("MockData", (bool)(e.Value ?? false)))" />
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="feature-flag">
-                            <span class="flag-name">Dev Mode Sidebar</span>
-                            <label class="toggle">
-                                <input type="checkbox" checked="@_systemSettings.DevModeSidebarEnabled"
-                                       @onchange="@(e => ToggleFeatureFlag("DevSidebar", (bool)(e.Value ?? false)))" />
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="feature-flag">
-                            <span class="flag-name">AI Recommendations</span>
-                            <label class="toggle">
-                                <input type="checkbox" checked="@_systemSettings.AiRecommendationsEnabled"
-                                       @onchange="@(e => ToggleFeatureFlag("AiRecommendations", (bool)(e.Value ?? false)))" />
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
+            @if (_systemSubSection == SystemSubSection.AiServices)
+            {
             <!-- AI Configuration -->
             <div class="ai-config-section">
                 <h3>AI Configuration</h3>
@@ -1505,7 +1526,10 @@
                     </div>
                 </div>
             </div>
+            }
 
+            @if (_systemSubSection == SystemSubSection.DataConnectors)
+            {
             <!-- Data Source Configurations -->
             <div class="data-sources-config">
                 <h3>Data Source Connections</h3>
@@ -1551,6 +1575,7 @@
                     </div>
                 }
             </div>
+            }
         </section>
 
         <!-- Data Source Configuration Modal -->
@@ -1898,6 +1923,7 @@
     private List<User> _users = [];
     private List<Application> _applications = [];
     private AdminSection _activeSection = AdminSection.HealthScoring;
+    private SystemSubSection _systemSubSection = SystemSubSection.Overview;
     private string? _highlightedDataSource;
     private string? _scrollToDataSource;
 
@@ -2048,6 +2074,13 @@
         TaskConfig,
         AuditLog,
         System
+    }
+
+    private enum SystemSubSection
+    {
+        Overview,
+        AiServices,
+        DataConnectors
     }
 
     // Editable helper classes for forms

@@ -60,6 +60,46 @@
     font-size: 1.1rem;
 }
 
+/* System Sub-Tabs */
+.system-sub-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1.5rem;
+    background: var(--color-surface-alt, rgba(0, 0, 0, 0.1));
+    padding: 0.25rem;
+    border-radius: var(--radius-md);
+    width: fit-content;
+}
+
+.sub-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    color: var(--color-text-muted);
+}
+
+.sub-tab:hover {
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.sub-tab.active {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.sub-tab i {
+    font-size: 1rem;
+}
+
 /* Admin Section */
 .admin-section {
     background: var(--color-surface);

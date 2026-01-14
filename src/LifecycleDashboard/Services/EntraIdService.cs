@@ -436,10 +436,11 @@ public partial class EntraIdService : IEntraIdService
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync();
         var normalizedSearch = NormalizeString(searchTerm);
 
+        // Use LIKE without ToLower - SQL Server LIKE is case-insensitive by default
         return await dbContext.EntraUsers
-            .Where(u => EF.Functions.Like(u.DisplayName.ToLower(), $"%{normalizedSearch}%") ||
-                        EF.Functions.Like(u.UserPrincipalName.ToLower(), $"%{normalizedSearch}%") ||
-                        (u.Mail != null && EF.Functions.Like(u.Mail.ToLower(), $"%{normalizedSearch}%")))
+            .Where(u => EF.Functions.Like(u.DisplayName, $"%{normalizedSearch}%") ||
+                        EF.Functions.Like(u.UserPrincipalName, $"%{normalizedSearch}%") ||
+                        (u.Mail != null && EF.Functions.Like(u.Mail, $"%{normalizedSearch}%")))
             .OrderBy(u => u.DisplayName)
             .Take(maxResults)
             .ToListAsync();
@@ -626,11 +627,12 @@ public partial class EntraIdService : IEntraIdService
 
     private async Task<EntraUserEntity?> TryExactEmailMatchAsync(LifecycleDbContext dbContext, string email)
     {
+        // Use case-insensitive collation for SQL Server
         return await dbContext.EntraUsers
             .Include(u => u.Aliases)
             .FirstOrDefaultAsync(u =>
-                u.UserPrincipalName.ToLower() == email ||
-                (u.Mail != null && u.Mail.ToLower() == email));
+                EF.Functions.Collate(u.UserPrincipalName, "Latin1_General_CI_AS") == email ||
+                (u.Mail != null && EF.Functions.Collate(u.Mail, "Latin1_General_CI_AS") == email));
     }
 
     private async Task<EntraUserEntity?> TryExactAliasMatchAsync(LifecycleDbContext dbContext, string value)
@@ -645,9 +647,10 @@ public partial class EntraIdService : IEntraIdService
 
     private async Task<EntraUserEntity?> TryDisplayNameMatchAsync(LifecycleDbContext dbContext, string name)
     {
+        // Use case-insensitive collation for SQL Server
         return await dbContext.EntraUsers
             .Include(u => u.Aliases)
-            .FirstOrDefaultAsync(u => u.DisplayName.ToLower() == name);
+            .FirstOrDefaultAsync(u => EF.Functions.Collate(u.DisplayName, "Latin1_General_CI_AS") == name);
     }
 
     private async Task<EntraUserEntity?> TryNamePermutationMatchAsync(LifecycleDbContext dbContext, string name)
@@ -657,15 +660,27 @@ public partial class EntraIdService : IEntraIdService
 
         foreach (var permutation in permutations)
         {
+            // First try DisplayName match with case-insensitive collation
             var match = await dbContext.EntraUsers
                 .Include(u => u.Aliases)
                 .FirstOrDefaultAsync(u =>
-                    u.DisplayName.ToLower() == permutation ||
-                    (u.GivenName != null && u.Surname != null &&
-                     $"{u.GivenName} {u.Surname}".ToLower() == permutation));
+                    EF.Functions.Collate(u.DisplayName, "Latin1_General_CI_AS") == permutation);
 
             if (match != null)
                 return match;
+
+            // Try GivenName + Surname match - load candidates and filter in memory
+            // to avoid string concatenation in SQL
+            var candidates = await dbContext.EntraUsers
+                .Include(u => u.Aliases)
+                .Where(u => u.GivenName != null && u.Surname != null)
+                .ToListAsync();
+
+            var givenSurnameMatch = candidates.FirstOrDefault(u =>
+                $"{u.GivenName} {u.Surname}".Equals(permutation, StringComparison.OrdinalIgnoreCase));
+
+            if (givenSurnameMatch != null)
+                return givenSurnameMatch;
 
             // Also check aliases
             var aliasMatch = await dbContext.UserAliases
