@@ -704,36 +704,115 @@ public partial class EntraIdService : IEntraIdService
 
         var matches = new List<(EntraUserEntity User, MatchConfidence Confidence, double Similarity)>();
 
+        // Parse the input name (from ServiceNow - typically "First Last")
+        var (inputFirst, inputLast) = ParseName(name);
+        var normalizedInput = NormalizeString(name);
+
+        _logger.LogDebug("Fuzzy matching '{Name}' - parsed as First='{First}', Last='{Last}'",
+            name, inputFirst, inputLast);
+
         foreach (var user in allUsers)
         {
-            // Compare with display name
-            var displaySimilarity = CalculateSimilarity(name, NormalizeString(user.DisplayName));
+            // Clean AD display name (remove parenthetical suffix like "(J)")
+            var cleanDisplayName = CleanAdDisplayName(user.DisplayName);
 
-            // Compare with first+last name
-            double nameSimilarity = 0;
-            if (!string.IsNullOrEmpty(user.GivenName) && !string.IsNullOrEmpty(user.Surname))
+            // Parse the user's name from AD (typically "Last, First" format)
+            var (adFirst, adLast) = ParseName(cleanDisplayName);
+
+            // Also use GivenName/Surname if available (more reliable)
+            var adGivenName = !string.IsNullOrEmpty(user.GivenName) ? user.GivenName : adFirst;
+            var adSurname = !string.IsNullOrEmpty(user.Surname) ? user.Surname : adLast;
+
+            double bestSimilarity = 0;
+            MatchConfidence confidence = MatchConfidence.NoMatch;
+
+            // Strategy 1: Last names match exactly, check first names with nickname support
+            // This handles "Jeff Jones" matching "Jones, Jeffery (J)"
+            if (!string.IsNullOrEmpty(inputLast) && !string.IsNullOrEmpty(adSurname) &&
+                LastNamesMatch(inputLast, adSurname))
             {
-                var fullName = NormalizeString($"{user.GivenName} {user.Surname}");
-                nameSimilarity = CalculateSimilarity(name, fullName);
+                if (!string.IsNullOrEmpty(inputFirst) && !string.IsNullOrEmpty(adGivenName) &&
+                    FirstNamesMatch(inputFirst, adGivenName))
+                {
+                    // Last name exact + first name match (including nicknames) = High confidence
+                    bestSimilarity = 0.95;
+                    confidence = MatchConfidence.High;
+
+                    _logger.LogDebug("High match: '{Input}' -> '{AD}' (last name exact, first name/nickname match)",
+                        name, user.DisplayName);
+                }
+                else if (!string.IsNullOrEmpty(inputFirst) && !string.IsNullOrEmpty(adGivenName))
+                {
+                    // Last name exact, first names don't match but could be partial
+                    var firstNameSimilarity = CalculateSimilarity(
+                        NormalizeString(inputFirst),
+                        NormalizeString(adGivenName));
+
+                    if (firstNameSimilarity >= 0.5)
+                    {
+                        bestSimilarity = 0.7 + (firstNameSimilarity * 0.2);
+                        confidence = MatchConfidence.Medium;
+
+                        _logger.LogDebug("Medium match: '{Input}' -> '{AD}' (last name exact, first name {Sim:P0} similar)",
+                            name, user.DisplayName, firstNameSimilarity);
+                    }
+                }
             }
 
-            var bestSimilarity = Math.Max(displaySimilarity, nameSimilarity);
+            // Strategy 2: Traditional similarity comparison on full names
+            if (bestSimilarity < 0.6)
+            {
+                // Compare with cleaned display name
+                var cleanedNormalized = NormalizeString(cleanDisplayName);
+                var displaySimilarity = CalculateSimilarity(normalizedInput, cleanedNormalized);
+
+                // Compare with first+last name combinations
+                double nameSimilarity = 0;
+                if (!string.IsNullOrEmpty(adGivenName) && !string.IsNullOrEmpty(adSurname))
+                {
+                    // Try "First Last" format
+                    var fullName = NormalizeString($"{adGivenName} {adSurname}");
+                    nameSimilarity = CalculateSimilarity(normalizedInput, fullName);
+
+                    // Also try "Last First" format (without comma)
+                    var reverseFullName = NormalizeString($"{adSurname} {adGivenName}");
+                    var reverseSimilarity = CalculateSimilarity(normalizedInput, reverseFullName);
+                    nameSimilarity = Math.Max(nameSimilarity, reverseSimilarity);
+                }
+
+                var traditionalBest = Math.Max(displaySimilarity, nameSimilarity);
+                if (traditionalBest > bestSimilarity)
+                {
+                    bestSimilarity = traditionalBest;
+                    confidence = bestSimilarity switch
+                    {
+                        >= 0.95 => MatchConfidence.High,
+                        >= 0.85 => MatchConfidence.Medium,
+                        >= 0.7 => MatchConfidence.Low,
+                        _ => MatchConfidence.Low
+                    };
+                }
+            }
 
             if (bestSimilarity >= 0.6) // At least 60% similar
             {
-                var confidence = bestSimilarity switch
-                {
-                    >= 0.95 => MatchConfidence.High,
-                    >= 0.85 => MatchConfidence.Medium,
-                    >= 0.7 => MatchConfidence.Low,
-                    _ => MatchConfidence.Low
-                };
-
                 matches.Add((user, confidence, bestSimilarity));
             }
         }
 
-        return matches.OrderByDescending(m => m.Similarity).ToList();
+        var result = matches.OrderByDescending(m => m.Similarity).ToList();
+
+        if (result.Count > 0)
+        {
+            _logger.LogDebug("Found {Count} fuzzy matches for '{Name}', best: '{Best}' ({Similarity:P0})",
+                result.Count, name, result[0].User.DisplayName, result[0].Similarity);
+        }
+        else
+        {
+            _logger.LogDebug("No fuzzy matches found for '{Name}'", name);
+        }
+
+        return result;
     }
 
     private async Task CreateDepartedUserAlertAsync(LifecycleDbContext dbContext, string unmatchedValue, MatchContext context)
@@ -776,6 +855,272 @@ public partial class EntraIdService : IEntraIdService
         return input.Trim().ToLowerInvariant();
     }
 
+    /// <summary>
+    /// Cleans AD display names by removing parenthetical suffixes like "(J)" or "(JJ)"
+    /// "Jones, Jeffery (J)" becomes "Jones, Jeffery"
+    /// </summary>
+    private static string CleanAdDisplayName(string displayName)
+    {
+        if (string.IsNullOrEmpty(displayName))
+            return "";
+
+        // Remove parenthetical suffix like (J), (JJ), (Jr), etc.
+        var parenIndex = displayName.LastIndexOf('(');
+        if (parenIndex > 0 && displayName.EndsWith(')'))
+        {
+            displayName = displayName.Substring(0, parenIndex).Trim();
+        }
+
+        return displayName;
+    }
+
+    /// <summary>
+    /// Extracts first and last name from various formats.
+    /// Handles: "First Last", "Last, First", "Last, First (J)"
+    /// </summary>
+    private static (string FirstName, string LastName) ParseName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return ("", "");
+
+        // Clean any parenthetical suffix first
+        name = CleanAdDisplayName(name);
+
+        // Handle "Last, First" format
+        if (name.Contains(','))
+        {
+            var parts = name.Split(',', 2).Select(p => p.Trim()).ToArray();
+            if (parts.Length == 2)
+            {
+                return (parts[1], parts[0]); // First is after comma, Last is before
+            }
+        }
+
+        // Handle "First Last" or "First Middle Last" format
+        var spaceParts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (spaceParts.Length >= 2)
+        {
+            var firstName = spaceParts[0];
+            var lastName = spaceParts[^1]; // Last element
+            return (firstName, lastName);
+        }
+
+        // Single name - assume it's a last name
+        return ("", name);
+    }
+
+    /// <summary>
+    /// Common nickname mappings (both directions).
+    /// </summary>
+    private static readonly Dictionary<string, HashSet<string>> NicknameMappings = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["jeff"] = ["jeffrey", "jeffery", "geoffrey", "geoff"],
+        ["jeffrey"] = ["jeff", "jeffery", "geoffrey", "geoff"],
+        ["jeffery"] = ["jeff", "jeffrey", "geoffrey", "geoff"],
+        ["geoff"] = ["geoffrey", "jeff", "jeffrey", "jeffery"],
+        ["geoffrey"] = ["geoff", "jeff", "jeffrey", "jeffery"],
+        ["john"] = ["jonathan", "jon", "johnny", "jack"],
+        ["jonathan"] = ["john", "jon", "johnny"],
+        ["jon"] = ["john", "jonathan", "johnny"],
+        ["mike"] = ["michael", "mick", "mickey"],
+        ["michael"] = ["mike", "mick", "mickey"],
+        ["bill"] = ["william", "will", "billy", "willy"],
+        ["william"] = ["bill", "will", "billy", "willy"],
+        ["will"] = ["william", "bill", "billy"],
+        ["bob"] = ["robert", "rob", "robbie", "bobby"],
+        ["robert"] = ["bob", "rob", "robbie", "bobby"],
+        ["rob"] = ["robert", "bob", "robbie"],
+        ["jim"] = ["james", "jimmy", "jamie"],
+        ["james"] = ["jim", "jimmy", "jamie"],
+        ["jimmy"] = ["james", "jim", "jamie"],
+        ["joe"] = ["joseph", "joey"],
+        ["joseph"] = ["joe", "joey"],
+        ["tom"] = ["thomas", "tommy"],
+        ["thomas"] = ["tom", "tommy"],
+        ["dan"] = ["daniel", "danny"],
+        ["daniel"] = ["dan", "danny"],
+        ["dave"] = ["david", "davey"],
+        ["david"] = ["dave", "davey"],
+        ["steve"] = ["steven", "stephen", "stevie"],
+        ["steven"] = ["steve", "stephen", "stevie"],
+        ["stephen"] = ["steve", "steven", "stevie"],
+        ["chris"] = ["christopher", "kristopher"],
+        ["christopher"] = ["chris"],
+        ["matt"] = ["matthew", "matty"],
+        ["matthew"] = ["matt", "matty"],
+        ["nick"] = ["nicholas", "nicky"],
+        ["nicholas"] = ["nick", "nicky"],
+        ["tony"] = ["anthony", "anton"],
+        ["anthony"] = ["tony", "anton"],
+        ["rick"] = ["richard", "ricky", "dick"],
+        ["richard"] = ["rick", "ricky", "dick"],
+        ["dick"] = ["richard", "rick"],
+        ["ben"] = ["benjamin", "benny"],
+        ["benjamin"] = ["ben", "benny"],
+        ["sam"] = ["samuel", "sammy", "samantha"],
+        ["samuel"] = ["sam", "sammy"],
+        ["samantha"] = ["sam", "sammy"],
+        ["alex"] = ["alexander", "alexandra", "alexis"],
+        ["alexander"] = ["alex"],
+        ["alexandra"] = ["alex"],
+        ["liz"] = ["elizabeth", "beth", "betty", "eliza"],
+        ["elizabeth"] = ["liz", "beth", "betty", "eliza"],
+        ["beth"] = ["elizabeth", "liz", "betty"],
+        ["kate"] = ["katherine", "catherine", "kathy", "cathy", "katie"],
+        ["katherine"] = ["kate", "kathy", "katie"],
+        ["catherine"] = ["kate", "cathy", "katie"],
+        ["jen"] = ["jennifer", "jenny"],
+        ["jennifer"] = ["jen", "jenny"],
+        ["sue"] = ["susan", "susie", "suzanne"],
+        ["susan"] = ["sue", "susie", "suzanne"],
+        ["pat"] = ["patricia", "patrick", "patty"],
+        ["patricia"] = ["pat", "patty", "tricia"],
+        ["patrick"] = ["pat", "paddy"],
+        ["ed"] = ["edward", "eddie", "ted", "teddy"],
+        ["edward"] = ["ed", "eddie", "ted", "teddy"],
+        ["ted"] = ["edward", "theodore", "teddy"],
+        ["theodore"] = ["ted", "teddy", "theo"],
+        ["larry"] = ["lawrence", "laurence"],
+        ["lawrence"] = ["larry"],
+        ["charlie"] = ["charles", "chuck"],
+        ["charles"] = ["charlie", "chuck"],
+        ["chuck"] = ["charles", "charlie"],
+        ["harry"] = ["harold", "henry"],
+        ["harold"] = ["harry", "hal"],
+        ["henry"] = ["harry", "hank"],
+        ["hank"] = ["henry"],
+        ["greg"] = ["gregory"],
+        ["gregory"] = ["greg"],
+        ["andy"] = ["andrew", "drew"],
+        ["andrew"] = ["andy", "drew"],
+        ["drew"] = ["andrew", "andy"],
+        ["pete"] = ["peter"],
+        ["peter"] = ["pete"],
+        ["tim"] = ["timothy", "timmy"],
+        ["timothy"] = ["tim", "timmy"],
+        ["ron"] = ["ronald", "ronnie"],
+        ["ronald"] = ["ron", "ronnie"],
+        ["phil"] = ["philip", "phillip"],
+        ["philip"] = ["phil"],
+        ["phillip"] = ["phil"],
+        ["doug"] = ["douglas"],
+        ["douglas"] = ["doug"],
+        ["ray"] = ["raymond"],
+        ["raymond"] = ["ray"],
+        ["jerry"] = ["gerald", "jerome"],
+        ["gerald"] = ["jerry", "gerry"],
+        ["gerry"] = ["gerald", "jerry"],
+        ["ken"] = ["kenneth", "kenny"],
+        ["kenneth"] = ["ken", "kenny"],
+        ["don"] = ["donald", "donnie"],
+        ["donald"] = ["don", "donnie"],
+        ["frank"] = ["francis", "franklin", "frankie"],
+        ["francis"] = ["frank", "frankie"],
+        ["roger"] = ["rodger"],
+        ["rodger"] = ["roger"],
+        ["al"] = ["albert", "alan", "allen", "alfred"],
+        ["albert"] = ["al", "bert"],
+        ["alan"] = ["al"],
+        ["allen"] = ["al"],
+        ["alfred"] = ["al", "fred", "alfie"],
+        ["fred"] = ["frederick", "alfred", "freddy"],
+        ["frederick"] = ["fred", "freddy"],
+        ["wes"] = ["wesley"],
+        ["wesley"] = ["wes"],
+        ["stan"] = ["stanley"],
+        ["stanley"] = ["stan"],
+        ["marge"] = ["margaret", "maggie", "peggy"],
+        ["margaret"] = ["marge", "maggie", "peggy", "meg"],
+        ["maggie"] = ["margaret", "marge"],
+        ["peggy"] = ["margaret", "marge"],
+        ["nancy"] = ["ann", "anne", "anna"],
+        ["ann"] = ["anna", "anne", "annie"],
+        ["anna"] = ["ann", "anne", "annie"],
+        ["anne"] = ["ann", "anna", "annie"],
+        ["debbie"] = ["deborah", "deb"],
+        ["deborah"] = ["debbie", "deb"],
+        ["deb"] = ["deborah", "debbie"],
+        ["linda"] = ["lynn", "lindy"],
+        ["lynn"] = ["linda", "lynne"],
+        ["barb"] = ["barbara"],
+        ["barbara"] = ["barb", "barbie"],
+        ["carol"] = ["caroline", "carolyn"],
+        ["caroline"] = ["carol"],
+        ["carolyn"] = ["carol"],
+        ["cindy"] = ["cynthia"],
+        ["cynthia"] = ["cindy"],
+        ["donna"] = ["don"],
+        ["jane"] = ["janet", "janice"],
+        ["janet"] = ["jane", "jan"],
+        ["janice"] = ["jane", "jan"],
+        ["jan"] = ["janet", "janice", "jane"],
+        ["judy"] = ["judith", "judi"],
+        ["judith"] = ["judy", "judi"],
+        ["julie"] = ["julia", "juliet"],
+        ["julia"] = ["julie"],
+        ["kathy"] = ["katherine", "catherine", "kate", "katie"],
+        ["katie"] = ["katherine", "catherine", "kate", "kathy"],
+        ["mary"] = ["marie", "maria"],
+        ["marie"] = ["mary", "maria"],
+        ["maria"] = ["mary", "marie"],
+        ["pam"] = ["pamela"],
+        ["pamela"] = ["pam"],
+        ["sandy"] = ["sandra"],
+        ["sandra"] = ["sandy"],
+        ["sharon"] = ["shari"],
+        ["shari"] = ["sharon"],
+        ["steph"] = ["stephanie", "stephany"],
+        ["stephanie"] = ["steph", "stephany"],
+        ["terri"] = ["teresa", "theresa"],
+        ["teresa"] = ["terri", "theresa"],
+        ["theresa"] = ["terri", "teresa"],
+        ["vicky"] = ["victoria"],
+        ["victoria"] = ["vicky", "vicki"],
+        ["vicki"] = ["victoria", "vicky"]
+    };
+
+    /// <summary>
+    /// Checks if two first names could be the same person (exact match or nickname variation).
+    /// </summary>
+    private static bool FirstNamesMatch(string name1, string name2)
+    {
+        if (string.IsNullOrWhiteSpace(name1) || string.IsNullOrWhiteSpace(name2))
+            return false;
+
+        name1 = name1.ToLowerInvariant().Trim();
+        name2 = name2.ToLowerInvariant().Trim();
+
+        // Exact match
+        if (name1 == name2)
+            return true;
+
+        // Check nickname mappings
+        if (NicknameMappings.TryGetValue(name1, out var nicknames1) && nicknames1.Contains(name2))
+            return true;
+
+        if (NicknameMappings.TryGetValue(name2, out var nicknames2) && nicknames2.Contains(name1))
+            return true;
+
+        // Check if one starts with the other (e.g., "Rob" matches "Robert")
+        if (name1.Length >= 3 && name2.StartsWith(name1))
+            return true;
+        if (name2.Length >= 3 && name1.StartsWith(name2))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if two last names match (case-insensitive).
+    /// </summary>
+    private static bool LastNamesMatch(string name1, string name2)
+    {
+        if (string.IsNullOrWhiteSpace(name1) || string.IsNullOrWhiteSpace(name2))
+            return false;
+
+        return string.Equals(name1.Trim(), name2.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsEmail(string input)
     {
         return input.Contains('@') && input.Contains('.');
@@ -784,6 +1129,9 @@ public partial class EntraIdService : IEntraIdService
     private static List<string> GenerateNamePermutations(string name)
     {
         var permutations = new List<string>();
+
+        // Clean the name first (remove parenthetical suffixes)
+        name = CleanAdDisplayName(name);
 
         // Handle "Last, First" format
         if (name.Contains(','))
